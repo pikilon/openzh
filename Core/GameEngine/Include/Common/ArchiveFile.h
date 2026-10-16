@@ -62,6 +62,10 @@ public:
 
 	void									addFile(const AsciiString& path, const ArchivedFileInfo *fileInfo); ///< add this file to our directory tree.
 
+	/// Public window onto getArchivedFileInfo for the wasm streaming bridge: the page needs
+	/// (archive, offset, size) to know whether a file's bytes are resident before a sync read.
+	const ArchivedFileInfo *		friend_getArchivedFileInfo(const AsciiString& filename) const { return getArchivedFileInfo(filename); }
+
 protected:
 	void									getFileListInDirectory(const DetailedArchivedDirectoryInfo *dirInfo, const AsciiString& currentDirectory, const AsciiString& searchName, FilenameList &filenameList, Bool searchSubdirectories) const;
 	const ArchivedFileInfo *		getArchivedFileInfo(const AsciiString& filename) const;	///< return the ArchivedFileInfo from the directory tree.

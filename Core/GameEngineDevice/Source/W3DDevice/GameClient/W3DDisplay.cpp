@@ -46,9 +46,14 @@ static void drawFramerateBar();
 #endif
 #include <time.h>
 #include <vector>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
+#include "Common/CommandLine.h"
 #include "Common/FramePacer.h"
+#include "Common/GameState.h"
 #include "Common/ThingFactory.h"
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
@@ -600,6 +605,17 @@ static void SDL3_ApplyWindowModeForRenderConfig(Bool windowed, Int renderWidth, 
 {
 	extern SDL_Window* TheSDL3Window;
 	if (!TheSDL3Window) return;
+
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @bugfix Codex 05/08/2026 The browser has no native fullscreen for the canvas: SDL_SetWindowFullscreen
+	// always fails here and the canvas would stay at its 1024x768 creation size while the engine renders at the
+	// Options.ini resolution, which shows up as a black canvas. Always size the canvas to the render resolution;
+	// the page's Fullscreen button uses the browser Fullscreen API to scale it.
+	if (!SDL_SetWindowSize(TheSDL3Window, renderWidth, renderHeight)) {
+		fprintf(stderr, "WARNING: SDL_SetWindowSize(%d,%d) failed: %s\n", renderWidth, renderHeight, SDL_GetError());
+	}
+	return;
+#endif
 
 	if (!windowed) {
 		if (!SDL_SetWindowFullscreen(TheSDL3Window, false)) {
@@ -2053,10 +2069,20 @@ void W3DDisplay::update()
 			TheTerrainTracksRenderObjClassSystem->update();
 	}
 
-	WW3D::Update_Logic_Frame_Time(TheFramePacer->getLogicTimeStepMilliseconds());
+	// GeneralsX @feature Codex 04/08/2026 Ported from origami-ltd/wasm-generals: a command-line pause frame or bot match
+	// renders at the logic frame's own time so captures are deterministic.
+	if (TheCommandLinePauseFrame != 0 || TheCommandLineBotMatchMap[0] != '\0')
+	{
+		WW3D::Set_Logic_Time_Milliseconds(static_cast<UnsignedInt>(
+			(static_cast<uint64_t>(TheGameLogic->getFrame()) * 1000U) / LOGICFRAMES_PER_SECOND));
+	}
+	else
+	{
+		WW3D::Update_Logic_Frame_Time(TheFramePacer->getLogicTimeStepMilliseconds());
 
-	// TheSuperHackers @info This binds the WW3D update to the logic update.
-	WW3D::Sync(TheGameLogic->hasUpdated());
+		// TheSuperHackers @info This binds the WW3D update to the logic update.
+		WW3D::Sync(TheGameLogic->hasUpdated());
+	}
 
 	// update all views of the world - recomputes data which will affect drawing
 	if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK)
@@ -2083,7 +2109,6 @@ void W3DDisplay::step()
 void W3DDisplay::draw()
 {
 	//USE_PERF_TIMER(W3DDisplay_draw)
-
 	// GeneralsX @feature xxorza 15/04/2026 Process deferred window resize for pillarbox
 	DX8Wrapper::Pillarbox_Process_Resize();
 
@@ -2259,7 +2284,6 @@ AGAIN:
 			static Bool couldRender = true;
 			if ((TheGlobalData->m_breakTheMovie == FALSE) && (TheGlobalData->m_disableRender == false) && WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ), TheWaterTransparency->m_minWaterOpacity ) == WW3D_ERROR_OK)
 			{
-
 				if(TheGlobalData->m_loadScreenRender == TRUE)
 				{
 					TheInGameUI->draw();
@@ -2369,6 +2393,64 @@ AGAIN:
 #endif
 				// render is all done!
 				WW3D::End_Render();
+				static Bool saveStateWritten = false;
+				if (!saveStateWritten && TheCommandLineSaveStateFrame != 0 && TheGameLogic->isInGame()
+					&& TheGameLogic->getFrame() == TheCommandLineSaveStateFrame)
+				{
+					saveStateWritten = true;
+					UnicodeString description;
+					description.translate("GeneralsX parity checkpoint");
+					const SaveCode result = TheGameState->saveGame(TheCommandLineSaveStateFile, description, SAVE_FILE_TYPE_NORMAL);
+					fprintf(stderr, "[GeneralsX] SAVE_STATE_WRITTEN file=%s frame=%u result=%d\n",
+						TheCommandLineSaveStateFile, TheGameLogic->getFrame(), result);
+				}
+				// GeneralsX @feature Codex 04/08/2026 Capture the native authority image for exact-frame browser comparison.
+				static UnsignedInt captureFrame = 0;
+				static UnsignedInt captureRenderCount = 0;
+				if (TheCommandLineCaptureFrameCount != 0 && TheCommandLinePauseFrame != 0 && TheGameLogic->isInGame()
+					&& TheGameLogic->getFrame() == TheCommandLinePauseFrame)
+				{
+					if (captureFrame != TheGameLogic->getFrame())
+					{
+						captureFrame = TheGameLogic->getFrame();
+						captureRenderCount = 0;
+					}
+					++captureRenderCount;
+					if (captureRenderCount >= TheCommandLineCaptureFrameDelay)
+					{
+						const Coord3D pivot = TheTacticalView->getPosition();
+						const Coord3D camera = TheTacticalView->get3DCameraPosition();
+						const Coord3D direction = TheTacticalView->get3DCameraDirection();
+						fprintf(stderr,
+							"[GeneralsX] VISUAL_CAMERA frame=%u view=%dx%d display=%dx%d pivot=%g,%g,%g camera=%g,%g,%g direction=%g,%g,%g zoom=%g pitch=%g angle=%g fov=%g\n",
+							TheGameLogic->getFrame(), TheTacticalView->getWidth(), TheTacticalView->getHeight(), getWidth(), getHeight(),
+							pivot.x, pivot.y, pivot.z, camera.x, camera.y, camera.z,
+							direction.x, direction.y, direction.z, TheTacticalView->getZoom(),
+							TheTacticalView->getPitch(), TheTacticalView->getAngle(), TheTacticalView->getFieldOfView());
+#if defined(__EMSCRIPTEN__)
+						EM_ASM({
+							if (window.generalsXCaptureReferenceFrame) {
+								window.generalsXCaptureReferenceFrame($0);
+							}
+						}, TheGameLogic->getFrame());
+#else
+						takeScreenShot(SCREENSHOT_PNG, DEFAULT_JPEG_QUALITY);
+#endif
+						if (TheCommandLineCaptureFrameCount > 1)
+						{
+							--TheCommandLineCaptureFrameCount;
+							TheCommandLinePauseFrame = TheGameLogic->getFrame() + 1;
+							captureRenderCount = 0;
+							TheGameLogic->setGamePaused(FALSE, FALSE, FALSE);
+							TheGameLogic->setGamePausedInFrame(TheCommandLinePauseFrame, TRUE);
+						}
+						else
+						{
+							TheCommandLineCaptureFrameCount = 0;
+							captureRenderCount = 0;
+						}
+					}
+				}
 			}
 			else
 			{

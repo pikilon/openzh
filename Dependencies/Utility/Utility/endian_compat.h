@@ -22,7 +22,8 @@
 #ifndef ENDIAN_COMPAT_H
 #define ENDIAN_COMPAT_H
 
-#if defined(__linux__) || defined(__CYGWIN__)
+#if defined(__linux__) || defined(__CYGWIN__) || defined(__EMSCRIPTEN__)
+// GeneralsX @build Codex 04/08/2026 Emscripten exposes the standard little-endian conversion contract.
 #include <endian.h>
 
 #elif defined(__APPLE__)
@@ -113,7 +114,7 @@
 
 
 // Endian helper function data types
-#if defined(__linux__) || defined(__CYGWIN__)
+#if defined(__linux__) || defined(__CYGWIN__) || defined(__EMSCRIPTEN__)
 typedef uint16_t SwapType16;
 typedef uint32_t SwapType32;
 typedef uint64_t SwapType64;
@@ -240,4 +241,3 @@ template<typename Type> inline void letoh_ref(Type &value) { value = Endian::let
 #endif // _MSC_VER < 1300
 
 #endif // ENDIAN_COMPAT_H
-

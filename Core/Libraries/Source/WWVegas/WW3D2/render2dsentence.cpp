@@ -2044,7 +2044,7 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 	//
 	// Tier 2: System Fontconfig match (desktop Linux/macOS)
 	//
-#if !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+#if !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) && !defined(__EMSCRIPTEN__)
 	FcConfig *config = FcInitLoadConfigAndFonts();
 	if ( config != nullptr ) {
 		FcPattern *pattern = FcNameParse( (const FcChar8*)font_name );
@@ -2157,6 +2157,12 @@ FontCharsClass::Create_Freetype_Font (const char *font_name)
 	//	Locate the font file using Fontconfig
 	//
 	const char *font_path = Locate_Font_FontConfig( font_name );
+#if defined(SAGE_USE_WEBGPU)
+	// GeneralsX @feature 17/10/2026 Ported from origami-ltd/wasm-generals: the browser build preloads one font at this path.
+	if ( font_path == nullptr ) {
+		font_path = "/fonts/GeneralsX.ttf";
+	}
+#endif
 	if ( font_path == nullptr ) {
 		FT_Done_FreeType( FTLibrary );
 		FTLibrary = nullptr;

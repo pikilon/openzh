@@ -39,6 +39,7 @@
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/BuildAssistant.h"
+#include "Common/CommandLine.h"
 #include "Common/CRCDebug.h"
 #include "Common/FramePacer.h"
 #include "Common/GameAudio.h"
@@ -1060,6 +1061,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 
 	// reset the frame counter
 	m_frame = 0;
+	m_pauseFrame = m_gameMode == GAME_REPLAY ? TheCommandLinePauseFrame : 0;
 	m_hasUpdated = FALSE;
 
 #ifdef DEBUG_CRC
@@ -1883,6 +1885,15 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 	updateLoadProgress(LOAD_PROGRESS_POST_PRELOAD_ASSETS);
 
 	// GeneralsX @tweak Copilot 23/03/2026 Keep camera defaults aligned after resolution/aspect changes.
+	if (TheCommandLineMaxCameraHeight > 0.0f)
+		TheWritableGlobalData->m_maxCameraHeight = TheCommandLineMaxCameraHeight;
+	if (TheCommandLineMinCameraHeight > 0.0f)
+		TheWritableGlobalData->m_minCameraHeight = TheCommandLineMinCameraHeight;
+	if (TheGlobalData->m_minCameraHeight > TheGlobalData->m_maxCameraHeight)
+	{
+		printf("Minimum camera height exceeds maximum camera height\n");
+		exit(1);
+	}
 	TheTacticalView->setCameraHeightAboveGroundLimitsToDefault();
 	TheTacticalView->setAngleToDefault();
 	TheTacticalView->setPitchToDefault();

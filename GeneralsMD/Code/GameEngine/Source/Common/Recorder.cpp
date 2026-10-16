@@ -42,7 +42,10 @@
 
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/GameMessageParser.h"
+#if defined(SAGE_USE_GAMESPY)
+// GeneralsX @build Codex 04/08/2026 Keep replay support independent from unavailable browser online services.
 #include "GameNetwork/GameSpy/PeerDefs.h"
+#endif
 #include "GameNetwork/networkutil.h"
 #include "GameLogic/GameLogic.h"
 #include "Common/RandomValue.h"
@@ -595,8 +598,12 @@ void RecorderClass::startRecording(GameDifficulty diff, GameMode originalGameMod
 		}
 		else
 		{
+#if defined(SAGE_USE_GAMESPY)
 			theSlotList = GameInfoToAsciiString(TheGameSpyGame);
 			localIndex = TheGameSpyGame->getLocalSlotNum();
+#else
+			DEBUG_ASSERTCRASH(FALSE, ("Network game has no active LAN or GameSpy backend"));
+#endif
 		}
 	}
 	else
@@ -1807,8 +1814,10 @@ AsciiString RecorderClass::getLastReplayFileName()
 		GameInfo *game = nullptr;
 		if (TheLAN)
 			game = TheLAN->GetMyGame();
+#if defined(SAGE_USE_GAMESPY)
 		else if (TheGameSpyInfo)
 			game = TheGameSpyGame;
+#endif
 		if (game)
 		{
 			AsciiString players;

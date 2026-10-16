@@ -96,7 +96,7 @@ static const time_t playerListRefreshInterval = 5000;
 
 void setUnignoreText( WindowLayout *layout, AsciiString nick, GPProfile id);
 static void doSliderTrack(GameWindow *control, Int val);
-Bool DontShowMainMenu = FALSE;
+extern Bool DontShowMainMenu;
 enum { COLUMN_PLAYERNAME = 1 };
 
 // window ids ------------------------------------------------------------------------------

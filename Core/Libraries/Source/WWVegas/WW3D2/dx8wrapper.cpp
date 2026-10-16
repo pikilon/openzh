@@ -51,6 +51,9 @@
 #endif
 
 #include "dx8wrapper.h"
+#if defined(SAGE_USE_WEBGPU)
+#include "WebGPUDevice/WebGPUD3D8.h"
+#endif
 // GeneralsX @build BenderAI 10/02/2026 - Need LoadLibrary/GetProcAddress/FreeLibrary for dynamic loading
 #ifndef _WIN32
 #include "module_compat.h"
@@ -667,6 +670,14 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 			setenv("DXVK_CONFIG", "d3d9.countLosableResources = False; d3d9.forceSamplerTypeSpecConstants = False", 0);
 		}
 #endif
+		#if defined(SAGE_USE_WEBGPU)
+		// GeneralsX @feature Codex 04/08/2026 Use the browser-native WebGPU D3D8 implementation.
+		D3DInterface = CreateWebGPUDirect3D8();
+		if (!D3DInterface) {
+			fprintf(stderr, "ERROR: DX8Wrapper::Init() - WebGPU D3D8 initialization failed\n");
+			return false;
+		}
+		#else
 		// GeneralsX @build BenderAI 10/02/2026 - Platform-specific DLL/SO/DYLIB loading (Phase 5: macOS)
 #ifdef _WIN32
 		D3D8Lib = LoadLibrary("D3D8.DLL");
@@ -720,6 +731,7 @@ bool DX8Wrapper::Init(void * hwnd, bool lite)
 			Shutdown();
 			return(false);
 		}
+		#endif
 		IsInitted = true;
 
 		/*

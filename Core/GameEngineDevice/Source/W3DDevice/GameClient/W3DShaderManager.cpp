@@ -3867,8 +3867,3 @@ void FlatTerrainShaderPixelShader::reset()
 
 	DX8Wrapper::Invalidate_Cached_Render_States();
 }
-
-
-
-
-

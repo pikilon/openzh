@@ -61,6 +61,7 @@ enum
 #include <WW3D2/texture.h>
 #include <WW3D2/hlod.h>
 #include "Common/FramePacer.h"
+#include "Common/CommandLine.h"
 #include "Common/GameUtility.h"
 #include "Common/MapReaderWriterInfo.h"
 #include "Common/FileSystem.h"
@@ -403,6 +404,7 @@ void W3DTreeBuffer::updateSway(const BreezeInfo& info)
 		m_curSwayOffset[i] = 0;
 		m_curSwayFactor[i] = GameClientRandomValueReal(1.0f-delta, 1.0f+delta);
 	}
+	m_swayStartFrame = TheGameLogic ? TheGameLogic->getFrame() : 0;
 	m_curSwayVersion = info.m_breezeVersion;
 }
 
@@ -1089,6 +1091,7 @@ W3DTreeBuffer::W3DTreeBuffer()
 	allocateTreeBuffers();
 	m_initialized = true;
 	m_curSwayVersion = -1;
+	m_swayStartFrame = 0;
 
 	m_shadow = nullptr;
 
@@ -1579,9 +1582,17 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 	Int i;
 	for (i=0; i<MAX_SWAY_TYPES; i++)
 	{
-		m_curSwayOffset[i] += m_curSwayStep[i] * timeScale;
-		if (m_curSwayOffset[i] > NUM_SWAY_ENTRIES-1) {
-			m_curSwayOffset[i] -= NUM_SWAY_ENTRIES-1;
+		if (TheCommandLinePauseFrame != 0 && TheGameLogic)
+		{
+			const UnsignedInt elapsedFrames = TheGameLogic->getFrame() - m_swayStartFrame;
+			m_curSwayOffset[i] = fmod(m_curSwayStep[i] * elapsedFrames, static_cast<Real>(NUM_SWAY_ENTRIES - 1));
+		}
+		else
+		{
+			m_curSwayOffset[i] += m_curSwayStep[i] * timeScale;
+			if (m_curSwayOffset[i] > NUM_SWAY_ENTRIES-1) {
+				m_curSwayOffset[i] -= NUM_SWAY_ENTRIES-1;
+			}
 		}
 		Int minOffset = REAL_TO_INT_FLOOR(m_curSwayOffset[i]);
 		if (minOffset>=0 && minOffset+1<NUM_SWAY_ENTRIES) {
@@ -1591,7 +1602,6 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 			swayFactor[i] *= m_curSwayFactor[i];
 		}
 	}
-
 	m_isTerrainPass = false;
 
 	if (m_needToUpdateTexture) {

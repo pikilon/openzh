@@ -1,0 +1,135 @@
+{
+  "repo_notes": [
+    {
+      "content": "GeneralsX is a community-driven cross-platform port of Command & Conquer: Generals Zero Hour (2003) for Linux and macOS, modernizing a legacy Windows DirectX 8 + Miles Sound codebase to a modern 64-bit stack (SDL3 + DXVK + OpenAL/MiniAudio + FFmpeg). The primary target is GeneralsXZH (Zero Hour expansion in GeneralsMD/), with GeneralsX (base game in Generals/) as secondary. The codebase (~500k+ LOC) preserves retail gameplay and simulation determinism while modernizing the underlying platform layer.",
+      "author": "GeneralsX Team"
+    },
+    {
+      "content": "Platform isolation is strictly enforced: all platform-specific code must reside in Core/GameEngineDevice/ and Core/Libraries/Source/Platform/. Direct Win32, Cocoa, or unabstracted POSIX calls are strictly forbidden in game simulation logic (GameLogic/). SDL3 serves as the unified windowing, input, and platform abstraction layer across all target platforms.",
+      "author": "GeneralsX Team"
+    },
+    {
+      "content": "Multiplayer strategy: The legacy GameSpy online backend is discontinued and superseded by Next-Gen Multiplayer (NGMP / GeneralsOnline). Singleplayer campaigns, Skirmish (vs AI), and LAN multiplayer must remain fully functional. GameSpy online compatibility is not required and must not block NGMP development. Active client integration lives under GeneralsMD/Code/GameEngine/Source/GameNetwork/GeneralsOnline/ with protocol references in ../references/GameClient and ../references/GameServer.",
+      "author": "GeneralsX Team"
+    },
+    {
+      "content": "Cross-platform determinism between Linux x86_64 and macOS ARM64 is critical to prevent sync crashes (desyncs). Key rules: (1) Use deterministic WWMath equivalents for all math functions (WWMath::SqrtOrigin, SinTrig, CosTrig, Atan2Origin, etc.); (2) ScopedFPUGuard must wrap GameLogic::update(), audio callbacks, and mouse picking; (3) Guard all divisions against NaN/Inf integer cast divergences (WWMath::Div_FixNaN); (4) Disable FMA contraction (-ffp-contract=off); (5) Use scripts/qa/parse_deep_crc.py to diagnose deep CRC memory buffer dumps.",
+      "author": "GeneralsX Team"
+    },
+    {
+      "content": "Audio stack parity: GeneralsX maintains dual cross-platform modern audio backends — OpenAL and MiniAudio — replacing the legacy Miles Sound System. Any new audio features or bug fixes implemented in one backend must be replicated in the other to maintain strict feature parity.",
+      "author": "GeneralsX Team"
+    },
+    {
+      "content": "Build system uses CMake with presets defined in CMakePresets.json. Active release targets are 'linux64-deploy' and 'macos-vulkan'. Windows modern support is tracked under 'mingw-w64-i686' (Docker cross-compilation) and issue #29. DXVK source of truth is the fork branch generalsx-macos-v2.6 in generalsx-dxvk. Scripts are structured under scripts/build/, scripts/qa/, scripts/env/, and scripts/tooling/.",
+      "author": "GeneralsX Team"
+    }
+  ],
+  "pages": [
+    {
+      "title": "Project Overview",
+      "purpose": "High-level overview of GeneralsX: vision, scope, platform targets (Linux, macOS, Windows MinGW backlog), non-negotiable architectural constraints (retail compatibility, platform isolation, single codebase), and active development priorities.",
+      "parent": null
+    },
+    {
+      "title": "Repository Structure",
+      "purpose": "Document the top-level directory layout: GeneralsMD/ (Zero Hour, primary), Generals/ (base game, secondary), Core/ (shared engine), cmake/ (modular build scripts), scripts/ (build, QA, tooling), workspace references (../references/: GameClient, GameServer), resources/, flatpak/, assets/, and docs/.",
+      "parent": "Project Overview"
+    },
+    {
+      "title": "Build System & Presets",
+      "purpose": "Document CMakePresets.json and primary presets: linux64-deploy, linux64-testing, macos-vulkan, mingw-w64-i686, vc6, and win32. Explain modular cmake/ configuration files (dx8.cmake, sdl3.cmake, openal.cmake, miniaudio.cmake, ngmp.cmake, FindFFmpeg.cmake) and Docker containerized build workflows.",
+      "parent": "Project Overview"
+    },
+    {
+      "title": "Scripts & Tooling Reference",
+      "purpose": "Reference guide for scripts/: scripts/build/linux/ (docker-configure-linux.sh, docker-build-linux-zh.sh, build-linux-flatpak.sh, deploy-linux-zh.sh), scripts/build/macos/ (build-macos-zh.sh, deploy-macos-zh.sh, bundle-macos-zh.sh), scripts/qa/ (docker-smoke-test-zh.sh, parse_deep_crc.py), and scripts/tooling/ (generate_windows_icons.py, cpp maintenance).",
+      "parent": "Build System & Presets"
+    },
+    {
+      "title": "Core Engine Architecture",
+      "purpose": "Document Core/ shared libraries: GameEngine/ (simulation loop, subsystems, audio/video abstractions), GameEngineDevice/ (platform rendering device and OS abstractions), and Libraries/ (WWVegas, deterministic math, containers, STLPort compatibility).",
+      "parent": null
+    },
+    {
+      "title": "Platform Abstraction & Device Layer",
+      "purpose": "Document Core/GameEngineDevice/ and Core/Libraries/Source/Platform/: platform isolation rules, SDL3 windowing and event handling, threading primitives, and cross-platform compatibility headers (windows_compat.h). Prohibit native Win32/Cocoa calls in game logic.",
+      "parent": "Core Engine Architecture"
+    },
+    {
+      "title": "Rendering & DXVK Integration",
+      "purpose": "Document the W3D rendering engine and DXVK DirectX 8 to Vulkan translation layer across Linux, macOS (via MoltenVK to Metal), and Windows. Explain the fork source-of-truth policy in generalsx-dxvk (branch generalsx-macos-v2.6) and FetchContent build mechanics.",
+      "parent": "Core Engine Architecture"
+    },
+    {
+      "title": "Audio Subsystem (OpenAL & MiniAudio)",
+      "purpose": "Document the modern cross-platform audio architectures replacing Miles Sound System: OpenAL and MiniAudio implementations. Detail the strict parity requirement between both backends, 3D sound positioning, audio threading, and FPU isolation.",
+      "parent": "Core Engine Architecture"
+    },
+    {
+      "title": "Video Subsystem (FFmpeg)",
+      "purpose": "Document the video playback subsystem replacing legacy Bink Video with modern FFmpeg (cmake/FindFFmpeg.cmake and GameClient video player) for intro cinematics and campaign cutscenes.",
+      "parent": "Core Engine Architecture"
+    },
+    {
+      "title": "Next-Gen Multiplayer (NGMP / GeneralsOnline)",
+      "purpose": "Document the Next-Gen Multiplayer (NGMP / GeneralsOnline) client integration under GeneralsMD/Code/GameEngine/Source/GameNetwork/GeneralsOnline/. Explain REST API conventions (/env/dev/contract/1/ prefix, Bearer token auth), WebSocket routing via integer msg_id, room registration, P2P network synchronization, and reference implementations (../references/GameClient, ../references/GameServer).",
+      "parent": "Core Engine Architecture"
+    },
+    {
+      "title": "Cross-Platform Determinism & Anti-Desync",
+      "purpose": "Comprehensive guide to simulation determinism between Linux x86_64 and macOS ARM64: deterministic math replacements in WWMath (SqrtOrigin, SinTrig, CosTrig, Atan2Origin, etc.), ScopedFPUGuard usage around logic updates and audio, NaN/Inf integer cast guards (WWMath::Div_FixNaN), disabling FMA contraction (-ffp-contract=off), and deep CRC diagnostics (scripts/qa/parse_deep_crc.py).",
+      "parent": null
+    },
+    {
+      "title": "Cross-Platform Port Strategy",
+      "purpose": "Architectural strategy for porting the legacy 32-bit DirectX 8 Windows game to modern 64-bit Linux and macOS: SDL3 everywhere, DXVK everywhere, OpenAL/MiniAudio parity, single codebase maintainability, and clean separation between platform abstractions and game simulation.",
+      "parent": null
+    },
+    {
+      "title": "Linux Platform",
+      "purpose": "Document Linux-specific build, packaging, and execution: linux64-deploy preset, Docker builds, native compilation, Flatpak bundle packaging (scripts/build/linux/build-linux-flatpak.sh), AppImage, case-sensitive filesystem requirements (fixIncludesCase.sh), and smoke testing.",
+      "parent": "Cross-Platform Port Strategy"
+    },
+    {
+      "title": "macOS Platform",
+      "purpose": "Document macOS Apple Silicon (ARM64) support: macos-vulkan preset, DXVK + MoltenVK Vulkan-to-Metal translation chain, native Meson configuration (cmake/meson-arm64-native.ini), Vulkan SDK requirements, and .app bundle packaging (scripts/build/macos/bundle-macos-zh.sh).",
+      "parent": "Cross-Platform Port Strategy"
+    },
+    {
+      "title": "Windows Modern Platform",
+      "purpose": "Document the modern Windows platform roadmap (issue #29): MinGW-w64 toolchain, mingw-w64-i686 Docker cross-compilation, planned windows64-deploy preset, SDL3/DXVK runtime, and multi-resolution executable icon generation (scripts/tooling/generate_windows_icons.py).",
+      "parent": "Cross-Platform Port Strategy"
+    },
+    {
+      "title": "Reference Repositories",
+      "purpose": "Document internal and external reference codebases: workspace references in ../references/ (GameClient, GameServer) and upstream/historical references (TheSuperHackers upstream baseline, fighter19-dxvk-port for DXVK/SDL3, jmarshall-win64-modern for OpenAL/Win64).",
+      "parent": "Cross-Platform Port Strategy"
+    },
+    {
+      "title": "Zero Hour (GeneralsMD)",
+      "purpose": "Document GeneralsMD/ structure: primary development target GeneralsXZH, expansion-specific game logic, WinMain.cpp entry point, run-time data layout, and CMake target configuration.",
+      "parent": null
+    },
+    {
+      "title": "Generals Base Game",
+      "purpose": "Document Generals/ structure: secondary development target GeneralsX, base game codebase, and the backporting policy (platform/backend improvements and Core bugfixes are backported from Zero Hour, but expansion-specific game logic is not).",
+      "parent": null
+    },
+    {
+      "title": "Legacy Windows & Upstream Compatibility",
+      "purpose": "Document legacy Windows build targets (vc6, win32) for upstream alignment with TheSuperHackers: STLPort diffs, manual memory management (delete/delete[]), retail replay compatibility rules (RTS_BUILD_OPTION_DEBUG=OFF), and upstream merge conflict resolution strategies.",
+      "parent": null
+    },
+    {
+      "title": "Development Workflow & Standards",
+      "purpose": "Document day-to-day engineering practices: GeneralsX code annotation conventions (// GeneralsX @keyword author DD/MM/YYYY Description), Conventional Commits without '@' in the subject line, GitHub PR/issue workflows, and console logging conventions (fprintf(stderr)).",
+      "parent": null
+    },
+    {
+      "title": "Documentation Architecture",
+      "purpose": "Document docs/ hierarchy: monthly worklog diaries in docs/WORKLOG/YYYY-MM-DIARY.md (with standard AI disclosure note), active work notes in docs/WORKDIR/ (planning, reports, support, audit, lessons), and user documentation hosted in the GitHub Wiki with stubs in docs/HOWTO/.",
+      "parent": "Development Workflow & Standards"
+    }
+  ]
+}

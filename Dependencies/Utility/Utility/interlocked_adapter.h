@@ -1,0 +1,45 @@
+/*
+**	Command & Conquer Generals Zero Hour(tm)
+**	Copyright 2026 TheSuperHackers
+**
+**	This program is free software: you can redistribute it and/or modify
+**	it under the terms of the GNU General Public License as published by
+**	the Free Software Foundation, either version 3 of the License, or
+**	(at your option) any later version.
+**
+**	This program is distributed in the hope that it will be useful,
+**	but WITHOUT ANY WARRANTY; without even the implied warranty of
+**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**	GNU General Public License for more details.
+**
+**	You should have received a copy of the GNU General Public License
+**	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+// This file provides the Interlocked functions of the Windows SDK. The VC6 headers have them neither for volatile
+// pointers nor for 8, 16 and 64 bit values, so VC6 gets its own implementations.
+#pragma once
+
+#if defined(_MSC_VER) && _MSC_VER < 1300
+
+	#include "interlocked_x86asm.inl"
+
+#elif defined(_WIN32)
+
+	#include <windows.h>
+
+#endif
+
+#if !defined(_WIN32)
+inline void* InterlockedCompareExchangePointer(void* volatile* Destination, void* Exchange, void* Comparand)
+{
+	void* expected = Comparand;
+	__atomic_compare_exchange_n(Destination, &expected, Exchange, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+	return expected;
+}
+
+inline void* InterlockedExchangePointer(void* volatile* Target, void* Value)
+{
+	return __atomic_exchange_n(Target, Value, __ATOMIC_SEQ_CST);
+}
+#endif

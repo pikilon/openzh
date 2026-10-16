@@ -133,9 +133,14 @@ Never send a large or speculative PR upstream without the owner's approval.
 * AI providers: local models may be used freely. A paid remote AI API needs the
   owner's confirmation for each run. Code, tests, CI and the game never call
   one.
-* Rules live in this file and in `AGENTS.md` files under subdirectories. Never
-  create `CLAUDE.md`, `GEMINI.md`, `.cursor/` or other agent-specific rule
-  files.
+* Specs, tests and verification are written by the strongest model in the
+  session. Small, fully specified implementation tasks go to a local model
+  (LM Studio) through `scripts/local-agent.sh`, following
+  `.agents/skills/local-delegation/SKILL.md`.
+* Rules live in this file, in `AGENTS.md` files under subdirectories, in
+  `.agents/skills/<name>/SKILL.md` and in `.agents/agents/<name>/agent.md`, all
+  plain Markdown any harness can read. Never create `CLAUDE.md`, `GEMINI.md`,
+  `.claude/`, `.cursor/` or other agent-specific rule files.
 
 ## Open Questions for the Owner
 

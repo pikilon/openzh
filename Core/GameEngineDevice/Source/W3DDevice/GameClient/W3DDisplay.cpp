@@ -2400,9 +2400,11 @@ AGAIN:
 					saveStateWritten = true;
 					UnicodeString description;
 					description.translate("GeneralsX parity checkpoint");
-					const SaveCode result = TheGameState->saveGame(TheCommandLineSaveStateFile, description, SAVE_FILE_TYPE_NORMAL);
+					// GeneralsX @build 17/10/2026 GameState::saveGame returns a SaveResult now; the parity log
+					// still reports the SaveCode it carries, so the "did the save succeed" meaning is unchanged.
+					const SaveResult result = TheGameState->saveGame(TheCommandLineSaveStateFile, description, SAVE_FILE_TYPE_NORMAL);
 					fprintf(stderr, "[GeneralsX] SAVE_STATE_WRITTEN file=%s frame=%u result=%d\n",
-						TheCommandLineSaveStateFile, TheGameLogic->getFrame(), result);
+						TheCommandLineSaveStateFile, TheGameLogic->getFrame(), result.saveCode);
 				}
 				// GeneralsX @feature Codex 04/08/2026 Capture the native authority image for exact-frame browser comparison.
 				static UnsignedInt captureFrame = 0;

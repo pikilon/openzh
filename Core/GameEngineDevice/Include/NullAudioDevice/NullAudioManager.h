@@ -61,7 +61,9 @@ public:
 	void adjustVolumeOfPlayingAudio(AsciiString, Real) override {}
 	void removePlayingAudio(AsciiString) override {}
 	void removeAllDisabledAudio() override {}
-	Bool has3DSensitiveStreamsPlaying() const override { return false; }
+	// GeneralsX @build 17/10/2026 AudioManager no longer declares has3DSensitiveStreamsPlaying(); keep the
+	// silent-device answer as a plain member (not an override) for ported callers that still ask.
+	Bool has3DSensitiveStreamsPlaying() const { return false; }
 
 	void *getHandleForBink() override { return nullptr; }
 	void releaseHandleForBink() override {}

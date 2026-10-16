@@ -200,20 +200,54 @@ extern "C" int GeneralsXFileResident(const char *name)
 		return 1;
 	if (TheLocalFileSystem != nullptr && TheLocalFileSystem->doesFileExist(name))
 		return 1; // loose file on MEMFS: local read, no network involved
+	// GeneralsX @build 17/10/2026 ArchiveFileSystem::getArchiveFile is protected now; reach the winning
+	// archive the way upstream code does (see W3DFileSystem::reprioritizeTexturesBySize): walk the public
+	// directory tree and read the sub-file through ArchiveFile's own friend_getArchivedFileInfo()/getName().
 	AsciiString path(name);
-	ArchiveFile *archive = TheArchiveFileSystem->getArchiveFile(path);
-	if (archive == nullptr)
+	AsciiString lower = path;
+	lower.toLower();
+	// Split the path exactly like getArchivedDirectoryInfo() does: it walks every separator token and
+	// leaves the last one in result.lastToken, so the lookup here is (parent directory, leaf name).
+	const char *leaf = lower.reverseFind('\\');
+	leaf = leaf ? leaf + 1 : lower.str();
+	const char *lastSep = lower.reverseFind('/');
+	if (lastSep != nullptr && lastSep + 1 > leaf)
+		leaf = lastSep + 1;
+	if (*leaf == '\0')
 		return 1;
-	const ArchivedFileInfo *info = archive->friend_getArchivedFileInfo(path);
-	if (info == nullptr)
+	// The parent must keep its trailing separator removed, else the walker treats the leaf as a folder.
+	AsciiString directory(lower.str(), (int)(leaf - lower.str()));
+	while (directory.getLength() > 0)
+	{
+		const char last = directory.getCharAt(directory.getLength() - 1);
+		if (last != '\\' && last != '/')
+			break;
+		directory.truncateBy(1);
+	}
+	ArchivedDirectoryInfo *dirInfo = TheArchiveFileSystem->friend_getArchivedDirectoryInfo(directory.str());
+	if (dirInfo == nullptr)
 		return 1;
-	// Small files (UI clicks, unit voices) must play on the trigger that asked for them — skipping
-	// shifts the sound to its NEXT trigger, which is heard as menu-open playing on menu-close. A
-	// couple of 256K chunks over the LAN is a one-time ~2-frame cost, cached forever after.
-	// ponytail: 512K line; raise/lower if profiling shows first-play hitches or late voices.
-	if (info->m_size <= 512 * 1024)
-		return 1;
-	return GeneralsXEnsureResident(archive->getName().str(), (double)info->m_offset, (double)info->m_size);
+	std::pair<ArchivedFileLocationMap::const_iterator, ArchivedFileLocationMap::const_iterator> range =
+		dirInfo->m_files.equal_range(AsciiString(leaf));
+	for (ArchivedFileLocationMap::const_iterator it = range.first; it != range.second; ++it)
+	{
+		ArchiveFile *archive = it->second;
+		if (archive == nullptr)
+			continue;
+		const ArchivedFileInfo *info = archive->friend_getArchivedFileInfo(path);
+		if (info == nullptr)
+			continue;
+		// Small files (UI clicks, unit voices) must play on the trigger that asked for them — skipping
+		// shifts the sound to its NEXT trigger, which is heard as menu-open playing on menu-close. A
+		// couple of 256K chunks over the LAN is a one-time ~2-frame cost, cached forever after.
+		// ponytail: 512K line; raise/lower if profiling shows first-play hitches or late voices.
+		if (info->m_size <= 512 * 1024)
+			return 1;
+		// The page keys resident bytes on (archive name, offset, size); friend_getArchivedFileInfo is the
+		// public window that exposes the sub-file's offset and size in that archive.
+		return GeneralsXEnsureResident(archive->getName().str(), (double)info->m_offset, (double)info->m_size);
+	}
+	return 1;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetAudioMuted(Int muted)

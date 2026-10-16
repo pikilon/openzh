@@ -141,6 +141,12 @@ Never send a large or speculative PR upstream without the owner's approval.
   `.agents/skills/<name>/SKILL.md` and in `.agents/agents/<name>/agent.md`, all
   plain Markdown any harness can read. Never create `CLAUDE.md`, `GEMINI.md`,
   `.claude/`, `.cursor/` or other agent-specific rule files.
+* Files inherited from GeneralsX (`.github/copilot-instructions.md`,
+  `.github/instructions/`, and its `AGENTS.md` kept as
+  `docs/upstream/GeneralsX-AGENTS.md`) describe upstream conventions. Follow
+  them for code style, annotations and determinism; where they contradict this
+  file (worklog, commit trailers, platforms, CI), this file wins. They stay in
+  place so upstream merges stay simple.
 
 ## Open Questions for the Owner
 

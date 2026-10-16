@@ -10,7 +10,9 @@ Date: 2026-10-16. Evidence: `docs/base-evaluation.md`.
 
 * This repository is a fork of `fbraz3/GeneralsX`, imported with its full
   history (which includes TheSuperHackers' and EA's), so it can keep merging
-  GeneralsX and TheSuperHackers upstream.
+  GeneralsX and TheSuperHackers upstream. Imported commit:
+  `f6e8ddb6fdafc28dae91f60cb0d4b15ffb36af6b` (2026-10-16), remotes
+  `generalsx` and `thesuperhackers`.
 * The browser engine work from `origami-ltd/wasm-generals` is ported in from
   its GPL-3.0 part only: the WebGPU D3D8 translation
   (`Core/GameEngineDevice/Source/WebGPUDevice/`), the Emscripten CMake

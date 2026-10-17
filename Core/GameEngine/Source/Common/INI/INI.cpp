@@ -471,8 +471,12 @@ UnsignedInt INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 				}
 				else
 				{
+					// GeneralsX @debug Codex 04/08/2026 Report legacy enum failures hidden by release builds.
+					fprintf(stderr, "[INI] Unknown block '%s' at line %d in '%s': %s\n", token,
+						getLineNum(), getFilename().str(), currentLine.str());
+					fflush(stderr);
 					DEBUG_CRASH( ("[LINE: %d - FILE: '%s'] Unknown block '%s'",
-														 getLineNum(), getFilename().str(), token ) );
+												 getLineNum(), getFilename().str(), token ) );
 					throw INI_UNKNOWN_TOKEN;
 				}
 
@@ -481,6 +485,16 @@ UnsignedInt INI::load( AsciiString filename, INILoadType loadType, Xfer *pXfer )
 		}
 		fprintf(stderr, "[INI] load - processed total %d lines\n", lineCount);
 		fflush(stderr);
+	}
+	// GeneralsX @debug Codex 04/08/2026 Preserve actionable parser context in browser logs.
+	catch (const INIException& exception)
+	{
+		fprintf(stderr, "[INI] ERROR in load('%s') - %s", filename.str(),
+			exception.mFailureMessage ? exception.mFailureMessage : "INIException without a message\n");
+		fflush(stderr);
+		unPrepFile();
+
+		throw;
 	}
 	catch (...)
 	{
@@ -905,7 +919,13 @@ void INI::parseAndTranslateLabel( INI* ini, void * /*instance*/, void *store, co
 	// translate
 	UnicodeString translated = TheGameText->fetch( token );
 	if( translated.isEmpty() )
+	{
+		// GeneralsX @debug Codex 04/08/2026 Identify missing localized data in browser asset bundles.
+		fprintf(stderr, "[INI] Missing translated label '%s' at line %d in '%s'\n", token,
+			ini->getLineNum(), ini->getFilename().str());
+		fflush(stderr);
 		throw INI_INVALID_DATA;
+	}
 
 	// save the translated text
 	UnicodeString *theString = (UnicodeString *)store;
@@ -1900,6 +1920,9 @@ Type scanType(const char* tokenString)
 		}
 	}
 
+	// GeneralsX @debug Codex 04/08/2026 Expose invalid indexed values in browser diagnostics.
+	fprintf(stderr, "[INI] Unknown indexed value '%s'\n", token);
+	fflush(stderr);
 	DEBUG_CRASH(("token %s is not a valid member of the index list",token));
 	throw INI_INVALID_DATA;
 	return 0;	// never executed, but keeps compiler happy

@@ -29,6 +29,7 @@
 #ifndef _WIN32
 
 #include "SDL3GameEngine.h"
+#include "NullAudioDevice/NullAudioManager.h"
 // GeneralsX @build Mr. Meeseeks 16/06/2026 Make audio headers mutually exclusive to avoid redefinition conflicts
 #ifdef SAGE_USE_MINIAUDIO
 #include "MiniAudioDevice/MiniAudioManager.h"
@@ -42,6 +43,7 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/Gadget.h"
+#include "GameClient/Shell.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
@@ -52,12 +54,322 @@
 #include "W3DDevice/GameClient/W3DWebBrowser.h"
 #include "StdDevice/Common/StdLocalFileSystem.h"
 #include "Common/BIGFileSystem.h"
+#include "Common/CommandLine.h"
+#include "Common/FramePacer.h"
 #include "Common/GlobalData.h"
+#include "Common/MessageStream.h"
+#include "GameLogic/VictoryConditions.h"
+#include "Common/AudioAffect.h"
+#include "Common/GameAudio.h"
+#include "GameClient/MapUtil.h"
+#include "GameNetwork/LANAPICallbacks.h"
+#include "GameNetwork/NetworkInterface.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#include "WebGPUDevice/WebGPUD3D8.h"
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#if defined(__EMSCRIPTEN__)
+extern int __argc;
+extern char **__argv;
+extern void StartPressed();
+
+// GeneralsX @feature Codex 04/08/2026 Expose deterministic browser CLI navigation without synthetic physical input.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXOpenLanMenu()
+{
+	if (TheShell == nullptr)
+		return FALSE;
+	TheShell->push("Menus/LanLobbyMenu.wnd", TRUE);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXCommandLineArgc()
+{
+	return __argc;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXHasReplayArgument()
+{
+	for (Int index = 1; index < __argc; ++index)
+	{
+		if (__argv[index] != nullptr && stricmp(__argv[index], "-replay") == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXQueuedReplayCount()
+{
+	return TheGlobalData != nullptr ? static_cast<Int>(TheGlobalData->m_simulateReplays.size()) : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLogicFrame()
+{
+	return TheGameLogic != nullptr ? TheGameLogic->getFrame() : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanSetIdentity(Int client)
+{
+	if (TheLAN == nullptr || client < 1 || client > 254)
+		return FALSE;
+	UnicodeString name;
+	name.format(L"Browser%d", client);
+	TheLAN->RequestSetName(name);
+	return TRUE;
+}
+
+// GeneralsX @feature Codex 06/08/2026 Let the page choose the lobby name (ASCII, page-supplied).
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanSetName(const char *label)
+{
+	if (TheLAN == nullptr || label == nullptr || label[0] == '\0')
+		return FALSE;
+	AsciiString ascii(label);
+	UnicodeString name;
+	name.translate(ascii);
+	TheLAN->RequestSetName(name);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanHost()
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() != nullptr)
+		return FALSE;
+	TheLAN->RequestGameCreate(L"GeneralsX", FALSE);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanJoinFirst()
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() != nullptr)
+		return FALSE;
+	LANGameInfo *game = TheLAN->LookupGameByListOffset(0);
+	if (game == nullptr)
+		return FALSE;
+	TheLAN->RequestGameJoin(game);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanAccept()
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() == nullptr)
+		return FALSE;
+	TheLAN->RequestAccept();
+	return TRUE;
+}
+
+// GeneralsX @feature Codex 05/08/2026 Expose the engine's cursor position so the page can draw the game cursor
+// while the pointer is locked (the browser hides the OS cursor under pointer lock).
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXMouseX()
+{
+	return TheMouse != nullptr ? TheMouse->getMouseStatus()->pos.x : -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXMouseY()
+{
+	return TheMouse != nullptr ? TheMouse->getMouseStatus()->pos.y : -1;
+}
+
+// GeneralsX @feature Codex 05/08/2026 Engine-level mute for the browser Sound button.
+// Never patch window.AudioContext for this: doing so wedges MiniAudio init and the game never starts.
+// GeneralsX @bugfix Codex 06/08/2026 Mute through the script-volume slot, not setOn(): the on/off
+// flags only gate NEW events, so muting left the looping music audible and unmuting never brought
+// anything back. A volume write reaches every playing voice via m_volumeHasChanged, and the system
+// (options) volumes stay untouched — unmute restores exactly what the player configured.
+#include "Common/ArchiveFileSystem.h"
+#include "Common/ArchiveFile.h"
+#include "Common/LocalFileSystem.h"
+
+EM_JS(int, GeneralsXEnsureResident, (const char *big, double offset, double size), {
+	const ensure = globalThis.__gxEnsure;
+	return ensure ? ensure(UTF8ToString(big), offset, size) : 1;
+});
+
+// 1 = safe to read this file synchronously (bytes resident, loose file, unknown file, or a
+// blocking-tolerant moment: boot, frontend, match load screen).
+// 0 = archive bytes still crossing the network — a background fetch was kicked, retry later.
+extern "C" int GeneralsXFileResident(const char *name)
+{
+	if (TheGameLogic == nullptr || !TheGameLogic->isInGame() || TheGameLogic->isLoadingMap())
+		return 1;
+	if (name == nullptr || *name == '\0' || TheArchiveFileSystem == nullptr)
+		return 1;
+	if (TheLocalFileSystem != nullptr && TheLocalFileSystem->doesFileExist(name))
+		return 1; // loose file on MEMFS: local read, no network involved
+	// GeneralsX @build 17/10/2026 ArchiveFileSystem::getArchiveFile is protected now; reach the winning
+	// archive the way upstream code does (see W3DFileSystem::reprioritizeTexturesBySize): walk the public
+	// directory tree and read the sub-file through ArchiveFile's own friend_getArchivedFileInfo()/getName().
+	AsciiString path(name);
+	AsciiString lower = path;
+	lower.toLower();
+	// Split the path exactly like getArchivedDirectoryInfo() does: it walks every separator token and
+	// leaves the last one in result.lastToken, so the lookup here is (parent directory, leaf name).
+	const char *leaf = lower.reverseFind('\\');
+	leaf = leaf ? leaf + 1 : lower.str();
+	const char *lastSep = lower.reverseFind('/');
+	if (lastSep != nullptr && lastSep + 1 > leaf)
+		leaf = lastSep + 1;
+	if (*leaf == '\0')
+		return 1;
+	// The parent must keep its trailing separator removed, else the walker treats the leaf as a folder.
+	AsciiString directory(lower.str(), (int)(leaf - lower.str()));
+	while (directory.getLength() > 0)
+	{
+		const char last = directory.getCharAt(directory.getLength() - 1);
+		if (last != '\\' && last != '/')
+			break;
+		directory.truncateBy(1);
+	}
+	ArchivedDirectoryInfo *dirInfo = TheArchiveFileSystem->friend_getArchivedDirectoryInfo(directory.str());
+	if (dirInfo == nullptr)
+		return 1;
+	std::pair<ArchivedFileLocationMap::const_iterator, ArchivedFileLocationMap::const_iterator> range =
+		dirInfo->m_files.equal_range(AsciiString(leaf));
+	for (ArchivedFileLocationMap::const_iterator it = range.first; it != range.second; ++it)
+	{
+		ArchiveFile *archive = it->second;
+		if (archive == nullptr)
+			continue;
+		const ArchivedFileInfo *info = archive->friend_getArchivedFileInfo(path);
+		if (info == nullptr)
+			continue;
+		// Small files (UI clicks, unit voices) must play on the trigger that asked for them — skipping
+		// shifts the sound to its NEXT trigger, which is heard as menu-open playing on menu-close. A
+		// couple of 256K chunks over the LAN is a one-time ~2-frame cost, cached forever after.
+		// ponytail: 512K line; raise/lower if profiling shows first-play hitches or late voices.
+		if (info->m_size <= 512 * 1024)
+			return 1;
+		// The page keys resident bytes on (archive name, offset, size); friend_getArchivedFileInfo is the
+		// public window that exposes the sub-file's offset and size in that archive.
+		return GeneralsXEnsureResident(archive->getName().str(), (double)info->m_offset, (double)info->m_size);
+	}
+	return 1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetAudioMuted(Int muted)
+{
+	if (TheAudio == nullptr)
+		return FALSE;
+	TheAudio->setVolume(muted ? 0.0f : 1.0f, AudioAffect_All);
+	return TRUE;
+}
+
+// GeneralsX @feature Codex 06/08/2026 Pause when the player leaves the game surface. Esc cannot
+// pause in a browser — the pointer-lock exit consumes it before the engine ever sees the key — so
+// the page calls this when focus moves outside the canvas and when it comes back.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetPaused(Int paused)
+{
+	if (TheGameLogic == nullptr || !TheGameLogic->isInGame() || TheGameLogic->isLoadingMap())
+		return FALSE;
+	if (TheNetwork != nullptr)
+		return FALSE; // a LAN match cannot pause: the other players' simulation marches on
+	const Bool want = paused ? TRUE : FALSE;
+	if ((TheGameLogic->isGamePaused() ? TRUE : FALSE) == want)
+		return TRUE;
+	TheGameLogic->setGamePaused(want);
+	return TRUE;
+}
+
+// GeneralsX @feature Codex 05/08/2026 Pick the smallest official map that fits the requested player count.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanSetMapMinPlayers(Int minPlayers)
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() == nullptr || !TheLAN->AmIHost() || TheMapCache == nullptr)
+		return FALSE;
+	TheMapCache->updateCache();
+	const MapMetaData *best = nullptr;
+	AsciiString bestName;
+	for (std::map<AsciiString, MapMetaData>::iterator it = TheMapCache->begin(); it != TheMapCache->end(); ++it)
+	{
+		const MapMetaData &meta = it->second;
+		if (!meta.m_isMultiplayer || !meta.m_isOfficial || meta.m_numPlayers < minPlayers)
+			continue;
+		if (best == nullptr || meta.m_numPlayers < best->m_numPlayers)
+		{
+			best = &it->second;
+			bestName = it->first;
+		}
+	}
+	if (best == nullptr)
+		return FALSE;
+	LANGameInfo *game = TheLAN->GetMyGame();
+	game->setMap(bestName);
+	game->getSlot(0)->setMapAvailability(true);
+	game->setMapCRC(best->m_CRC);
+	game->setMapSize(best->m_filesize);
+	game->resetStartSpots();
+	game->adjustSlotsForMap();
+	game->resetAccepted();
+	TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+	printf("GeneralsXLanSetMapMinPlayers: %s (%d players)\n", bestName.str(), best->m_numPlayers);
+	return TRUE;
+}
+
+// GeneralsX @feature Codex 05/08/2026 Let the browser console place an AI in a LAN lobby slot.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanSetSlotAI(Int slotIndex, Int difficulty)
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() == nullptr || !TheLAN->AmIHost())
+		return FALSE;
+	if (slotIndex < 1 || slotIndex >= MAX_SLOTS || difficulty < 0 || difficulty > 2)
+		return FALSE;
+	LANGameInfo *game = TheLAN->GetMyGame();
+	GameSlot *slot = game->getLANSlot(slotIndex);
+	if (slot == nullptr || slot->getState() == SLOT_PLAYER)
+		return FALSE;
+	static const SlotState aiStates[3] = { SLOT_EASY_AI, SLOT_MED_AI, SLOT_BRUTAL_AI };
+	slot->setState(aiStates[difficulty]);
+	game->resetAccepted();
+	TheLAN->RequestGameOptions(GenerateGameOptionsString(), true);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanStart()
+{
+	if (TheLAN == nullptr || TheLAN->GetMyGame() == nullptr || !TheLAN->AmIHost())
+		return FALSE;
+	StartPressed();
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanSurrender()
+{
+	if (TheGameLogic == nullptr || TheGameLogic->getGameMode() != GAME_LAN)
+		return FALSE;
+	GameMessage *msg = TheMessageStream->appendMessage(GameMessage::MSG_SELF_DESTRUCT);
+	msg->appendBooleanArgument(TRUE);
+	return TRUE;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanState()
+{
+	Int state = 0;
+	if (TheLAN != nullptr)
+		state |= 1;
+	if (TheLAN != nullptr && TheLAN->GetMyGame() != nullptr)
+		state |= 2;
+	if (TheLAN != nullptr && TheLAN->AmIHost())
+		state |= 4;
+	if (TheLAN != nullptr && TheLAN->GetMyGame() != nullptr && TheLAN->GetMyGame()->isGameInProgress())
+		state |= 8;
+	if (TheNetwork != nullptr)
+		state |= 16;
+	if (TheGameLogic != nullptr && TheGameLogic->getGameMode() == GAME_LAN)
+		state |= 32;
+	if (TheVictoryConditions != nullptr && TheVictoryConditions->getEndFrame() != 0)
+		state |= 64;
+	if (TheNetwork != nullptr && TheNetwork->sawCRCMismatch())
+		state |= 128;
+	return state;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXLanEndFrame()
+{
+	return TheVictoryConditions != nullptr ? TheVictoryConditions->getEndFrame() : 0;
+}
+#endif
 
 // Extern globals for input devices (set by GameClient)
 extern Mouse *TheMouse;
@@ -224,9 +536,74 @@ void SDL3GameEngine::update(void)
 void SDL3GameEngine::execute(void)
 {
 	fprintf(stderr, "INFO: SDL3GameEngine::execute() - entering main loop\n");
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @port Codex 04/08/2026 Let Chrome own frame scheduling and keep the engine alive.
+	TheFramePacer->reset();
+	emscripten_set_main_loop_arg(browserFrame, this, 0, true);
+	// GeneralsX @bugfix Codex 06/08/2026 requestAnimationFrame stops in a window that is unfocused or
+	// occluded (macOS marks background windows occluded), which freezes one LAN client while its peer
+	// keeps simulating — the match then starts desynced. setTimeout keeps stepping regardless of focus.
+	emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, 16);
+#else
 	GameEngine::execute();
 	fprintf(stderr, "INFO: SDL3GameEngine::execute() - exited main loop\n");
+#endif
 }
+
+#if defined(__EMSCRIPTEN__)
+// Chrome throttles window timers in hidden tabs (down to once a minute), which freezes the main
+// loop and desyncs LAN peers. The page drives frames from a worker while hidden via this export.
+// The guard makes overlapping entry impossible: executeFrame can suspend in emscripten_sleep,
+// and a pump arriving during that suspension must be dropped, not run reentrantly.
+static void* s_gxPumpEngine = nullptr;
+static Bool s_gxInFrame = FALSE;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void GeneralsXPump(void)
+{
+	if (s_gxPumpEngine != nullptr)
+		SDL3GameEngine::browserFrame(s_gxPumpEngine);
+}
+
+void SDL3GameEngine::browserFrame(void* enginePointer)
+{
+	if (s_gxInFrame)
+		return;
+	s_gxInFrame = TRUE;
+	s_gxPumpEngine = enginePointer;
+	SDL3GameEngine* engine = static_cast<SDL3GameEngine*>(enginePointer);
+	if (engine->getQuitting())
+	{
+		s_gxInFrame = FALSE;
+		emscripten_cancel_main_loop();
+		return;
+	}
+
+	const UnsignedInt speed = TheCommandLineBotMatchMap[0] != '\0' ?
+		TheCommandLineBotMatchSpeed : TheCommandLineReplaySpeed;
+	const Bool canAccelerate = speed > 1 && TheGameLogic && TheGameClient &&
+		TheGameLogic->isInGame() && !TheGameLogic->isLoadingMap() && !TheGameLogic->isGamePaused();
+	const UnsignedInt iterations = canAccelerate ? max(1u, (speed + 1) / 2) : 1u;
+	const Bool canDraw = WebGPUDeviceCanSubmitFrame();
+	Bool renderedFrame = FALSE;
+	for (UnsignedInt i = 0; i < iterations; ++i)
+	{
+		const Bool drawFrame = canDraw && i + 1 == iterations;
+		TheGameClient->setDrawingEnabled(drawFrame);
+		engine->executeFrame();
+		renderedFrame |= drawFrame;
+		if (engine->getQuitting() || !TheGameLogic->isInGame() || TheGameLogic->isLoadingMap() ||
+			TheGameLogic->isGamePaused())
+			break;
+	}
+	if (!engine->getQuitting() && !renderedFrame && canDraw)
+	{
+		TheGameClient->setDrawingEnabled(TRUE);
+		engine->executeFrame();
+	}
+	TheGameClient->setDrawingEnabled(TRUE);
+	s_gxInFrame = FALSE;
+}
+#endif
 
 /**
  * From GameEngine: serviceWindowsOS() - native OS service
@@ -310,6 +687,9 @@ void SDL3GameEngine::pollSDL3Events(void)
 
 			case SDL_EVENT_KEY_DOWN:
 			case SDL_EVENT_KEY_UP:
+				if (TheCommandLinePauseFrame != 0 && TheGlobalData->m_simulateReplays.empty()) {
+					break;
+				}
 				// Fighter19 pattern: direct addSDLEvent() call
 				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
 				if (TheKeyboard) {
@@ -321,13 +701,18 @@ void SDL3GameEngine::pollSDL3Events(void)
 				break;
 
 			case SDL_EVENT_TEXT_INPUT:
-				forwardTextInputEvent(event.text.text);
+				if (TheCommandLinePauseFrame == 0 || !TheGlobalData->m_simulateReplays.empty()) {
+					forwardTextInputEvent(event.text.text);
+				}
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
 			case SDL_EVENT_MOUSE_BUTTON_UP:
 			case SDL_EVENT_MOUSE_WHEEL:
+				if (TheCommandLinePauseFrame != 0 && TheGlobalData->m_simulateReplays.empty()) {
+					break;
+				}
 				// Fighter19 pattern: direct addSDLEvent() call with raw SDL_Event
 				// GeneralsX @refactor felipebraz 16/02/2026 Simplified event routing
 				if (TheMouse) {
@@ -575,8 +960,11 @@ WebBrowser *SDL3GameEngine::createWebBrowser(void)
  */
 AudioManager *SDL3GameEngine::createAudioManager(Bool dummy)
 {
-	(void)dummy;
 	fprintf(stderr, "INFO: SDL3GameEngine::createAudioManager()\n");
+	if (dummy || (TheGlobalData && !TheGlobalData->m_audioOn)) {
+		fprintf(stderr, "INFO: Creating NullAudio audio backend\n");
+		return new NullAudioManager();
+	}
 
 #ifdef SAGE_USE_MINIAUDIO
 	fprintf(stderr, "INFO: Creating MiniAudio audio backend\n");
@@ -586,10 +974,8 @@ AudioManager *SDL3GameEngine::createAudioManager(Bool dummy)
 	return new OpenALAudioManager();
 #else
 	fprintf(stderr, "INFO: Audio backend not available (SAGE_USE_OPENAL/SAGE_USE_MINIAUDIO not defined)\n");
-	fprintf(stderr, "WARNING: Falls back to parent implementation or silent mode\n");
-	return GameEngine::createAudioManager();  // Call parent (may return stub)
+	return new NullAudioManager();
 #endif
 }
 
 #endif // !_WIN32
-

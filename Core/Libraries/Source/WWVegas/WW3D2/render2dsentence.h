@@ -51,7 +51,8 @@
     #if defined(__APPLE__)
         #include <TargetConditionals.h>
     #endif
-    #if !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    // GeneralsX @build 17/10/2026 Browser builds have no fontconfig; the tiered font lookup skips it as on iOS.
+    #if !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) && !defined(__EMSCRIPTEN__)
         #include <fontconfig/fontconfig.h>
     #endif
 #endif

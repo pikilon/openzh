@@ -70,6 +70,7 @@
 #include "WWDownload/Registry.h"
 
 
+#if defined(SAGE_USE_GAMESPY)
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 // window ids ------------------------------------------------------------------------------
 static NameKeyType parentID = NAMEKEY_INVALID;
@@ -273,6 +274,7 @@ void SetLookAtPlayer( Int id, AsciiString nick)
 	lookAtPlayerID = id;
 	lookAtPlayerName = nick.str();
 }
+#endif
 
 //	BATTLE_HONOR_LADDER_CHAMP		= 0x0000001,
 //	BATTLE_HONOR_STREAK					= 0x0000002,
@@ -516,6 +518,7 @@ void InsertBattleHonor(GameWindow *list, const Image *image, Bool enabled, Int i
 	}
 }
 
+#if defined(SAGE_USE_GAMESPY)
 static void populateBattleHonors(const PSPlayerStats& stats, Int battleHonors, Int gamesInRow, Int lastGen, Int challenge, GameWindow *list)
 {
 	if( !list )
@@ -1637,3 +1640,4 @@ static void messageBoxYes()
 	TheGameSpyInfo->setLocalProfileID(0);
 #endif
 }
+#endif

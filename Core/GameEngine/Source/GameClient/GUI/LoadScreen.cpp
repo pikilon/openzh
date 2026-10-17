@@ -1509,6 +1509,7 @@ void MultiPlayerLoadScreen::processProgress(Int playerId, Int percentage)
 		GadgetProgressBarSetProgress(m_progressBars[m_playerLookup[playerId]], percentage );
 }
 
+#if defined(SAGE_USE_GAMESPY)
 // GameSpyLoadScreen Class //////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
 GameSpyLoadScreen::GameSpyLoadScreen()
@@ -1880,6 +1881,7 @@ void GameSpyLoadScreen::processProgress(Int playerId, Int percentage)
 	if(m_progressBars[m_playerLookup[playerId]])
 		GadgetProgressBarSetProgress(m_progressBars[m_playerLookup[playerId]], percentage );
 }
+#endif
 
 // MapTransferLoadScreen Class //////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
@@ -2058,4 +2060,3 @@ void MapTransferLoadScreen::setCurrentFilename(AsciiString filename)
 		GadgetStaticTextSetText(m_fileNameText, txt);
 	}
 }
-

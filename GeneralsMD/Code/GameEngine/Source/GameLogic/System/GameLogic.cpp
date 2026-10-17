@@ -36,9 +36,13 @@
 #endif
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #include "Common/AudioAffect.h"
 #include "Common/AudioHandleSpecialValues.h"
 #include "Common/BuildAssistant.h"
+#include "Common/CommandLine.h"
 #include "Common/CRCDebug.h"
 #include "Common/FramePacer.h"
 #include "Common/GameAudio.h"
@@ -691,9 +695,11 @@ LoadScreen *GameLogic::getLoadScreen( Bool loadingSaveGame )
 	case GAME_REPLAY:
 		return NEW ShellGameLoadScreen;
 		break;
+#if defined(SAGE_USE_GAMESPY)
 	case GAME_INTERNET:
 		return NEW GameSpyLoadScreen;
 		break;
+#endif
 	case GAME_NONE:
 	default:
 		return nullptr;
@@ -1137,9 +1143,26 @@ static void populateRandomStartPosition( GameInfo *game )
 // ------------------------------------------------------------------------------------------------
 void GameLogic::updateLoadProgress( Int progress )
 {
+#if defined(__EMSCRIPTEN__)
+	// Narrate load progress to the page: it drives the guest download overlay and tells the page
+	// not to auto-resume audio while the engine deliberately silences the device for the load.
+	// Second field says whether a real load screen is up (0 during the shell-map boot).
+	fprintf(stderr, "GENERALSX_LOAD_PROGRESS %d %d\n", progress, m_loadScreen ? 1 : 0);
+#endif
 
 	if( m_loadScreen )
+	{
 		m_loadScreen->update( progress );
+#if defined(__EMSCRIPTEN__)
+		// Silence first: yielding lets the audio thread run again, and with the engine mid-load it
+		// would replay the last rendered quantum — the click that opened the match, stuttering.
+		EM_ASM({ if (window.miniaudio) window.miniaudio.devices.forEach(function(d) { if (d && d.webaudio && d.webaudio.state === "running") d.webaudio.suspend(); }); });
+		// The browser only composites when the task yields, so every frame drawn during the load was
+		// queued and discarded: the player saw the old screen until the load finished. Yield here so
+		// the load screen actually appears and its bar moves. ASYNCIFY makes the sleep resumable.
+		emscripten_sleep(0);
+#endif
+	}
 
 	if (TheGameEngine->getQuitting() || m_quitToDesktopAfterMatch)
 	{
@@ -1211,6 +1234,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 
 	// reset the frame counter
 	m_frame = 0;
+	m_pauseFrame = m_gameMode == GAME_REPLAY ? TheCommandLinePauseFrame : 0;
 	m_hasUpdated = FALSE;
 
 #ifdef DEBUG_CRC
@@ -1220,6 +1244,13 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 #endif
 
 	setLoadingMap( TRUE );
+#if defined(__EMSCRIPTEN__)
+	// The blocking map load starves the WebAudio callback and the browser machine-guns the last
+	// rendered quantum — the menu click. Give that click time to actually play out, then silence the
+	// device for the rest of the load. ASYNCIFY makes the wait resumable.
+	emscripten_sleep(250);
+	EM_ASM({ if (window.miniaudio) window.miniaudio.devices.forEach(function(d) { if (d && d.webaudio) d.webaudio.suspend(); }); });
+#endif
 
 	if( loadingSaveGame == FALSE )
 	{
@@ -1302,8 +1333,10 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 #endif
 		else
 		{
+			#if defined(SAGE_USE_GAMESPY)
 			DEBUG_LOG(("Starting gamespy game"));
 			TheGameInfo = TheGameSpyGame;	/// @todo: MDC add back in after demo
+			#endif
 		}
 	}
 	else
@@ -1312,7 +1345,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 		{
 			TheGameInfo = TheRecorder->getGameInfo();
 		}
-		else if(m_gameMode == GAME_SKIRMISH)
+		else if(m_gameMode == GAME_SKIRMISH || (m_gameMode == GAME_REPLAY && TheSkirmishGameInfo))
 		{
 		  TheGameInfo = TheSkirmishGameInfo;
 		}
@@ -2182,6 +2215,15 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 	updateLoadProgress(LOAD_PROGRESS_POST_PRELOAD_ASSETS);
 
 	// TheSuperHackers @info Initialize the camera height limits to default if the resolution was changed
+	if (TheCommandLineMaxCameraHeight > 0.0f)
+		TheWritableGlobalData->m_maxCameraHeight = TheCommandLineMaxCameraHeight;
+	if (TheCommandLineMinCameraHeight > 0.0f)
+		TheWritableGlobalData->m_minCameraHeight = TheCommandLineMinCameraHeight;
+	if (TheGlobalData->m_minCameraHeight > TheGlobalData->m_maxCameraHeight)
+	{
+		printf("Minimum camera height exceeds maximum camera height\n");
+		exit(1);
+	}
 	TheTacticalView->setCameraHeightAboveGroundLimitsToDefault();
 	TheTacticalView->setAngleToDefault();
 	TheTacticalView->setPitchToDefault();
@@ -2320,6 +2362,22 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 		}
 	}
 
+#if defined(__EMSCRIPTEN__)
+	// A guest streams the archives from another machine; entering the match before the page pulled
+	// the whole game means mid-frame network reads — the stutter. The page raises this hold only
+	// for remote-served sessions and lowers it when the download lands (or fails). The sleep is
+	// ASYNCIFY-resumable, so the page's downloader keeps running underneath; the tick cap keeps a
+	// dead page from holding the match hostage (9000 × 100 ms = 15 min).
+	{
+		Int holdTicks = 0;
+		while (EM_ASM_INT({ return globalThis.__gxHoldMatch ? 1 : 0; }) && holdTicks++ < 9000)
+		{
+			updateLoadProgress(101);
+			emscripten_sleep(100);
+		}
+	}
+#endif
+
 	updateLoadProgress(LOAD_PROGRESS_END);
 
 	if(isInMultiplayerGame() && TheNetwork)
@@ -2387,6 +2445,11 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 
 	}
 
+#if defined(__EMSCRIPTEN__)
+	// The load screen is gone and the match is about to run: the page hides its overlay on this.
+	fprintf(stderr, "GENERALSX_LOAD_DONE\n");
+#endif
+
 	#ifdef DUMP_PERF_STATS
 	GetPrecisionTimer(&endTime64);
 	sprintf(Buf,"After delete load screen=%f",((double)(endTime64-startTime64)/(double)(freq64)*1000.0));
@@ -2424,7 +2487,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 ///		ShowControlBar(FALSE);
 
 		// explicitly set the Control bar to Observer Mode
-		if(m_gameMode == GAME_REPLAY )
+		if(m_gameMode == GAME_REPLAY && TheCommandLinePauseFrame == 0)
 		{
 			rts::changeLocalPlayer(observerPlayer);
 
@@ -2502,6 +2565,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 	TheWritableGlobalData->m_loadScreenRender = FALSE;	///< mark to resume rendering as normal
 
 	// if we're in a gamespy game, mark us as playing
+#if defined(SAGE_USE_GAMESPY)
 	if (TheGameSpyBuddyMessageQueue && TheGameSpyGame && isInInternetGame())
 	{
 		BuddyRequest req;
@@ -2512,6 +2576,7 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 			ARRAY_SIZE(req.arg.status.locationString));
 		TheGameSpyBuddyMessageQueue->addRequest(req);
 	}
+#endif
 
   if( loadingSaveGame == FALSE )
   {
@@ -2528,6 +2593,9 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 	//ReAllows quit menu to work during loading scene
 	//setGameLoading(FALSE);
 	setLoadingMap( FALSE );
+#if defined(__EMSCRIPTEN__)
+	EM_ASM({ if (window.miniaudio) window.miniaudio.devices.forEach(function(d) { if (d && d.webaudio) d.webaudio.resume(); }); });
+#endif
 
 #ifdef DUMP_PERF_STATS
 	GetPrecisionTimer(&endTime64);
@@ -2537,8 +2605,10 @@ void GameLogic::tryStartNewGame( Bool loadingSaveGame )
 
 	//Assume that getting this far means we've successfully entered an online game.
 	//Add an additional disconnection to player stats in case he doesn't complete this game. -MW
+#if defined(SAGE_USE_GAMESPY)
 	if (TheGameSpyInfo)
 		TheGameSpyInfo->updateAdditionalGameSpyDisconnections(1);
+#endif
 
 
   if ( isInReplayGame() && TheInGameUI && TheGameText )
@@ -4143,6 +4213,31 @@ void GameLogic::update()
 	{
 		m_frame++;
 		m_hasUpdated = TRUE;
+		if (m_gameMode == GAME_REPLAY && m_frame == TheRecorder->getPlaybackFrameCount())
+		{
+			fprintf(stderr,
+				"GENERALSX_REPLAY_RESULT {\"logicFrame\":%u,\"logicCRC\":\"%08X\",\"crcMismatch\":%s}\n",
+				m_frame, getCRC(CRC_RECALC), TheRecorder->sawCRCMismatch() ? "true" : "false");
+			fflush(stderr);
+		}
+
+		static UnsignedInt reportedLanEndFrame = 0;
+		if (m_gameMode != GAME_LAN)
+		{
+			reportedLanEndFrame = 0;
+		}
+		else if (TheVictoryConditions != nullptr && TheVictoryConditions->getEndFrame() != 0
+			&& TheVictoryConditions->getEndFrame() != reportedLanEndFrame)
+		{
+			reportedLanEndFrame = TheVictoryConditions->getEndFrame();
+			fprintf(stderr,
+				"GENERALSX_LAN_MATCH_RESULT {\"logicFrame\":%u,\"endFrame\":%u,\"victory\":%s,\"defeat\":%s,\"crcMismatch\":%s}\n",
+				m_frame, reportedLanEndFrame,
+				TheVictoryConditions->isLocalAlliedVictory() ? "true" : "false",
+				TheVictoryConditions->isLocalAlliedDefeat() ? "true" : "false",
+				TheNetwork != nullptr && TheNetwork->sawCRCMismatch() ? "true" : "false");
+			fflush(stderr);
+		}
 	}
 }
 
@@ -4152,8 +4247,24 @@ void GameLogic::preUpdate()
 {
 	m_hasUpdated = FALSE;
 
+	if (m_gameMode == GAME_REPLAY && TheCommandLineReplayCheckpointInterval != 0 && m_frame != 0
+		&& m_frame % TheCommandLineReplayCheckpointInterval == 0)
+	{
+		fprintf(stderr,
+			"GENERALSX_REPLAY_CHECKPOINT {\"logicFrame\":%u,\"logicCRC\":\"%08X\",\"crcMismatch\":%s}\n",
+			m_frame, getCRC(CRC_RECALC), TheRecorder->sawCRCMismatch() ? "true" : "false");
+		fflush(stderr);
+	}
+
 	if (m_pauseFrame == m_frame && m_pauseFrame != 0)
 	{
+		if (m_gameMode == GAME_REPLAY)
+		{
+			fprintf(stderr,
+				"GENERALSX_REPLAY_CHECKPOINT {\"logicFrame\":%u,\"logicCRC\":\"%08X\",\"crcMismatch\":%s}\n",
+				m_frame, getCRC(CRC_RECALC), TheRecorder->sawCRCMismatch() ? "true" : "false");
+			fflush(stderr);
+		}
 		m_pauseFrame = 0;
 		Bool pause = TRUE;
 		Bool pauseMusic = FALSE;
@@ -4384,7 +4495,6 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 		}
 		xferCRC->open(crcName);
 	}
-
 	// calculate CRCs
 	Object *obj;
 	DEBUG_ASSERTCRASH(this == TheGameLogic, ("Not in GameLogic"));

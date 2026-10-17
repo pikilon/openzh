@@ -22,6 +22,7 @@ const status = byId<HTMLElement>("status");
 const progress = byId<HTMLProgressElement>("import-progress");
 const summary = byId<HTMLElement>("stored-summary");
 const storage = byId<HTMLElement>("storage");
+const storageWarning = byId<HTMLElement>("storage-warning");
 const play = byId<HTMLButtonElement>("play");
 const clear = byId<HTMLButtonElement>("clear");
 const canvas = byId<HTMLCanvasElement>("canvas");
@@ -51,6 +52,20 @@ function hideProgress(): void {
   progress.hidden = true;
   progress.value = 0;
   progress.removeAttribute("value");
+}
+
+function hideStorageWarning(): void {
+  storageWarning.hidden = true;
+  storageWarning.textContent = "";
+}
+
+// The estimate is a hint, not a limit: Brave reports a fixed quota, so a
+// shortage warns the player and lets the import try anyway.
+function showStorageWarning(availableBytes: number, neededBytes: number): void {
+  storageWarning.textContent =
+    `The browser reports ${formatBytes(availableBytes)} available; ` +
+    `the import needs ${formatBytes(neededBytes)}.`;
+  storageWarning.hidden = false;
 }
 
 function showStored(stored: StoredFile[]): void {
@@ -112,6 +127,7 @@ function classifyPicked(files: FileList): { picked: File[]; report: InstallRepor
 }
 
 async function importFolder(files: FileList): Promise<void> {
+  hideStorageWarning();
   const choice = classifyPicked(files);
   if (choice === null) return;
   const { picked, report } = choice;
@@ -144,17 +160,22 @@ async function importFolder(files: FileList): Promise<void> {
       entries.map((entry) => ({ kind: entry.kind, name: entry.name, size: entry.file.size })),
       stored,
     );
-    if (free < needed) {
-      status.textContent = `Not enough storage: need ${formatBytes(needed)}, available ${formatBytes(free)}`;
-      hideProgress();
-      showStored(stored);
-      return;
-    }
+    if (free < needed) showStorageWarning(free, needed);
   }
-  await storeFiles(
-    entries,
-    (doneBytes, totalBytes) => showProgress(doneBytes, totalBytes),
-  );
+  try {
+    await storeFiles(
+      entries,
+      (doneBytes, totalBytes) => showProgress(doneBytes, totalBytes),
+    );
+  } catch (error) {
+    // Whatever was copied before the failure stays; report it and keep Play
+    // pointing at the archives that are actually stored.
+    hideProgress();
+    const named = error as { name?: string; message?: string };
+    status.textContent = `Import failed: ${named.name ?? "Error"}: ${named.message ?? ""}`;
+    await refresh();
+    return;
+  }
   hideProgress();
   status.textContent = "Ready";
   await refresh();
@@ -214,6 +235,7 @@ async function clearAll(): Promise<void> {
   // stale, empty summary.
   play.disabled = true;
   await clearStored();
+  hideStorageWarning();
   status.textContent = "";
   hideProgress();
   await refresh();

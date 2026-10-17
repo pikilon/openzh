@@ -762,6 +762,32 @@
         "web/src/main.ts"
       ],
       "summary": "The 1024x768 canvas overflows the launcher column; scale it to fit with its aspect ratio."
+    },
+    {
+      "issue": 91,
+      "title": "Launcher: Play launches the game fullscreen",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/91-fullscreen-launch.md",
+      "depends_on": [
+        28,
+        80
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-fullscreen.spec.ts",
+        "web/tests/launcher-fullscreen-fallbacks.spec.ts",
+        "web/tests/launcher-canvas.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts"
+      ],
+      "summary": "Play enters the browser's fullscreen on the canvas container and fits the canvas to the screen; leaving fullscreen returns to the windowed playing layout, and a Fullscreen button re-enters it."
     }
   ]
 }

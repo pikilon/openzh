@@ -3459,6 +3459,11 @@ bool WebGPUTexture::upload()
 		layout.bytesPerRow = paddedRowBytes;
 		layout.rowsPerImage = rowCount;
 		WGPUExtent3D extent = { storage.width, storage.height, 1 };
+		// GeneralsX @bugfix zhwp 17/10/2026 A block-compressed mip copy must cover whole 4x4 blocks, as D3D stores them.
+		if (compressed) {
+			extent.width = (storage.width + 3) & ~3U;
+			extent.height = (storage.height + 3) & ~3U;
+		}
 		wgpuQueueWriteTexture(m_device->webGPUQueue(), &destination, padded.data(), padded.size(), &layout, &extent);
 	}
 	m_dirty = false;

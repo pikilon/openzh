@@ -53,4 +53,12 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-17 | #79 | tests | deepseek-flash (dsh, owner) | ok | – | revised brief; 2 new real-data tests fail on the old engine |
 | 2026-10-17 | #79 | code | deepseek-flash (dsh, owner) | ok | – | C++/CMake; compiled first try; real-data and synthetic checks pass (one #74 flake, rerun) |
 
+| 2026-10-17 | #91 | tests | deepseek-flash (dsh) | ok | ~8 min | first brief, criteria 1-6; superseded by the owner's decision |
+| 2026-10-17 | #91 | tests | deepseek-flash (dsh) | ok | ~9 min | first brief, criteria 7-9, in parallel; superseded |
+| 2026-10-17 | #91 | code | deepseek-flash (dsh) | ok | ~8 min | first contract; verified, not merged (contract revised) |
+| 2026-10-17 | #91 | tests | deepseek-flash (dsh) | ok | ~23 min | revised brief (button, Play windowed); 10 tests fail, only test paths |
+| 2026-10-17 | #91 | code | deepseek-flash (dsh) | ok | ~8 min | verified from a clean checkout, merged (#102) |
+| 2026-10-17 | #97 | tests | deepseek-flash (dsh) | ok | ~18 min | guard criteria settled in the brief; 2/4 fail on the layout |
+| 2026-10-17 | #97 | code | deepseek-flash (dsh) | ok | ~6 min | verified from a clean checkout, merged (#106) |
+
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

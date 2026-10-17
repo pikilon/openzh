@@ -632,6 +632,32 @@
         "web/app/index.html"
       ],
       "summary": "Brave reports a fixed storage quota, so #31's refusal blocked the real 2.1 GB import; turn it into a warning and report real write errors."
+    },
+    {
+      "issue": 72,
+      "title": "Launcher: import the local game folder automatically in development",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/72-local-gamedata.md",
+      "depends_on": [
+        70
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/local-gamedata.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/serve.mjs",
+        "web/src/local-gamedata.ts",
+        "web/src/main.ts",
+        "web/app/index.html",
+        "web/package.json"
+      ],
+      "summary": "npm run serve exposes ZHWP_GAME_DIR read-only on 127.0.0.1 and the launcher imports it into OPFS on load; no manual folder pick on the owner's machine."
     }
   ]
 }

@@ -788,6 +788,31 @@
         "web/src/main.ts"
       ],
       "summary": "The playing view has a Fullscreen button above the canvas; it puts the canvas container in the browser's fullscreen mode and fits the canvas to the screen at its aspect ratio, and leaving fullscreen returns to the windowed playing layout. Play does not enter fullscreen on its own (the owner's decision: the engine drops it while starting)."
+    },
+    {
+      "issue": 97,
+      "title": "Launcher: while playing, the game fills the window below the text",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/97-playing-layout.md",
+      "depends_on": [
+        80,
+        91
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-window-layout.spec.ts",
+        "web/tests/harness/layout/"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts"
+      ],
+      "summary": "The playing view is capped by the 48rem launcher column and a 15rem height margin; while playing, the canvas takes the largest rectangle below the text at its drawing buffer's aspect ratio, with no page scroll."
     }
   ]
 }

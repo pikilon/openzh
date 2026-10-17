@@ -6,7 +6,8 @@ import { classifyArchives, REQUIRED, type GameKind, type InstallReport } from ".
 import { storeFiles, listStored, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 
-type Page = Window & typeof globalThis & { __zhwpLog?: string[] };
+type Outcome = { status: "resolved" } | { status: "error"; message: string };
+type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -21,6 +22,7 @@ const summary = byId<HTMLElement>("stored-summary");
 const play = byId<HTMLButtonElement>("play");
 const clear = byId<HTMLButtonElement>("clear");
 const canvas = byId<HTMLCanvasElement>("canvas");
+const engineError = byId<HTMLElement>("engine-error");
 const picker = byId<HTMLElement>("picker");
 
 // The path the folder picker gives the file under: `webkitRelativePath`
@@ -109,19 +111,29 @@ async function playNow(): Promise<void> {
   canvas.focus();
   picker.hidden = true;
   status.textContent = "Starting";
+  // The `module` query parameter lets tests start a fake engine instead of the
+  // real one (docs/briefs/29-launcher-errors.md), the same rule as smoke.js.
+  const params = new URLSearchParams(window.location.search);
+  const moduleUrl = params.get("module") ?? "/engine/GeneralsXZH.js";
   const page = window as Page;
   page.__zhwpLog = [];
+  page.__zhwpDone = undefined;
   const record = (line: string) => {
     page.__zhwpLog?.push(line);
   };
+  // An abort after the factory resolved replaces the resolved outcome.
   const reportError = (message: unknown) => {
-    status.textContent = `Engine failed: ${String(message ?? "unknown error")}`;
-    record("[page] " + String(message ?? "unknown error"));
+    const text = String(message ?? "").trim() || "unknown error";
+    status.textContent = `Engine failed: ${text}`;
+    engineError.textContent = text;
+    engineError.hidden = false;
+    record("[page] " + text);
+    page.__zhwpDone = { status: "error", message: text };
   };
   try {
-    const module = (await import("/engine/GeneralsXZH.js")) as { default?: unknown };
+    const module = (await import(moduleUrl)) as { default?: unknown };
     if (typeof module.default !== "function") {
-      throw new Error("module /engine/GeneralsXZH.js has no default-exported factory");
+      throw new Error(`module ${moduleUrl} has no default-exported factory`);
     }
     const options = await prepareEngineOptions({
       canvas,
@@ -131,9 +143,12 @@ async function playNow(): Promise<void> {
       onAbort: reportError,
     });
     await (module.default as (options: unknown) => Promise<unknown>)(options);
-    status.textContent = "Ready";
+    if (page.__zhwpDone === undefined) {
+      page.__zhwpDone = { status: "resolved" };
+      status.textContent = "Ready";
+    }
   } catch (error) {
-    reportError(error instanceof Error ? error.message : String(error));
+    reportError(error);
   }
 }
 

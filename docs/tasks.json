@@ -855,7 +855,8 @@
       "allowed_paths": [
         "web/app/index.html",
         "web/app/favicon.png",
-        "web/scripts/package.mjs"
+        "web/scripts/package.mjs",
+        "web/scripts/serve.mjs"
       ],
       "summary": "The launcher links a 48x48 PNG favicon converted from the game's own launcher icon in EA's GPL source release (catalog 01_EA_GPL_Source_Releases), and the packager ships it next to app/index.html."
     }

@@ -44,6 +44,9 @@ Hour": the file is `web/app/favicon.png`.
   next to `app/index.html`; the packaged page serves it from the same relative
   path, and the output still has only `app`, `dist`, `engine`, `index.html`
   and `_headers` at the top level.
+* The development server (`web/scripts/serve.mjs`) serves `.png` files as
+  `image/png`, like the types it already maps; nothing else about the server
+  changes.
 * A missing icon never blocks the game: the page does not fetch the icon from
   JavaScript, and a 404 for it leaves the launcher and Play working.
 * No user-visible string in the page mentions an EA trademark.
@@ -52,7 +55,7 @@ Hour": the file is `web/app/favicon.png`.
 
 ## Acceptance criteria
 1. `GET /app/index.html` has a `<link rel="icon">` whose `href` resolves to `/app/favicon.png`.
-2. `GET /app/favicon.png` returns 200 with an image content type and the PNG signature.
+2. `GET /app/favicon.png` returns 200 with `Content-Type: image/png` and the PNG signature.
 3. With `/app/favicon.png` routed to 404, the launcher still imports a synthetic install and Play starts the fake engine with no `#engine-error`.
 4. `node scripts/package.mjs` with a synthetic engine writes `app/favicon.png` byte-identical to `web/app/favicon.png`, and the packaged `app/index.html` still links it.
 5. The page's title, headings and the icon link carry no `Command & Conquer`, `Generals` or `Zero Hour` text.
@@ -65,7 +68,10 @@ Hour": the file is `web/app/favicon.png`.
 ## Allowed paths
 * `web/app/index.html`
 * `web/app/favicon.png`
+* `web/app/favicon.png`'s source: the catalog file named in the brief, read
+  only, never copied into the repository.
 * `web/scripts/package.mjs`
+* `web/scripts/serve.mjs`
 
 ## Check command
 `cd web && npm ci && npx playwright test && npm run package`

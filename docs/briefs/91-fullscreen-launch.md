@@ -50,7 +50,8 @@ letterbox is page background around it.
   hidden>` holds `<button id="fullscreen">Fullscreen</button>` and sits before
   `#screen`. `#engine-error` stays before the canvas in document order. No EA
   trademark appears in any added text.
-* `#play-controls` is hidden before Play and shown while the game runs.
+* `#play-controls` is hidden before Play and shown from Play on, also after an
+  engine error (the error message, the canvas and the playing view stay).
 * Clicking `#play` starts the engine exactly as today and asks the browser for
   fullscreen on `#screen` in the same user gesture.
 * While `#screen` is `document.fullscreenElement`, the canvas is displayed at
@@ -85,9 +86,9 @@ letterbox is page background around it.
 4. If the drawing buffer becomes 1280x720 while fullscreen, the canvas re-fits to 16:9: its displayed width is 1280 (within 1 px), its height is 720 (within 1 px) and its two vertical gaps differ by at most 1 px.
 5. After the fullscreen session ends (`document.exitFullscreen()` from the page, which is what the browser's Esc does), `document.fullscreenElement` is null, the canvas is still visible and fits the windowed page (#80: inside the viewport, below the heading, drawing-buffer aspect ratio within 1%, no horizontal scroll), and `#play-controls` is visible.
 6. Clicking `#fullscreen` while playing windowed makes `document.fullscreenElement` `#screen` again, the canvas fills the screen as in criterion 2, and `document.activeElement` is `#canvas`.
-7. With `Element.prototype.requestFullscreen` removed, Play starts the game windowed: no fullscreen element, `#canvas` visible, `#engine-error` hidden, and `#fullscreen` hidden.
-8. With `requestFullscreen` replaced by a function that returns a rejected promise, Play starts the game windowed: no fullscreen element, `#canvas` visible, `#engine-error` hidden, and `#fullscreen` visible.
-9. With the abort fake engine, and separately with the late-abort fake engine, the page ends with no fullscreen element and a visible `#engine-error`.
+7. With `Element.prototype.requestFullscreen` removed, Play starts the game windowed: no fullscreen element, `#canvas` visible, `#engine-error` hidden, `#play-controls` visible, and `#fullscreen` hidden.
+8. With `requestFullscreen` replaced by a function that returns a rejected promise, Play starts the game windowed: no fullscreen element, `#canvas` visible, `#engine-error` hidden, `#play-controls` visible, and `#fullscreen` visible.
+9. With the abort fake engine (its abort races the fullscreen request) and separately with the late-abort fake engine (it aborts 1 s after the engine started, while the game is in fullscreen), the page ends with no fullscreen element, a visible `#engine-error` and a visible `#play-controls`; the fullscreen events recorded by the test show the late-abort run was in fullscreen before the abort.
 
 ## Test paths
 * `web/tests/launcher-fullscreen.spec.ts`: criteria 1-6, using
@@ -96,7 +97,9 @@ letterbox is page background around it.
   with a click dispatched from `page.evaluate`.
 * `web/tests/launcher-fullscreen-fallbacks.spec.ts`: criteria 7-9, using
   `page.addInitScript` stubs applied before `goto`, and
-  `/harness/errors/abort.js` and `/harness/errors/abort-late.js`.
+  `/harness/errors/abort.js` and `/harness/errors/abort-late.js`. For criterion
+  9, record `fullscreenchange` events from an init script, so the fullscreen
+  state before the abort is observed without racing a poll.
 * `web/tests/launcher-canvas.spec.ts`: only its `startCanvas` setup, which
   must leave fullscreen (guarded with `document.fullscreenElement`) before it
   measures the windowed layout; its assertions do not change.

@@ -40,11 +40,17 @@ try {
     onAbort: (reason) => reportError(reason),
   };
   // archives=opfs mounts the archives stored in OPFS into the engine's file
-  // system before it runs (docs/briefs/5b-mount-archives.md).
-  const factoryOptions =
-    params.get("archives") === "opfs"
-      ? await (await import("/dist/engine.js")).prepareEngineOptions(options)
-      : options;
+  // system before it runs (docs/briefs/5b-mount-archives.md) and persists the
+  // engine's user data across reloads (docs/briefs/19-persist-user-data.md).
+  let factoryOptions = options;
+  if (params.get("archives") === "opfs") {
+    const engine = await import("/dist/engine.js");
+    factoryOptions = await engine.prepareEngineOptions(options);
+    factoryOptions.preRun.push((module) => {
+      window.__zhwpModule = module;
+    });
+    window.__zhwpSaveUserData = () => engine.saveUserData(window.__zhwpModule);
+  }
   await createGeneralsX(factoryOptions);
   if (window.__zhwpDone === undefined) window.__zhwpDone = { status: "resolved" };
 } catch (error) {

@@ -7,6 +7,9 @@ import type { StoredFile } from "./opfs-store";
 import { listStored } from "./opfs-store";
 import { FileBridge } from "./bridge";
 import { mountArchives } from "./mount";
+import { addUserDataPersistence } from "./user-data";
+
+export { saveUserData } from "./user-data";
 
 type Options = {
   preRun?: ((module: any) => void)[] | ((module: any) => void);
@@ -17,11 +20,20 @@ export async function prepareEngineOptions<T extends object>(
 ): Promise<T & { preRun: ((m: any) => void)[] }> {
   const files: StoredFile[] = await listStored();
   const bridge = files.length > 0 ? await FileBridge.start(files) : undefined;
+  if (bridge !== undefined) {
+    // The bridge's OPFS sync access handles stay locked for as long as the
+    // worker holds them, so they must be released when the page unloads: a
+    // reload would otherwise fail to open the same archives again. On pagehide
+    // the worker closes them synchronously before the next page runs.
+    window.addEventListener("pagehide", () => {
+      void bridge.close();
+    });
+  }
   const source = options as T & Options;
   const existing = source.preRun ?? [];
   const preRun = typeof existing === "function" ? [existing] : [...existing];
   preRun.push((module: any) => {
     if (bridge !== undefined) mountArchives(module.FS, bridge, files);
   });
-  return { ...source, preRun };
+  return addUserDataPersistence({ ...source, preRun });
 }

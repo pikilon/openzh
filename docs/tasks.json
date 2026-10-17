@@ -1,0 +1,616 @@
+{
+  "schema": 1,
+  "repo": "pikilon/zero-hour-web-port",
+  "note": "Machine-readable task index. Source of truth for status is the issue's labels; keep both in sync. See docs/briefs/README.md.",
+  "tasks": [
+    {
+      "issue": 26,
+      "title": "Pipeline: script that verifies a task attempt mechanically",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/26-verify-task.md",
+      "depends_on": [],
+      "check": "bash scripts/pipeline/tests/verify-task.test.sh",
+      "test_paths": [
+        "scripts/pipeline/tests/"
+      ],
+      "allowed_paths": [
+        "scripts/pipeline/verify-task.sh"
+      ],
+      "summary": "A script that decides an attempt from docs/tasks.json: only allowed paths changed, and the check passes (or, for tests, fails) from a clean worktree."
+    },
+    {
+      "issue": 27,
+      "title": "No-EA-assets guard script",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/27-no-ea-assets.md",
+      "depends_on": [],
+      "check": "bash scripts/tests/check-no-ea-assets.test.sh && scripts/check-no-ea-assets.sh",
+      "test_paths": [
+        "scripts/tests/"
+      ],
+      "allowed_paths": [
+        "scripts/check-no-ea-assets.sh",
+        "scripts/no-ea-assets.allow"
+      ],
+      "summary": "The guard from #2, usable locally now: fails when the tree or a given folder holds game-data file types outside an allowlist."
+    },
+    {
+      "issue": 28,
+      "title": "Launcher: canvas keeps the right mouse button and the keyboard",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/28-canvas-input.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-input.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/main.ts",
+        "web/app/index.html"
+      ],
+      "summary": "The game uses right-click and the keyboard: the canvas suppresses the context menu and takes focus on Play."
+    },
+    {
+      "issue": 29,
+      "title": "Launcher: show engine failures on the page",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/29-launcher-errors.md",
+      "depends_on": [
+        28
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-errors.spec.ts",
+        "web/tests/harness/errors/"
+      ],
+      "allowed_paths": [
+        "web/src/main.ts",
+        "web/app/index.html"
+      ],
+      "summary": "An abort or a failed start is shown in a visible error box and recorded like the smoke page does; a `module` parameter allows fake engines in tests."
+    },
+    {
+      "issue": 30,
+      "title": "Launcher: detect missing browser features before import",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/30-browser-features.md",
+      "depends_on": [
+        29
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-features.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/features.ts",
+        "web/src/main.ts",
+        "web/app/index.html"
+      ],
+      "summary": "Without WebGPU, cross-origin isolation or OPFS the launcher says what is missing and disables import and Play."
+    },
+    {
+      "issue": 31,
+      "title": "Launcher: persistent storage and a quota check before import",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/31-storage-quota.md",
+      "depends_on": [
+        30
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-storage.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/storage.ts",
+        "web/src/main.ts",
+        "web/src/test-api.ts",
+        "web/app/index.html"
+      ],
+      "summary": "Ask for persistent storage, show usage, and refuse an import that does not fit instead of failing halfway."
+    },
+    {
+      "issue": 32,
+      "title": "Static site package with isolation headers",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/32-static-package.md",
+      "depends_on": [
+        27
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/package.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/package.mjs",
+        "web/package.json",
+        "web/.gitignore"
+      ],
+      "summary": "`npm run package` builds a self-contained static folder (launcher, wrapper, engine, COOP/COEP headers file) with no game data, checked by the guard."
+    },
+    {
+      "issue": 33,
+      "title": "Real data: first run to the main menu and triage",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": true,
+      "blocked_by": "#6",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        6
+      ],
+      "check": "cd web && ZHWP_GAME_DIR=<install> npx playwright test tests/real-data.spec.ts",
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Run `web/tests/real-data.spec.ts` on the owner's install; every failure becomes its own issue with a brief. No delegated work."
+    },
+    {
+      "issue": 34,
+      "title": "Real data: a replay plays in the browser with rendering",
+      "phase": 1,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "#6",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        33,
+        39,
+        37
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Local-only test: a real replay plays in the windowed engine for N seconds with no WebGPU failure and a non-uniform canvas. Spec after the first real run."
+    },
+    {
+      "issue": 35,
+      "title": "Real data: audio in the browser",
+      "phase": 1,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "#6",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        33
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Sound and music play after the first user gesture (browser autoplay rules). Spec after the first real run shows what the audio backend does."
+    },
+    {
+      "issue": 36,
+      "title": "Real data: frame-time baseline",
+      "phase": 1,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "#6",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        34
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Measure frame times of a real replay in Brave and record them in docs/porting-notes.md, to know whether phase 1 needs performance work."
+    },
+    {
+      "issue": 37,
+      "title": "Smoke page: engine arguments from the URL",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/37-smoke-args.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/smoke-args.spec.ts",
+        "web/tests/harness/args/"
+      ],
+      "allowed_paths": [
+        "web/smoke/smoke.js"
+      ],
+      "summary": "Repeated `arg` query parameters replace the default `-win`, so harnesses can run `-headless -replay ...`."
+    },
+    {
+      "issue": 38,
+      "title": "Smoke page: record the engine's exit code",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/38-smoke-exit.md",
+      "depends_on": [
+        37
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/smoke-exit.spec.ts",
+        "web/tests/harness/exit/"
+      ],
+      "allowed_paths": [
+        "web/smoke/smoke.js"
+      ],
+      "summary": "When the engine exits (headless replay simulation returns 0 or 1), `__zhwpDone` says `exited` with the code."
+    },
+    {
+      "issue": 39,
+      "title": "Put a replay file into the engine's user data before start",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/39-replay-file.md",
+      "depends_on": [
+        38
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/user-files.spec.ts",
+        "web/tests/harness/replays/"
+      ],
+      "allowed_paths": [
+        "web/src/user-files.ts",
+        "web/src/engine.ts",
+        "web/smoke/smoke.js"
+      ],
+      "summary": "`addUserFiles` writes given files under the user data folder after IDBFS loads; the smoke page's `replay=<url>` uses it for `Replays/`."
+    },
+    {
+      "issue": 40,
+      "title": "Oracle: compare two CRC logs",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/40-compare-crc.md",
+      "depends_on": [],
+      "check": "node --test scripts/oracle/tests/",
+      "test_paths": [
+        "scripts/oracle/tests/"
+      ],
+      "allowed_paths": [
+        "scripts/oracle/compare-crc.mjs"
+      ],
+      "summary": "A Node script that reports the first diverging frame between two `ZHWP_CRC` logs."
+    },
+    {
+      "issue": 41,
+      "title": "Engine: print the logic CRC with -crclog",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": true,
+      "blocked_by": "#6",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/41-crc-log.md",
+      "depends_on": [
+        6,
+        39
+      ],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && ZHWP_GAME_DIR=<install> ZHWP_REPLAY=<file.rep> npx playwright test tests/real-data-crc.spec.ts",
+      "test_paths": [
+        "web/tests/real-data-crc.spec.ts"
+      ],
+      "allowed_paths": [
+        "Core/GameEngine/Source/Common/CommandLine.cpp",
+        "GeneralsMD/Code/GameEngine/Include/Common/GlobalData.h",
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp",
+        "GeneralsMD/Code/GameEngine/Source/GameLogic/System/GameLogic.cpp",
+        "GeneralsMD/Code/GameEngine/Source/Common/GameMain.cpp"
+      ],
+      "summary": "With `-crclog` the engine prints `ZHWP_CRC <frame> <crc>` every time it computes the logic CRC the recorder compares. Verifiable only with real data."
+    },
+    {
+      "issue": 42,
+      "title": "Oracle: run a replay in Brave and write its CRC log",
+      "phase": 2,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/42-replay-runner.md",
+      "depends_on": [
+        39
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/run-replay.spec.ts",
+        "web/tests/harness/replay/"
+      ],
+      "allowed_paths": [
+        "web/scripts/run-replay.mjs",
+        "web/package.json"
+      ],
+      "summary": "`npm run replay -- --replay x.rep --out x.crc` runs the smoke page headless in Brave and saves the `ZHWP_CRC` lines; tested with a fake engine."
+    },
+    {
+      "issue": 43,
+      "title": "Oracle: native replay runner",
+      "phase": 2,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "#14",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        14,
+        41
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "`scripts/oracle/run-native.sh` runs the native build of the same commit with `-headless -replay -crclog` and writes the CRC log."
+    },
+    {
+      "issue": 44,
+      "title": "Oracle: one command per replay, native vs browser",
+      "phase": 2,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "#14",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        43,
+        42,
+        40
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "`scripts/oracle/oracle.sh <replay>` runs both, compares, prints the first diverging frame. Local only (needs game data)."
+    },
+    {
+      "issue": 45,
+      "title": "Replay corpus kept outside the repository",
+      "phase": 2,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Decide where replays come from (owner's games, GeneralsX's public replay repo) and how they are stored locally (`ZHWP_REPLAY_DIR`)."
+    },
+    {
+      "issue": 46,
+      "title": "Cross-browser CRC matrix",
+      "phase": 2,
+      "status": "needs-owner",
+      "blocked": true,
+      "blocked_by": "D-04",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        44
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Phase 2 must show identical CRCs across browsers and OSes, but D-04 limits tests to Brave. Needs the owner's decision on which browsers to add."
+    },
+    {
+      "issue": 47,
+      "title": "D-06: network architecture for online play",
+      "phase": 3,
+      "status": "needs-owner",
+      "blocked": true,
+      "blocked_by": "phase 2 exit",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        "phase-2-exit"
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Lockstep over WebRTC data channels, signalling/relay server, where it is hosted and who pays. Decision record before any phase 3 code."
+    },
+    {
+      "issue": 48,
+      "title": "Signalling and relay server",
+      "phase": 3,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 2 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        47
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Small Node server: rooms, offer/answer/ICE exchange, relay fallback. Tested with synthetic clients."
+    },
+    {
+      "issue": 49,
+      "title": "Engine transport over WebRTC data channels",
+      "phase": 3,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 2 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        47
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Replace the UDP socket under `Transport` in the browser build with a JS bridge to data channels, keeping the engine's packet format."
+    },
+    {
+      "issue": 50,
+      "title": "Game lobby through the signalling server",
+      "phase": 3,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 2 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        48,
+        49
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "The engine's LAN lobby lists and joins games announced through the signalling server instead of UDP broadcast."
+    },
+    {
+      "issue": 51,
+      "title": "Two headless clients play a scripted match with identical CRCs",
+      "phase": 3,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 2 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        50
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Automated phase 3 check: two or more browsers play through the real network code; a desync fails and reports the first diverging frame."
+    },
+    {
+      "issue": 52,
+      "title": "Tag the last fidelity-only commit",
+      "phase": 4,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 3 exit",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        "phase-3-exit"
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Tag and document the commit after which the original-replay oracle guards unchanged systems only."
+    },
+    {
+      "issue": 53,
+      "title": "Load content override archives after the originals",
+      "phase": 4,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 3 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        52
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "The launcher imports a mod folder whose `.big` files load with higher priority, replacing originals one asset at a time."
+    },
+    {
+      "issue": 54,
+      "title": "Placeholder boxes for missing models",
+      "phase": 4,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 3 exit",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        52
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "A missing W3D model renders as a team-coloured box instead of failing."
+    },
+    {
+      "issue": 55,
+      "title": "Replays and tests for new content",
+      "phase": 4,
+      "status": "needs-spec",
+      "blocked": true,
+      "blocked_by": "phase 3 exit",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [
+        53
+      ],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "New content gets its own replays and CRC baselines, separate from the original-replay oracle."
+    }
+  ]
+}

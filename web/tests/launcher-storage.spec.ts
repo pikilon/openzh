@@ -1,12 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildBig } from "./helpers/big";
 
-// Issue #31: persistent storage and a quota check before import. The page asks
-// the browser to keep the archives, shows how much space they use and refuses
-// an import that does not fit. The pure helpers are exercised through the
-// harness page; the launcher through stubbed StorageManager methods.
+// Issue #31: persistent storage and a storage estimate before import. Issue
+// #70: the estimate warns instead of refusing the import. The pure helpers are
+// exercised through the harness page; the launcher through stubbed
+// StorageManager methods.
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -17,13 +17,19 @@ type StorageMock = {
   persist?: boolean | "count";
 };
 
-function makeInstall(dir: string): string {
+function makeInstall(dir: string, data = "GameData\nEnd\n"): string {
   const root = join(dir, "install");
   mkdirSync(root, { recursive: true });
   for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
+    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data }]));
   }
   return root;
+}
+
+function installBytes(root: string): number {
+  return ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]
+    .map((name) => statSync(join(root, name)).size)
+    .reduce((sum, size) => sum + size, 0);
 }
 
 async function openHarness(page: Page): Promise<void> {
@@ -155,19 +161,129 @@ test("6: when estimate rejects, #storage reads Storage: unknown and import still
   await expect(page.locator("#play")).toBeEnabled();
 });
 
-test("7: a pick that does not fit is refused and nothing is stored", async ({ page }, info) => {
+test("70.1: when the estimate is smaller than needed, the import finishes and counts the archives", async ({ page }, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 16 },
     persisted: false,
     persist: false,
   });
   await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
   await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
 
-  await expect(page.locator("#status")).toHaveText(/^Not enough storage: need /);
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await expect(page.locator("#play")).toBeEnabled();
+});
+
+test("70.2: when the estimate is smaller than needed, #storage-warning shows both formatted sizes", async ({ page }, info) => {
+  await mockStorage(page, {
+    estimate: { usage: 0, quota: 16 },
+    persisted: false,
+    persist: false,
+  });
+  await page.goto("/app/index.html");
+  const root = makeInstall(info.outputPath());
+  const needed = installBytes(root);
+
+  await page.locator("#folder-input").setInputFiles(root);
+
+  const warning = page.locator("#picker #storage-warning");
+  await expect(warning).toBeVisible();
+  await expect(warning).toHaveAttribute("role", "status");
+  await expect(warning).toHaveText(`The browser reports 16 B available; the import needs ${needed} B.`);
+});
+
+test("70.3: when the estimate leaves enough space, #storage-warning stays hidden", async ({ page }, info) => {
+  await mockStorage(page, {
+    estimate: { usage: 0, quota: 2 * GB },
+    persisted: false,
+    persist: false,
+  });
+  await page.goto("/app/index.html");
+  const warning = page.locator("#picker #storage-warning");
+  await expect(warning).toHaveCount(1);
+  await expect(warning).toBeHidden();
+
+  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await expect(warning).toBeHidden();
+});
+
+test("70.4: after a warning, Clear hides #storage-warning", async ({ page }, info) => {
+  await mockStorage(page, {
+    estimate: { usage: 0, quota: 16 },
+    persisted: false,
+    persist: false,
+  });
+  await page.goto("/app/index.html");
+  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  const warning = page.locator("#picker #storage-warning");
+  await expect(warning).toBeVisible();
+
+  await page.locator("#clear").click();
+
+  await expect(warning).toBeHidden();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
+});
+
+test("70.5: a QuotaExceededError during storing is reported and keeps what is stored", async ({ page }, info) => {
+  await mockStorage(page, {
+    estimate: { usage: 0, quota: 2 * GB },
+    persisted: false,
+    persist: false,
+  });
+  await page.goto("/app/index.html");
+
+  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath("first")));
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await expect(page.locator("#play")).toBeEnabled();
+
+  // Make every OPFS writable stream fail after the first import, as a full
+  // disk would, and pick archives whose sizes force a rewrite.
+  await page.evaluate(() => {
+    Object.defineProperty(FileSystemFileHandle.prototype, "createWritable", {
+      value: () => Promise.reject(new DOMException("quota exceeded", "QuotaExceededError")),
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath("second"), "GameData\nEnd\nEnd\n"));
+
+  await expect(page.locator("#status")).toHaveText(/^Import failed: QuotaExceededError: /);
+  await expect(page.locator("#import-progress")).toBeHidden();
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await expect(page.locator("#play")).toBeEnabled();
+});
+
+test("70.6: no path of the page writes Not enough storage into #status", async ({ page }, info) => {
+  await mockStorage(page, {
+    estimate: { usage: 0, quota: 16 },
+    persisted: false,
+    persist: false,
+  });
+  await page.goto("/app/index.html");
+  await page.evaluate(() => {
+    const status = document.getElementById("status");
+    if (status === null) throw new Error("missing #status");
+    const seen: string[] = [];
+    (window as unknown as { __statusSeen: string[] }).__statusSeen = seen;
+    new MutationObserver(() => seen.push(status.textContent ?? "")).observe(status, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+
+  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await expect
+    .poll(async () => page.locator("#status").textContent(), { timeout: 30_000 })
+    .not.toBe("Importing");
+
+  const seen = await page.evaluate(() => (window as unknown as { __statusSeen: string[] }).__statusSeen);
+  expect(seen.some((text) => text.includes("Not enough storage"))).toBe(false);
 });
 
 test("8: a complete folder pick calls navigator.storage.persist() once", async ({ page }, info) => {

@@ -61,4 +61,9 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-17 | #97 | tests | deepseek-flash (dsh) | ok | ~18 min | guard criteria settled in the brief; 2/4 fail on the layout |
 | 2026-10-17 | #97 | code | deepseek-flash (dsh) | ok | ~6 min | verified from a clean checkout, merged (#106) |
 
+| 2026-10-17 | #103 | tests | deepseek-flash (dsh) | ok | ~15 min | 5 tests fail; the brief needed the dev server MIME fix |
+| 2026-10-17 | #103 | code | deepseek-flash (dsh) | ok | ~13 min | suite + package green from a clean checkout, merged (#113) |
+| 2026-10-17 | #99 | tests | deepseek-flash (dsh) | ok | ~15 min | 5 tests fail; criterion 5 is the brief's guard |
+| 2026-10-17 | #99 | code | deepseek-flash (dsh) | blocked | ~9 min | web suite + TU syntax compile green; the engine build is denied by the sandbox (vcpkg lock); branch issue-99-code, not merged |
+
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

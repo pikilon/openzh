@@ -359,6 +359,31 @@ function enterFullscreen(): void {
   );
 }
 
+// Issue #99: the game is silent while the page is hidden or the window has lost
+// focus, and comes back only when it is visible and focused again. The engine
+// object is the module the factory resolved to; the page keeps it because Play
+// may be pressed from a page that was never visible or focused. Visibility wins
+// over focus: a focused page in a hidden document stays muted.
+type EngineModule = { _GeneralsXSetAudioMuted?: (muted: number) => unknown };
+
+let engineModule: EngineModule | null = null;
+let windowFocused = document.hasFocus();
+
+// 1 while the game must be silent, 0 only while the page is visible and focused.
+function muteValue(): number {
+  return document.visibilityState === "visible" && windowFocused ? 0 : 1;
+}
+
+// Re-applied when the module becomes available and on every later change. A
+// build without the export is ignored, and the game keeps playing.
+function applyMute(): void {
+  const engine = engineModule;
+  if (engine === null) return;
+  const setMuted = engine._GeneralsXSetAudioMuted;
+  if (typeof setMuted !== "function") return;
+  setMuted.call(engine, muteValue());
+}
+
 async function playNow(): Promise<void> {
   play.disabled = true;
   input.disabled = true;
@@ -413,7 +438,12 @@ async function playNow(): Promise<void> {
       printErr: record,
       onAbort: reportError,
     });
-    await (module.default as (options: unknown) => Promise<unknown>)(options);
+    const engine = (await (module.default as (options: unknown) => Promise<unknown>)(options)) as EngineModule;
+    // Issue #99: keep the object the factory resolved to and tell it the page's
+    // current state, since Play may have been pressed from a hidden or
+    // unfocused page.
+    engineModule = engine ?? null;
+    applyMute();
     if (page.__zhwpDone === undefined) {
       page.__zhwpDone = { status: "resolved" };
       status.textContent = "Ready";
@@ -478,6 +508,20 @@ if (missing.length > 0) {
     attributeFilter: ["width", "height"],
   });
   window.addEventListener("resize", fitCanvas);
+
+  // Issue #99: the window's focus and the document's visibility decide whether
+  // the game is heard; applyMute() re-reads both, so the order they arrive in
+  // does not matter. Before Play there is no engine object yet: the state is
+  // applied when the module resolves.
+  window.addEventListener("blur", () => {
+    windowFocused = false;
+    applyMute();
+  });
+  window.addEventListener("focus", () => {
+    windowFocused = true;
+    applyMute();
+  });
+  document.addEventListener("visibilitychange", applyMute);
 
   // The development server may expose the owner's game folder (issue #72):
   // import it on load, exactly as a folder pick, when it is there. Doing it

@@ -46,5 +46,7 @@ when it shows up again. Add an entry before closing the issue that found it.
 * Cause: `Atomics.wait` is forbidden on the main thread, so `FileBridge`
   busy-waits on `Atomics.load` for the worker's answer (D-03). If the worker
   dies mid-request, the page freezes.
-* Fix when it shows up: give the spin a time limit and throw, so the engine
-  sees a read error instead of hanging the tab.
+* Fix (issue #13): every wait has a time limit (`readTimeoutMs`, default
+  10 s); on time-out `readSync` throws, the worker is terminated and the
+  bridge refuses further reads, so the engine sees a read error instead of a
+  frozen tab.

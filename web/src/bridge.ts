@@ -26,13 +26,25 @@ interface SharedBridgeState {
 }
 
 export class FileBridge {
+  static readonly DEFAULT_READ_TIMEOUT_MS = 10_000;
+
+  private dead = false;
+  private closeStarted = false;
+
   private constructor(
     private readonly worker: Worker,
     private readonly shared: SharedBridgeState,
     private readonly files: readonly StoredFile[],
+    private readonly readTimeoutMs: number,
   ) {}
 
-  static async start(files: StoredFile[], workerUrl?: string | URL): Promise<FileBridge> {
+  static async start(
+    files: StoredFile[],
+    workerUrl?: string | URL,
+    options?: { readTimeoutMs?: number },
+  ): Promise<FileBridge> {
+    const timeout = options?.readTimeoutMs;
+    const readTimeoutMs = timeout === undefined ? FileBridge.DEFAULT_READ_TIMEOUT_MS : timeout;
     const url = workerUrl ?? new URL("./bridge-worker.js", import.meta.url);
     const worker = new Worker(url, { type: "module" });
     // One request block: control (Int32 + a Float64 position) plus data.
@@ -63,7 +75,7 @@ export class FileBridge {
       [],
     );
     await ready;
-    return new FileBridge(worker, shared, files);
+    return new FileBridge(worker, shared, files, readTimeoutMs);
   }
 
   size(kind: GameKind, name: string): number {
@@ -72,6 +84,7 @@ export class FileBridge {
   }
 
   readSync(kind: GameKind, name: string, position: number, target: Uint8Array): number {
+    if (this.dead || this.closeStarted) throw new Error(`bridge closed: cannot read ${kind}/${name}`);
     const index = this.index(kind, name);
     const file = this.files[index];
     if (!Number.isFinite(position) || position < 0) throw new Error(`bad read position: ${position}`);
@@ -80,7 +93,14 @@ export class FileBridge {
     let readTotal = 0;
     while (readTotal < wanted) {
       const chunk = Math.min(BLOCK, wanted - readTotal);
-      const read = this.request(index, position + readTotal, chunk);
+      let read: number;
+      try {
+        read = this.request(index, position + readTotal, chunk);
+      } catch (error) {
+        // A stalled worker makes the bridge unusable from here on.
+        this.giveUp();
+        throw error;
+      }
       if (read <= 0) break;
       target.set(this.shared.data.subarray(0, Math.min(read, chunk)), readTotal);
       readTotal += read;
@@ -90,12 +110,19 @@ export class FileBridge {
   }
 
   async close(): Promise<void> {
+    if (this.dead || this.closeStarted) return;
+    this.closeStarted = true;
     const { control } = this.shared;
     Atomics.store(control, CLOSE, 1);
     Atomics.store(control, REQ, 1);
     Atomics.notify(control, REQ);
-    this.spin(() => Atomics.load(control, CLOSE) === 0);
-    this.worker.terminate();
+    // A worker that never answers still must not leave the caller waiting.
+    if (this.spin(() => Atomics.load(control, CLOSE) === 0)) {
+      this.dead = true;
+      this.worker.terminate();
+    } else {
+      this.giveUp();
+    }
   }
 
   private index(kind: GameKind, name: string): number {
@@ -113,17 +140,32 @@ export class FileBridge {
     Atomics.store(control, REQ, 1);
     Atomics.notify(control, REQ);
     // Atomics.wait is forbidden here, so spin until the worker is done.
-    this.spin(() => Atomics.load(control, STATUS) === 1);
+    const file = this.files[index];
+    if (!this.spin(() => Atomics.load(control, STATUS) === 1)) {
+      throw new Error(`read timed out: ${file.kind}/${file.name} at ${position}`);
+    }
     const read = Atomics.load(control, LENGTH);
     if (Atomics.load(control, ERROR) === 1) {
-      throw new Error(`read failed: ${this.files[index].kind}/${this.files[index].name} at ${position}`);
+      throw new Error(`read failed: ${file.kind}/${file.name} at ${position}`);
     }
     return read;
   }
 
-  private spin(done: () => boolean): void {
+  // Marks the bridge unusable and kills the worker: the caller keeps running.
+  private giveUp(): void {
+    this.dead = true;
+    this.worker.terminate();
+  }
+
+  // Busy-wait: the worker answers in microseconds and cannot wake us. The
+  // time limit is checked every 1024 iterations so a stalled worker cannot
+  // block the main thread forever. Returns false on time-out.
+  private spin(done: () => boolean): boolean {
+    let iterations = 0;
+    const deadline = performance.now() + this.readTimeoutMs;
     while (!done()) {
-      // Busy-wait: the worker answers in microseconds and cannot wake us.
+      if ((++iterations & 1023) === 0 && performance.now() >= deadline) return false;
     }
+    return true;
   }
 }

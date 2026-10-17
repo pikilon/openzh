@@ -39,7 +39,13 @@ try {
     printErr: record,
     onAbort: (reason) => reportError(reason),
   };
-  await createGeneralsX(options);
+  // archives=opfs mounts the archives stored in OPFS into the engine's file
+  // system before it runs (docs/briefs/5b-mount-archives.md).
+  const factoryOptions =
+    params.get("archives") === "opfs"
+      ? await (await import("/dist/engine.js")).prepareEngineOptions(options)
+      : options;
+  await createGeneralsX(factoryOptions);
   if (window.__zhwpDone === undefined) window.__zhwpDone = { status: "resolved" };
 } catch (error) {
   reportError(error instanceof Error ? error.message : String(error));

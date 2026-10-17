@@ -7,7 +7,7 @@
     "serve": "npm run build && node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /engine=../build/webgpu/GeneralsMD --mount /dist=dist --mount /harness=tests/harness",
     "test": "playwright test",
     "test:smoke": "playwright test tests/smoke.spec.ts",
-    "build": "esbuild src/test-api.ts src/bridge-worker.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning"
+    "build": "esbuild src/test-api.ts src/bridge-worker.ts src/engine.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

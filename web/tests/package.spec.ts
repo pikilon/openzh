@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Contract of scripts/package.mjs (docs/briefs/32-static-package.md).
 //
@@ -75,6 +75,16 @@ function listFiles(dir: string): string[] {
     else if (entry.isFile()) files.push(path);
   }
   return files;
+}
+
+// The href of the first <link rel="icon"> in an HTML string, or null.
+function iconLinkHref(html: string): string | null {
+  for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+    if (!/\brel\s*=\s*["']icon["']/i.test(tag)) continue;
+    const href = /\bhref\s*=\s*["']([^"']*)["']/i.exec(tag);
+    if (href !== null) return href[1];
+  }
+  return null;
 }
 
 test("1: a fake engine folder produces the package tree and exits 0", ({}, info) => {
@@ -205,4 +215,24 @@ test("7: the last output line reports the out folder, file count and byte total"
   const bytes = files.reduce((total, file) => total + statSync(file).size, 0);
   expect(Number(match![2]), line).toBe(files.length);
   expect(Number(match![3]), line).toBe(bytes);
+});
+
+// Issue #103: the launcher's icon is part of the package, next to app/index.html.
+test("4: the package copies app/favicon.png and the packaged page links it", ({}, info) => {
+  const engine = fakeEngine(info);
+  const out = outputDir(info);
+
+  const result = runPackage(engine, out);
+  expect(result.status, report(result)).toBe(0);
+
+  const packagedIcon = join(out, "app", "favicon.png");
+  expect(existsSync(packagedIcon), packagedIcon).toBe(true);
+  expect(readFileSync(packagedIcon), "app/favicon.png bytes").toEqual(
+    readFileSync(join(WEB_ROOT, "app", "favicon.png")),
+  );
+
+  const packagedIndex = join(out, "app", "index.html");
+  const href = iconLinkHref(readFileSync(packagedIndex, "utf8"));
+  expect(href, "the packaged app/index.html has no icon link").not.toBeNull();
+  expect(fileURLToPath(new URL(href!, pathToFileURL(packagedIndex)))).toBe(packagedIcon);
 });

@@ -26,8 +26,8 @@ export function mountArchives(FS: any, bridge: FileBridge, files: StoredFile[]):
 * `read(stream, buffer, offset, length, position)`: reads through
   `bridge.readSync` into `buffer.subarray(offset, offset + length)` and
   returns the byte count. `llseek` supports SEEK_SET/CUR/END. Any write,
-  create, rename or unlink throws `FS.ErrnoError(63)` (EROFS... use the
-  numeric errno Emscripten defines for EPERM/EROFS consistently).
+  create, rename or unlink throws `FS.ErrnoError(63)` (EPERM in Emscripten's
+  errno numbering).
 
 ### `web/src/engine.ts`
 ```ts

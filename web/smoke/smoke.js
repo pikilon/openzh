@@ -32,9 +32,13 @@ try {
     throw new Error(`module ${moduleUrl} has no default-exported factory`);
   }
   const canvas = document.getElementById("canvas");
+  // arg=-headless&arg=-replay&arg=a.rep selects the engine arguments, in URL
+  // order and unchanged (docs/briefs/37-smoke-args.md). Without any arg the
+  // page keeps opening a window.
+  const engineArgs = params.getAll("arg");
   const options = {
     canvas,
-    arguments: ["-win"],
+    arguments: engineArgs.length > 0 ? engineArgs : ["-win"],
     print: record,
     printErr: record,
     onAbort: (reason) => reportError(reason),

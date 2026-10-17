@@ -835,6 +835,29 @@
         "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp"
       ],
       "summary": "The page mutes the engine when it is hidden or unfocused, through the existing AudioManager window-focus mute (system volumes saved and restored), and unmutes when it is visible and focused again."
+    },
+    {
+      "issue": 103,
+      "title": "Launcher: a Zero Hour favicon so the tab is recognisable",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/103-favicon.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test && npm run package",
+      "test_paths": [
+        "web/tests/launcher-favicon.spec.ts",
+        "web/tests/package.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/favicon.png",
+        "web/scripts/package.mjs"
+      ],
+      "summary": "The launcher links a 48x48 PNG favicon converted from the game's own launcher icon in EA's GPL source release (catalog 01_EA_GPL_Source_Releases), and the packager ships it next to app/index.html."
     }
   ]
 }

@@ -48,15 +48,14 @@ in the browser build, so in-game text renders.
 ## Acceptance criteria
 1. With the owner's game data, from Play until 20 s after `GENERALSX_LOAD_DONE`, `__zhwpLog` contains no line with `Unable to resolve font`.
 2. In the same run, the engine's file system contains the preloaded Liberation files (checked through `window.__zhwpModule.FS` on the smoke page with `archives=opfs`, or by the absence of warnings if the launcher is used).
-3. 20 s after `GENERALSX_LOAD_DONE`, a screenshot of the main menu's button column (the right-hand panel) has more distinct colours than the same region had before the change (text is drawn); the test stores both numbers in its output.
-4. The synthetic test suite still passes.
+3. The synthetic test suite still passes.
 
 ## Test paths
 * `web/tests/real-data-fonts.spec.ts`: local only, skipped unless
   `ZHWP_GAME_DIR` is set; same import as `web/tests/real-data-webgpu.spec.ts`;
-  screenshots only to the system temp folder. For criterion 3 the test may
-  use a fixed threshold measured on the current engine (state it in a
-  comment) instead of comparing two builds.
+  screenshots only to the system temp folder. Visible text is checked by
+  the owner by hand (owner's decision after the first attempt: the pixel
+  criterion was dropped).
 
 ## Allowed paths
 * `GeneralsMD/Code/Main/CMakeLists.txt`

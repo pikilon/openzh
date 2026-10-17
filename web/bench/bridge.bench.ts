@@ -6,7 +6,7 @@ import { test } from "@playwright/test";
 
 const SIZE = 1024 * 1024 * 1024; // 1 GiB
 
-test("file bridge throughput", async ({ page, browserName }) => {
+test("file bridge throughput", async ({ page }, info) => {
   test.setTimeout(600_000);
   await page.goto("/harness/index.html");
   await page.waitForFunction(() => (window as unknown as { zhwpReady?: boolean }).zhwpReady === true);
@@ -15,11 +15,19 @@ test("file bridge throughput", async ({ page, browserName }) => {
     await z.clearStored();
     const chunk = new Uint8Array(16 * 1024 * 1024);
     for (let i = 0; i < chunk.length; i++) chunk[i] = i & 0xff;
-    const parts: Blob[] = [];
-    for (let done = 0; done < size; done += chunk.length) parts.push(new Blob([chunk]));
+    // Import speed on a 256 MiB in-memory Blob (Brave cannot read a 1 GiB
+    // composed Blob in a temporary profile; real picks are disk-backed Files).
+    const importSize = 256 * 1024 * 1024;
     let t = performance.now();
-    await z.storeFiles([{ kind: "zh", name: "BenchZH.big", file: new Blob(parts) }]);
-    const importMBs = size / 1048576 / ((performance.now() - t) / 1000);
+    await z.storeFiles([{ kind: "zh", name: "ImportZH.big", file: new Blob(Array(importSize / chunk.length).fill(chunk)) }]);
+    const importMBs = importSize / 1048576 / ((performance.now() - t) / 1000);
+    await z.clearStored();
+    // The 1 GiB file is written straight into the store's OPFS layout.
+    const root = await navigator.storage.getDirectory();
+    const dir = await (await root.getDirectoryHandle("zhwp", { create: true })).getDirectoryHandle("zh", { create: true });
+    const writable = await (await dir.getFileHandle("BenchZH.big", { create: true })).createWritable();
+    for (let done = 0; done < size; done += chunk.length) await writable.write(chunk);
+    await writable.close();
     const bridge = await z.FileBridge.start(await z.listStored());
 
     const small = new Uint8Array(64 * 1024);
@@ -46,5 +54,5 @@ test("file bridge throughput", async ({ page, browserName }) => {
       sequentialMBs: Math.round(seqMBs),
     };
   }, SIZE);
-  console.log(JSON.stringify({ browser: browserName, ...result }));
+  console.log(JSON.stringify({ browser: info.project.name, ...result }));
 });

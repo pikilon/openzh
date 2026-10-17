@@ -10,6 +10,8 @@ the browser tests. Root `AGENTS.md` rules apply; these add to them.
 * Every response the dev server sends carries COOP `same-origin`, COEP
   `require-corp` and CORP `same-origin`: threads and `SharedArrayBuffer`
   need cross-origin isolation.
-* Tests: Playwright (`npm test`). The engine must be built first with
+* Tests: Playwright (`npm test`) in Brave only (D-04); `BRAVE_PATH` overrides
+  the binary. Manual checks use Brave or the agent's built-in browser, never
+  Chrome or Firefox. The engine must be built first with
   `scripts/build-webgpu.sh` at the repository root.
 * Keep dependencies few and pinned to exact versions.

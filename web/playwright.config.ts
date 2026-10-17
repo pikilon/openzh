@@ -14,11 +14,18 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 20_000,
   },
+  // Owner's rule (D-04): tests run only in Brave, the browser installed on the
+  // owner's machine. Override the binary with BRAVE_PATH.
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"], launchOptions: { args: ["--enable-unsafe-webgpu"] } },
+      name: "brave",
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          executablePath: process.env.BRAVE_PATH ?? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+          args: ["--enable-unsafe-webgpu"],
+        },
+      },
     },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
   ],
 });

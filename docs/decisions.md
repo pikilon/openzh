@@ -69,3 +69,15 @@ Rejected for now: Emscripten WASMFS with its OPFS backend (needs a pthreads
 build and relinking the engine; revisit if the bridge is too slow), loading
 archives into JS memory (several GB per tab), and moving the engine into a
 worker (rendering and input live on the main thread today).
+
+## D-04: Test only in Brave and the agent's built-in browser
+
+Date: 2026-10-17. Owner's instruction.
+
+* Automated browser tests (Playwright) run in Brave, the browser installed on
+  the owner's machine, through its executable (`BRAVE_PATH` overrides it).
+* Manual and exploratory checks use Brave or the agent's built-in browser.
+* Chrome and Firefox are not tested; no time is spent on other browsers.
+* Conflict to resolve: `AGENTS.md` phase 1 says "playable in current Chrome
+  and Firefox" and issue #7 repeats it. Until the owner restates the target,
+  phase 1 is verified in Brave only.

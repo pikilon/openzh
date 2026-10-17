@@ -30,6 +30,9 @@ const canvas = byId<HTMLCanvasElement>("canvas");
 const engineError = byId<HTMLElement>("engine-error");
 const picker = byId<HTMLElement>("picker");
 const unsupported = byId<HTMLElement>("unsupported");
+const playControls = byId<HTMLElement>("play-controls");
+const screen = byId<HTMLElement>("screen");
+const fullscreen = byId<HTMLButtonElement>("fullscreen");
 
 // The path the folder picker gives the file under: `webkitRelativePath`
 // (empty when the browser gave none, then the name alone).
@@ -249,12 +252,90 @@ async function importLocalGameData(): Promise<void> {
   await storeEntries(entries, stored);
 }
 
+// Issue #91: the game plays in the page, and the Fullscreen button above it
+// puts #screen in the browser's fullscreen mode. Play never asks for it: SDL
+// drops a page-owned fullscreen while the engine starts, so the player presses
+// the button once the game is up, and again after any exit. The engine and its
+// render resolution do not change: only the canvas's CSS size does, because the
+// engine maps the mouse through the element box.
+let engineFailed = false;
+
+// A browser without the Fullscreen API offers no button at all.
+function canFullscreen(): boolean {
+  return typeof screen.requestFullscreen === "function";
+}
+
+function leaveFullscreen(): void {
+  if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => undefined);
+}
+
+// The largest box with the drawing buffer's aspect ratio that fits the screen;
+// the flex layout of #screen:fullscreen centres it. The drawing buffer itself
+// is never written.
+function fitFullscreenCanvas(): void {
+  if (document.fullscreenElement !== screen) return;
+  const bufferWidth = canvas.width;
+  const bufferHeight = canvas.height;
+  if (bufferWidth <= 0 || bufferHeight <= 0) return;
+  const scale = Math.min(window.innerWidth / bufferWidth, window.innerHeight / bufferHeight);
+  canvas.style.width = `${bufferWidth * scale}px`;
+  canvas.style.height = `${bufferHeight * scale}px`;
+}
+
+// Out of fullscreen #80's page CSS fits the canvas to the page again.
+function unfullscreenCanvas(): void {
+  canvas.style.width = "";
+  canvas.style.height = "";
+}
+
+function onFullscreenChange(): void {
+  if (document.fullscreenElement !== screen) {
+    unfullscreenCanvas();
+    return;
+  }
+  // A failed engine must not keep the screen: the message has to stay readable
+  // and #fullscreen is not offered again, even when the browser grants a
+  // request that was still pending when the engine aborted.
+  if (engineFailed) {
+    leaveFullscreen();
+    return;
+  }
+  fitFullscreenCanvas();
+  // The keyboard input follows the game (#28) without another click.
+  canvas.focus();
+  // The fullscreen layout lands in the next frame: fit again then, against the
+  // screen size it really gives the canvas.
+  window.requestAnimationFrame(fitFullscreenCanvas);
+}
+
+function enterFullscreen(): void {
+  if (!canFullscreen()) return;
+  const requested = screen.requestFullscreen();
+  void Promise.resolve(requested).then(
+    () => {
+      if (engineFailed) leaveFullscreen();
+      else {
+        fitFullscreenCanvas();
+        canvas.focus();
+      }
+    },
+    // A refused request keeps the game windowed and shows no error: the
+    // button stays so the player can retry.
+    () => undefined,
+  );
+}
+
 async function playNow(): Promise<void> {
   play.disabled = true;
   input.disabled = true;
   canvas.hidden = false;
   canvas.focus();
   picker.hidden = true;
+  // The controls sit above the game from Play on, so the player can go
+  // fullscreen while it runs.
+  engineFailed = false;
+  playControls.hidden = false;
+  fullscreen.hidden = !canFullscreen();
   status.textContent = "Starting";
   // The `module` query parameter lets tests start a fake engine instead of the
   // real one (docs/briefs/29-launcher-errors.md), the same rule as smoke.js.
@@ -272,6 +353,11 @@ async function playNow(): Promise<void> {
     status.textContent = `Engine failed: ${text}`;
     engineError.textContent = text;
     engineError.hidden = false;
+    // #91: the failure ends the playing view's fullscreen session, and the
+    // button is not offered again, so the message stays readable.
+    engineFailed = true;
+    fullscreen.hidden = true;
+    leaveFullscreen();
     record("[page] " + text);
     page.__zhwpDone = { status: "error", message: text };
   };
@@ -336,6 +422,21 @@ if (missing.length > 0) {
   canvas.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   });
+
+  // The player asks for fullscreen from the click's own user gesture; the
+  // browser's Esc, or the page's exit, brings the windowed layout back (#91).
+  fullscreen.addEventListener("click", () => {
+    enterFullscreen();
+  });
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+
+  // The engine writes its render resolution into the canvas backing size, so a
+  // change while fullscreen has to re-fit the canvas to the new aspect ratio.
+  new MutationObserver(fitFullscreenCanvas).observe(canvas, {
+    attributes: true,
+    attributeFilter: ["width", "height"],
+  });
+  window.addEventListener("resize", fitFullscreenCanvas);
 
   // The development server may expose the owner's game folder (issue #72):
   // import it on load, exactly as a folder pick, when it is there. Doing it

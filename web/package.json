@@ -8,6 +8,7 @@
     "test": "playwright test",
     "test:smoke": "playwright test tests/smoke.spec.ts",
     "build": "esbuild src/test-api.ts src/bridge-worker.ts src/engine.ts src/main.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning",
+    "package": "npm run build && node scripts/package.mjs",
     "bench": "playwright test --config playwright.bench.config.ts"
   },
   "devDependencies": {

@@ -1,0 +1,17 @@
+# Tracked files that are accepted despite a forbidden extension. They come
+# from EA's GPL source release and are part of the ported source tree, not
+# game data. One repository-relative path per line; blank lines and lines
+# starting with '#' are ignored. Applies to tracked-files mode only.
+Core/Libraries/Source/WWVegas/WW3D2/RequiredAssets/AddProjectorGradient.tga
+Core/Libraries/Source/WWVegas/WW3D2/RequiredAssets/MultProjectorGradient.tga
+Core/Libraries/Source/WWVegas/WW3D2/RequiredAssets/ShatterPlanes0.w3d
+Core/Libraries/Source/WWVegas/WW3D2/RequiredAssets/w3d_missing_texture.tga
+Core/Tools/Autorun/English/Present.wav
+Core/Tools/Autorun/English/Rock-n-Roll.wav
+Core/Tools/Autorun/mouse.wav
+Core/Tools/W3DView/Res/Light.w3d
+Core/Tools/W3DView/Res/cursor.tga
+Core/Tools/W3DView/Res/grab.tga
+Core/Tools/W3DView/Res/orbit.tga
+Core/Tools/W3DView/Res/zoom.tga
+GeneralsZH/Data/Window/Menus/ExtrasMenu.wnd

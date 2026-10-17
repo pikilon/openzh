@@ -1921,6 +1921,7 @@ FontCharsClass::Free_GDI_Font ()
 // Tier 1: Probe local/bundled fonts/ directory (app bundle, game root, cwd)
 // Tier 2: System Fontconfig match (desktop Linux/macOS)
 // Tier 3: Guaranteed fallback to bundled Arial (Liberation Sans)
+// GeneralsX @bugfix zhwp 17/10/2026 The browser build ends with a last resort to the same Liberation files before warning
 ////////////////////////////////////////////////////////////////////////////////////
 const char *
 FontCharsClass::Locate_Font_FontConfig (const char *font_name)
@@ -1987,6 +1988,18 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 					   strcmp( normalized, "liberationmono" ) == 0 ||
 					   strcmp( normalized, "liberationmonobold" ) == 0);
 
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @bugfix zhwp 17/10/2026 The browser build maps the UI's Tahoma, Arial Unicode MS and FixedSys faces to
+	// the Liberation files it embeds; a native build keeps resolving them through the tiers and fontconfig as before.
+	if ( strcmp( normalized, "tahoma" ) == 0 || strcmp( normalized, "tahomabold" ) == 0 ||
+	     strcmp( normalized, "arialunicodems" ) == 0 || strcmp( normalized, "arialunicodemsbold" ) == 0 ) {
+		is_arial = true;
+	}
+	if ( strcmp( normalized, "fixedsys" ) == 0 || strcmp( normalized, "fixedsysbold" ) == 0 ) {
+		is_courier = true;
+	}
+#endif
+
 	// GeneralsX @feature felipebraz 26/09/2026 Font Awesome 6 Brands font resolution
 	bool is_fa_brands = (strcmp( normalized, "fontawesome6brands" ) == 0 ||
 	                     strcmp( normalized, "fontawesome6brands.ttf" ) == 0 ||
@@ -2007,6 +2020,11 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 		candidates[candidate_count++] = "LiberationSans-Regular";
 		candidates[candidate_count++] = "liberationsans-regular";
 		candidates[candidate_count++] = "LiberationSans";
+		// GeneralsX @bugfix zhwp 17/10/2026 The browser build embeds Liberation Sans under its game file names
+		if ( is_bold ) {
+			candidates[candidate_count++] = "arialbold.ttf";
+		}
+		candidates[candidate_count++] = "arial.ttf";
 	} else if ( is_times ) {
 		if ( is_bold ) {
 			candidates[candidate_count++] = "LiberationSerif-Bold";
@@ -2015,6 +2033,8 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 		candidates[candidate_count++] = "LiberationSerif-Regular";
 		candidates[candidate_count++] = "liberationserif-regular";
 		candidates[candidate_count++] = "LiberationSerif";
+		// GeneralsX @bugfix zhwp 17/10/2026 The browser build embeds Liberation Serif as timesnewroman.ttf, the only serif file
+		candidates[candidate_count++] = "timesnewroman.ttf";
 	} else if ( is_courier ) {
 		if ( is_bold ) {
 			candidates[candidate_count++] = "LiberationMono-Bold";
@@ -2023,6 +2043,8 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 		candidates[candidate_count++] = "LiberationMono-Regular";
 		candidates[candidate_count++] = "liberationmono-regular";
 		candidates[candidate_count++] = "LiberationMono";
+		// GeneralsX @bugfix zhwp 17/10/2026 The browser build embeds Liberation Mono as couriernew.ttf, the only mono file
+		candidates[candidate_count++] = "couriernew.ttf";
 	} else if ( is_fa_brands ) {
 		candidates[candidate_count++] = "fa-brands-400";
 		candidates[candidate_count++] = "fa-brands-400.ttf";
@@ -2115,6 +2137,29 @@ FontCharsClass::Locate_Font_FontConfig (const char *font_name)
 		}
 	}
 
+#if defined(__EMSCRIPTEN__)
+	//
+	// GeneralsX @bugfix zhwp 17/10/2026 The browser build has no system fonts and embeds only the four Liberation
+	// files, so every remaining face, the symbol ones included, resolves to Liberation Sans instead of no font.
+	//
+	static const char *web_fallback_names_bold[] = {
+		"arialbold.ttf",
+		"arial.ttf",
+		"LiberationSans-Bold",
+		"LiberationSans-Regular"
+	};
+	static const char *web_fallback_names_reg[] = {
+		"arial.ttf",
+		"LiberationSans-Regular"
+	};
+	const char *const *web_fnames = is_bold ? web_fallback_names_bold : web_fallback_names_reg;
+	const int web_fcount = is_bold ? 4 : 2;
+	if ( Platform::FindLocalFontFile( web_fnames, web_fcount, candidate_path, sizeof(candidate_path) ) ) {
+		FreetypeFontPath = candidate_path;
+		return FreetypeFontPath;
+	}
+#endif
+
 	fprintf( stderr, "[Font] WARNING: Unable to resolve font '%s' (all tiers exhausted)\n", font_name );
 	fflush( stderr );
 	return nullptr;
@@ -2159,8 +2204,9 @@ FontCharsClass::Create_Freetype_Font (const char *font_name)
 	const char *font_path = Locate_Font_FontConfig( font_name );
 #if defined(SAGE_USE_WEBGPU)
 	// GeneralsX @feature 17/10/2026 Ported from origami-ltd/wasm-generals: the browser build preloads one font at this path.
+	// GeneralsX @bugfix zhwp 17/10/2026 The embedded font is Liberation Sans under its game name, so the last resort points at it (issue #79)
 	if ( font_path == nullptr ) {
-		font_path = "/fonts/GeneralsX.ttf";
+		font_path = "/fonts/arial.ttf";
 	}
 #endif
 	if ( font_path == nullptr ) {

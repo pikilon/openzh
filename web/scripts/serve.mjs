@@ -1,11 +1,14 @@
 // Static development server for the browser engine build (docs/briefs/4-smoke-harness.md).
 //
 // Usage (from web/): node scripts/serve.mjs --port <n> --mount <urlPrefix>=<dir> [--mount ...]
+//   [--gamedata <dir>]
 // Serves only files under each mount, with the cross-origin isolation headers
 // every response needs so the engine can use threads and SharedArrayBuffer.
+// With --gamedata it also lists and serves the player's local game archives
+// (docs/briefs/72-local-gamedata.md), read-only and on 127.0.0.1 only.
 import { createServer } from "node:http";
-import { createReadStream, statSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { createReadStream, readdirSync, statSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 
 const TYPES = new Map([
@@ -17,10 +20,37 @@ const TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
 ]);
 
+const GAMEDATA_INDEX = "/gamedata/index.json";
+const GAMEDATA_FILES = "/gamedata/files/";
+
 function usage(message) {
   console.error(message);
-  console.error("usage: node scripts/serve.mjs --port <n> --mount <urlPrefix>=<dir> [--mount ...]");
+  console.error("usage: node scripts/serve.mjs --port <n> --mount <urlPrefix>=<dir> [--mount ...] [--gamedata <dir>]");
   process.exit(2);
+}
+
+// Lists every regular .big file under `root` at any depth: relative,
+// `/`-separated paths sorted by path, with the bytes on disk at start.
+function listArchives(root) {
+  const archives = [];
+  const walk = (dir, segments) => {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute, [...segments, entry.name]);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".big")) {
+        archives.push({
+          path: [...segments, entry.name].join("/"),
+          size: statSync(absolute).size,
+          file: absolute,
+        });
+      }
+    }
+  };
+  walk(root, []);
+  archives.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return archives;
 }
 
 function parseOptions(argv) {
@@ -29,6 +59,7 @@ function parseOptions(argv) {
     options: {
       port: { type: "string" },
       mount: { type: "string", multiple: true },
+      gamedata: { type: "string" },
     },
     allowPositionals: true,
   });
@@ -58,7 +89,21 @@ function parseOptions(argv) {
     mounts.set(urlPrefix, root);
   }
   if (mounts.size === 0) usage("at least one --mount <urlPrefix>=<dir> is required");
-  return { port, mounts };
+  let gamedata = null;
+  if (values.gamedata !== undefined && values.gamedata !== "") {
+    const root = resolve(values.gamedata);
+    let stat;
+    try {
+      stat = statSync(root);
+    } catch {
+      usage(`--gamedata path does not exist: ${values.gamedata}`);
+    }
+    if (!stat.isDirectory()) usage(`--gamedata path is not a directory: ${values.gamedata}`);
+    const archives = listArchives(root);
+    const files = new Map(archives.map((archive) => [archive.path, archive.file]));
+    gamedata = { archives, files };
+  }
+  return { port, mounts, gamedata };
 }
 
 // Resolves a decoded request path to a file inside one of the mounts, or null.
@@ -102,21 +147,7 @@ function notFound(response) {
   response.end();
 }
 
-const { port, mounts } = parseOptions(process.argv.slice(2));
-
-const server = createServer((request, response) => {
-  let pathname;
-  try {
-    pathname = decodeURIComponent(new URL(request.url ?? "/", "http://127.0.0.1").pathname);
-  } catch {
-    notFound(response);
-    return;
-  }
-  const file = resolveFile(pathname, mounts);
-  if (file === null) {
-    notFound(response);
-    return;
-  }
+function sendFile(request, response, file, type) {
   let stat;
   try {
     stat = statSync(file);
@@ -129,7 +160,7 @@ const server = createServer((request, response) => {
     return;
   }
   setHeaders(response);
-  response.setHeader("Content-Type", contentType(file));
+  response.setHeader("Content-Type", type);
   response.setHeader("Content-Length", String(stat.size));
   response.statusCode = 200;
   if (request.method === "HEAD") {
@@ -139,7 +170,61 @@ const server = createServer((request, response) => {
   const stream = createReadStream(file);
   stream.on("error", () => response.destroy());
   stream.pipe(response);
+}
+
+const { port, mounts, gamedata } = parseOptions(process.argv.slice(2));
+
+const server = createServer((request, response) => {
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(request.url ?? "/", "http://127.0.0.1").pathname);
+  } catch {
+    notFound(response);
+    return;
+  }
+  if (gamedata !== null) {
+    if (pathname === GAMEDATA_INDEX) {
+      const body = JSON.stringify({
+        files: gamedata.archives.map((archive) => ({ path: archive.path, size: archive.size })),
+      });
+      setHeaders(response);
+      response.setHeader("Content-Type", "application/json");
+      response.setHeader("Content-Length", String(Buffer.byteLength(body)));
+      response.statusCode = 200;
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+      response.end(body);
+      return;
+    }
+    if (pathname.startsWith(GAMEDATA_FILES)) {
+      // Only the exact paths listed at start are served: encoded traversal
+      // decodes to a path outside that set and gets a 404 like any other miss.
+      const file = gamedata.files.get(pathname.slice(GAMEDATA_FILES.length));
+      if (file === undefined) {
+        notFound(response);
+        return;
+      }
+      sendFile(request, response, file, "application/octet-stream");
+      return;
+    }
+    if (pathname === "/gamedata" || pathname.startsWith("/gamedata/")) {
+      notFound(response);
+      return;
+    }
+  }
+  const file = resolveFile(pathname, mounts);
+  if (file === null) {
+    notFound(response);
+    return;
+  }
+  sendFile(request, response, file, contentType(file));
 });
+
+if (gamedata !== null) {
+  console.log(`game data: ${gamedata.archives.length} archives`);
+}
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`listening on http://127.0.0.1:${port}`);

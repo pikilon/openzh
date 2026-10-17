@@ -1,16 +1,20 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // The engine must be built first: scripts/build-webgpu.sh (repository root).
+// ZHWP_PORT picks the dev server port (default 4173) so several checkouts can
+// run their tests at the same time.
+const port = Number(process.env.ZHWP_PORT ?? 4173);
+
 export default defineConfig({
   testDir: "tests",
   timeout: 90_000,
   fullyParallel: false,
   reporter: [["list"]],
   globalSetup: "./tests/global-setup.ts",
-  use: { baseURL: "http://127.0.0.1:4173" },
+  use: { baseURL: `http://127.0.0.1:${port}` },
   webServer: {
-    command: "npm run serve",
-    url: "http://127.0.0.1:4173/smoke/index.html",
+    command: `npm run build && node scripts/serve.mjs --port ${port} --mount /smoke=smoke --mount /app=app --mount /engine=../build/webgpu/GeneralsMD --mount /dist=dist --mount /harness=tests/harness`,
+    url: `http://127.0.0.1:${port}/smoke/index.html`,
     reuseExistingServer: false,
     timeout: 20_000,
   },

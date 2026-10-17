@@ -50,5 +50,7 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-17 | #78 | tests | deepseek-flash | ok | 1.6 min | real-data test fails on the old engine (call 42) |
 | 2026-10-17 | #78 | code | deepseek-flash | ok | 0.5 min | C++; compiled first try, checks pass (call 43) |
 | 2026-10-17 | #79 | tests | deepseek-flash | failed | 16.6 min | criterion 3 test passes before the code; branch failed/79-tests-deepseek-flash (call 44) |
+| 2026-10-17 | #79 | tests | deepseek-flash (dsh, owner) | ok | – | revised brief; 2 new real-data tests fail on the old engine |
+| 2026-10-17 | #79 | code | deepseek-flash (dsh, owner) | ok | – | C++/CMake; compiled first try; real-data and synthetic checks pass (one #74 flake, rerun) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

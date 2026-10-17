@@ -723,7 +723,7 @@
       "issue": 79,
       "title": "Browser build: fonts for the game's text",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",

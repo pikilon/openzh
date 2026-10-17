@@ -62,6 +62,15 @@ and the page does not scroll.
   engine under `/harness/layout/` that sets the drawing buffer to 1280x720.
 * `web/tests/harness/layout/`: the fakes.
 
+Criteria 1, 3, 5 and 6 are guards: they already hold on today's code (a
+768x432 canvas inside a page that does not scroll, centred, a 768 px text
+column, an untouched drawing buffer) and must keep holding after the change.
+The tests that fail before the implementation are 2 and 4: today the canvas
+does not start at the bottom of `#play-controls` and stays 768 px wide at
+1920x1080. They are the ones that gate the change; the check must fail before
+the implementation because of them, and the guard tests must not be weakened
+to make that happen.
+
 ## Allowed paths
 * `web/app/index.html`
 * `web/src/main.ts`

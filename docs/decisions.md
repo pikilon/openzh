@@ -101,11 +101,17 @@ split of work.
   the owner's DeepSeek credits, never through OpenRouter.
 * If either step fails (time-out, BLOCKED, the check does not pass, tests
   that do not fail before implementation, edits outside the allowed paths),
-  the task gets the `escalate` label and is retried one rung up:
-  `openrouter/xiaomi/mimo-v2.6-pro`, then `sonnet` (the `llm` MCP's
-  `claude_agent`). DeepSeek V4 Pro is not used: it costs more and did worse
-  than Flash. Trivial tasks labelled `local-model-ok` may try the free local
-  model (`scripts/local-agent.sh`) first for the code.
+  the task stops there: labels `blocked` and `escalate`, and the next task
+  goes on. Escalation is manual and done in separate passes: only the owner
+  authorises retrying a step on `openrouter/xiaomi/mimo-v2.6-pro` or on
+  `sonnet` (the `llm` MCP's `claude_agent`); no agent starts either model on
+  its own. DeepSeek V4 Pro is not used: it costs more and did worse than
+  Flash, and it is removed from the `llm` MCP. Trivial tasks labelled
+  `local-model-ok` may try the free local model (`scripts/local-agent.sh`)
+  first for the code.
+* Delegated agents return results only (verdict, check result, changed
+  files), never implementation context: no explanations, summaries of the
+  code or reasoning. The architect neither asks for nor reads that context.
 * Failed attempts are kept (branch, worktree log, agent output) and recorded
   (`report_outcome` and `docs/model-results.md`). Whether the tests or the
   code were at fault is analysed later with Sonnet, when the owner decides;

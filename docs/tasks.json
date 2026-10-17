@@ -813,6 +813,28 @@
         "web/src/main.ts"
       ],
       "summary": "The playing view is capped by the 48rem launcher column and a 15rem height margin; while playing, the canvas takes the largest rectangle below the text at its drawing buffer's aspect ratio, with no page scroll."
+    },
+    {
+      "issue": 99,
+      "title": "Launcher: mute the game when the page is not focused",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/99-mute-unfocused.md",
+      "depends_on": [],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-mute.spec.ts",
+        "web/tests/harness/mute/"
+      ],
+      "allowed_paths": [
+        "web/src/main.ts",
+        "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp"
+      ],
+      "summary": "The page mutes the engine when it is hidden or unfocused, through the existing AudioManager window-focus mute (system volumes saved and restored), and unmutes when it is visible and focused again."
     }
   ]
 }

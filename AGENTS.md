@@ -136,8 +136,9 @@ Never send a large or speculative PR upstream without the owner's approval.
 * Work follows the test-driven pipeline of D-05: the architect (strongest
   model) writes specs only; DeepSeek V4.1 Flash (official DeepSeek API, the
   owner's DeepSeek credits, never OpenRouter) writes the tests and, in a
-  separate run, the code; failures escalate to mimo-v2.6-pro and then
-  Sonnet. Procedure: `.agents/skills/tdd-pipeline/SKILL.md`; the free local
+  separate run, the code. A failed step blocks the task; escalating it to
+  mimo-v2.6-pro or Sonnet needs the owner's authorisation, in a later pass.
+  Delegated agents return results only, never implementation context. Procedure: `.agents/skills/tdd-pipeline/SKILL.md`; the free local
   runner is in `.agents/skills/local-delegation/SKILL.md`.
 * Rules live in this file, in `AGENTS.md` files under subdirectories, in
   `.agents/skills/<name>/SKILL.md` and in `.agents/agents/<name>/agent.md`, all

@@ -33,7 +33,8 @@ by writing implementation code.
 7. Stop after 10 failed check runs, or as soon as the brief is ambiguous or
    the task needs a path you were not allowed.
 
-Your final answer is one line:
+Your final answer is results only: no explanation of what you changed or
+how, no code summary, no reasoning. It is one line:
 
 ```
 DONE

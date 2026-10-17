@@ -30,7 +30,7 @@ You run as step 2 of the pipeline in `.agents/skills/tdd-pipeline/SKILL.md`.
 4. Never write or change product code, the brief, other tests or config.
 5. Do not commit.
 
-Final answer:
+Final answer, results only (no explanation, summary or reasoning):
 
 ```
 DONE

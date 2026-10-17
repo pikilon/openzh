@@ -84,6 +84,23 @@
         max-height: calc(100vh - 12rem);
         background: #000;
       }
+      /* Issue #97: from Play on the page is the window's width and the canvas
+         takes the space below #play-controls (src/main.ts sizes it), so the
+         launcher's column no longer caps the game. The text keeps its readable
+         column, and no page padding is left below the canvas to scroll. */
+      body.playing {
+        max-width: none;
+        padding-bottom: 0;
+      }
+      body.playing h1,
+      body.playing main > p.note {
+        max-width: 48rem;
+      }
+      body.playing #canvas {
+        margin-top: 0;
+        max-width: none;
+        max-height: none;
+      }
       /* Fullscreen (#91) is #screen's: the canvas is displayed at the largest
          size that fits the screen at the drawing buffer's aspect ratio, and the
          letterbox is the background around it (a stretched canvas would

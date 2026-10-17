@@ -123,11 +123,14 @@ for (const name of ENGINE_REQUIRED) {
 
 const dist = join(WEB_ROOT, "dist");
 const appIndex = join(WEB_ROOT, "app", "index.html");
+const appIcon = join(WEB_ROOT, "app", "favicon.png");
 requireDirectory(dist, "dist");
 statSync(appIndex).isFile() || fail(`launcher page is not a file: ${appIndex}`);
+statSync(appIcon).isFile() || fail(`launcher icon is not a file: ${appIcon}`);
 
 mkdirSync(join(out, "app"), { recursive: true });
 copyFileSync(appIndex, join(out, "app", "index.html"));
+copyFileSync(appIcon, join(out, "app", "favicon.png"));
 copyDirectory(dist, join(out, "dist"), () => true);
 
 mkdirSync(join(out, "engine"), { recursive: true });

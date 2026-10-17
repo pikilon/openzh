@@ -39,5 +39,9 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-17 | #39 | code | deepseek-flash | ok | 2.3 min | check passes from clean checkout, only allowed paths (call 31) |
 | 2026-10-17 | #42 | tests | deepseek-flash | ok | 4.1 min | new tests fail, only test paths (call 32) |
 | 2026-10-17 | #42 | code | deepseek-flash | ok | 1.8 min | check passes from clean checkout, only allowed paths (call 33) |
+| 2026-10-17 | #70 | tests | deepseek-flash | ok | 2.5 min | new tests fail, only test paths (call 34) |
+| 2026-10-17 | #70 | code | deepseek-flash | ok | 5.4 min | check passes from clean checkout, only allowed paths (call 35) |
+| 2026-10-17 | #72 | tests | deepseek-flash | ok | 11.1 min | 11 new tests fail; flaky main tests seen (#74) (call 36) |
+| 2026-10-17 | #72 | code | deepseek-flash | ok | 2.6 min | check passes twice from clean checkout (call 37) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

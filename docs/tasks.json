@@ -616,7 +616,7 @@
       "issue": 70,
       "title": "Launcher: the storage estimate must warn, not refuse the import",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -637,7 +637,7 @@
       "issue": 72,
       "title": "Launcher: import the local game folder automatically in development",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
@@ -658,6 +658,22 @@
         "web/package.json"
       ],
       "summary": "npm run serve exposes ZHWP_GAME_DIR read-only on 127.0.0.1 and the launcher imports it into OPFS on load; no manual folder pick on the owner's machine."
+    },
+    {
+      "issue": 74,
+      "title": "Flaky tests on main: launcher incomplete-folder and user-files #5",
+      "phase": 1,
+      "status": "escalate",
+      "blocked": true,
+      "blocked_by": "owner-authorised analysis pass",
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "Two existing tests fail intermittently on main (2/15 before #70, 7/15 after); kept for analysis."
     }
   ]
 }

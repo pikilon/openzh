@@ -173,7 +173,9 @@
       "local_model_ok": false,
       "brief": null,
       "depends_on": [
-        70
+        77,
+        78,
+        79
       ],
       "check": "cd web && ZHWP_GAME_DIR=<install> npx playwright test tests/real-data.spec.ts",
       "test_paths": [],
@@ -674,6 +676,86 @@
       "test_paths": [],
       "allowed_paths": [],
       "summary": "Two existing tests fail intermittently on main (2/15 before #70, 7/15 after); kept for analysis."
+    },
+    {
+      "issue": 77,
+      "title": "WebGPU: render passes must get a depth-stencil format, not a colour texture",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/77-depth-stencil-format.md",
+      "depends_on": [],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && npx playwright test tests/real-data-webgpu.spec.ts && env -u ZHWP_GAME_DIR npx playwright test",
+      "test_paths": [
+        "web/tests/real-data-webgpu.spec.ts"
+      ],
+      "allowed_paths": [
+        "Core/GameEngineDevice/Source/WebGPUDevice/WebGPUD3D8.cpp"
+      ],
+      "summary": "Most frames are dropped because a 512x512 RGBA8 texture is bound as depth-stencil attachment: black canvas with flicker."
+    },
+    {
+      "issue": 78,
+      "title": "WebGPU: upload the small mip levels of compressed textures",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/78-compressed-small-mips.md",
+      "depends_on": [
+        77
+      ],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && npx playwright test tests/real-data-textures.spec.ts && env -u ZHWP_GAME_DIR npx playwright test",
+      "test_paths": [
+        "web/tests/real-data-textures.spec.ts"
+      ],
+      "allowed_paths": [
+        "Core/GameEngineDevice/Source/WebGPUDevice/WebGPUD3D8.cpp"
+      ],
+      "summary": "DXT mip levels under 4x4 fail WriteTexture validation; round copies up to whole blocks."
+    },
+    {
+      "issue": 79,
+      "title": "Browser build: fonts for the game's text",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": null,
+      "depends_on": [],
+      "check": null,
+      "test_paths": [],
+      "allowed_paths": [],
+      "summary": "The browser build resolves no font (Times New Roman, Arial, ...), so no text renders. Which font files may ship with the build is the owner's decision."
+    },
+    {
+      "issue": 80,
+      "title": "Launcher: the game canvas fits the page",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/80-canvas-fit.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/launcher-canvas.spec.ts",
+        "web/tests/harness/canvas/"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts"
+      ],
+      "summary": "The 1024x768 canvas overflows the launcher column; scale it to fit with its aspect ratio."
     }
   ]
 }

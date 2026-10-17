@@ -16,7 +16,8 @@ Written 2026-10-17. Revisit after the first run on real game data (#33).
   The web wrapper imports the player's folder into OPFS, mounts it through
   the synchronous bridge (D-03), persists user data (IDBFS) and has a
   launcher page. Browser tests run in Brave only (D-04).
-* Blocked on the owner: game data (#6), native toolchain (#14). Public CI is
+* Game data (#6) is available on the owner's machine through `ZHWP_GAME_DIR`.
+  Blocked on the owner: native toolchain (#14). Public CI is
   deferred (#2).
 
 ## Phase 1: playable in the browser
@@ -105,7 +106,7 @@ their own CRC baselines (#55).
 
 ## Dependencies outside the task list
 
-* #6 game data (owner): blocks #33–#36 and #41, and through them the phase 1
+* #6 game data (owner): available locally via `ZHWP_GAME_DIR` since 2026-10-17; it blocked #33–#36 and #41, and through them the phase 1
   and phase 2 exits.
 * #14 native build (owner action on the toolchain): blocks #43, #44.
 * #2 public CI (deferred): until it is picked up, every check runs locally

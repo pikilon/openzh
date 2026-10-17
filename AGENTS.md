@@ -110,6 +110,15 @@ Never send a large or speculative PR upstream without the owner's approval.
   choice while the repository is private; before it goes public or is
   published as a playable site, raise the trademark question with the owner.
 
+## Local Game Data
+
+The owner's machine has a legitimate copy of the game (Generals 1.0 and Zero
+Hour 1.04) outside the repository. Tests and manual checks that need it read
+the folder from `ZHWP_GAME_DIR` (set in the owner's shell; the exact path is in
+the gitignored `CLAUDE.local.md`). If the variable is set and the folder
+exists, use it: you do not need to ask the owner to install anything. Never
+copy it into the repository, build output, CI or artifacts.
+
 ## Way of Working
 
 * Everything in the repository and on GitHub is English. Chat with the owner

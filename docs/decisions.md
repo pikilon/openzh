@@ -45,3 +45,27 @@ Date: 2026-10-16.
 * All agent instructions are plain Markdown readable by any harness:
   `AGENTS.md` files, `.agents/skills/` and `.agents/agents/`. No
   harness-specific rule files.
+
+## D-03: Game archives reach the engine through OPFS and a synchronous worker bridge
+
+Date: 2026-10-17. Issue #5.
+
+* The engine opens `/GeneralsZH/*.big` and `/Generals/*.big` with ordinary
+  synchronous file calls, and the archives are several GB while the WASM heap
+  is a fixed 2 GiB, so archives are never copied into the Emscripten heap or
+  into an in-memory file system.
+* The player's chosen files are copied once into OPFS. A dedicated worker
+  opens them with `FileSystemSyncAccessHandle`; the main thread reads byte
+  ranges synchronously through a `SharedArrayBuffer` request/response block
+  (the main thread spins on `Atomics.load`, because `Atomics.wait` is not
+  allowed there). An Emscripten file system mount exposes the stored files at
+  the paths the engine expects, with `readdir`/`stat`/`read` backed by the
+  bridge.
+* This is the architecture wasm-generals describes ("synchronous worker +
+  SharedArrayBuffer file bridge"), written here from scratch because its
+  implementation lives in unpublished packages.
+
+Rejected for now: Emscripten WASMFS with its OPFS backend (needs a pthreads
+build and relinking the engine; revisit if the bridge is too slow), loading
+archives into JS memory (several GB per tab), and moving the engine into a
+worker (rendering and input live on the main thread today).

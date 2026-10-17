@@ -50,3 +50,14 @@ when it shows up again. Add an entry before closing the issue that found it.
   10 s); on time-out `readSync` throws, the worker is terminated and the
   bridge refuses further reads, so the engine sees a read error instead of a
   frozen tab.
+
+### File bridge throughput (measured, not a bug)
+
+* `cd web && npm run bench` (1 GiB file in OPFS), 2026-10-17, M2 Max, headless
+  Playwright profiles, warm OS cache:
+  * Chromium: 64 KiB random reads 150 µs each (about 6,700/s); 32 MiB
+    sequential reads 3.4 GB/s; import 0.9 GB/s.
+  * Firefox: 46 µs each (about 21,700/s); 6.3 GB/s; import 3.2 GB/s.
+* The bridge is not the bottleneck at these numbers, so D-03 stands. Re-run
+  with real archives and a cold cache before drawing conclusions about load
+  times.

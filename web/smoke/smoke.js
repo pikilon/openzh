@@ -15,15 +15,34 @@ function record(line) {
   window.__zhwpLog.push(line);
 }
 
+// Emscripten's exit() surfaces either through onExit or as an ExitStatus
+// rejection: an object named "ExitStatus" whose status is the exit code.
+function isExitStatus(reason) {
+  return (
+    reason !== null &&
+    typeof reason === "object" &&
+    reason.name === "ExitStatus" &&
+    typeof reason.status === "number"
+  );
+}
+
+function reportExit(code) {
+  // Once the engine has exited, a later abort or resolution does not replace it.
+  if (window.__zhwpDone?.status === "exited") return;
+  window.__zhwpDone = { status: "exited", code: Number(code) };
+}
+
 function reportError(message) {
-  // An abort after the factory resolved replaces the outcome.
+  // An abort after the factory resolved replaces the outcome, but an exit wins.
+  if (window.__zhwpDone?.status === "exited") return;
   window.__zhwpDone = { status: "error", message: String(message ?? "unknown error") };
 }
 
 window.addEventListener("error", (event) => record("[page] " + event.message));
-window.addEventListener("unhandledrejection", (event) =>
-  record("[page] " + String(event.reason ?? "unhandled rejection")),
-);
+window.addEventListener("unhandledrejection", (event) => {
+  record("[page] " + String(event.reason ?? "unhandled rejection"));
+  if (isExitStatus(event.reason)) reportExit(event.reason.status);
+});
 
 try {
   const module = await import(moduleUrl);
@@ -42,6 +61,7 @@ try {
     print: record,
     printErr: record,
     onAbort: (reason) => reportError(reason),
+    onExit: (code) => reportExit(code),
   };
   // archives=opfs mounts the archives stored in OPFS into the engine's file
   // system before it runs (docs/briefs/5b-mount-archives.md) and persists the
@@ -58,5 +78,6 @@ try {
   await createGeneralsX(factoryOptions);
   if (window.__zhwpDone === undefined) window.__zhwpDone = { status: "resolved" };
 } catch (error) {
-  reportError(error instanceof Error ? error.message : String(error));
+  if (isExitStatus(error)) reportExit(error.status);
+  else reportError(error instanceof Error ? error.message : String(error));
 }

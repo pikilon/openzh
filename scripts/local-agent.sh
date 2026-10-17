@@ -15,7 +15,7 @@
 #   LOCAL_AGENT_MODEL        OpenCode model id (default lmstudio/ornith-1.5-35b-a3b-mlx)
 #   LOCAL_AGENT_URL          OpenAI-compatible base URL (default http://127.0.0.1:1234/v1)
 #   LOCAL_AGENT_TIMEOUT_MIN  Minutes before the run is stopped (default 30)
-#   LOCAL_AGENT_WORKTREES    Where worktrees are created (default ../zhwp-worktrees)
+#   LOCAL_AGENT_WORKTREES    Where worktrees are created (default zhwp-worktrees next to the main checkout)
 #
 # The first stdout line is the verdict:
 #   PASS (0)         check passed and only allowed paths changed
@@ -60,7 +60,9 @@ command -v opencode >/dev/null || { verdict UNAVAILABLE "opencode is not install
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 slug="$(basename "$brief" .md | tr -c 'A-Za-z0-9-' '-' | sed 's/-*$//')"
-worktrees="${LOCAL_AGENT_WORKTREES:-$root/../zhwp-worktrees}"
+# Default next to the main checkout, even when run from a linked worktree.
+main_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+worktrees="${LOCAL_AGENT_WORKTREES:-$main_root/../zhwp-worktrees}"
 wt="$worktrees/local-$slug-$stamp"
 branch="local/$slug-$stamp"
 mkdir -p "$worktrees"

@@ -92,3 +92,33 @@ Lessons from the trials:
   returned `false` without clearing the output on a later bad entry, which no
   test checked. Write tests for every sentence of the contract, and review
   the diff before accepting a `PASS`.
+
+## Remote implementer through the `llm` MCP
+
+When the owner has confirmed a paid model for the session (D-02 and the
+paid-API rule in `AGENTS.md`), implementation can also go to the `llm` MCP
+server's `dsh_agent` tool (DeepSeek Harness), for example with
+`openrouter/xiaomi/mimo-v2.6-pro`. The procedure is the same: committed brief
+and failing tests first, the agent edits only the allowed paths, the lead
+reviews the diff, runs the full check outside the agent and calls
+`report_outcome(call_id, ok|failed, note)`.
+
+Measured on 2026-10-17 with `mimo-v2.6-pro`:
+
+| Task | Result | Time |
+| --- | --- | --- |
+| `.big` index parser (C++, trial) | PASS, contract fully met | under 1 min |
+| 3 API-drift compile fixes in the ported engine | PASS after the lead's build | 28 min |
+| Dev server + smoke page (JS, tests given) | PASS 14/14 | 14 min |
+| OPFS store + SharedArrayBuffer file bridge (TS, tests given) | PASS 18/18 | 4 min |
+
+Constraints of the `dsh` sandbox (workspace-write):
+
+* It cannot write outside the working folder, so it cannot run
+  `scripts/build-webgpu.sh` (vcpkg and the emscripten cache live elsewhere):
+  the lead runs the build and sends back the errors.
+* Firefox cannot start inside it; the agent runs `--project=chromium` and the
+  lead runs both browsers.
+* A provider error ("The operation was aborted") is usually transient: retry
+  once, then do the task yourself.
+* Track spend against the owner's cap before every paid call.

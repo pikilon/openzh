@@ -4,12 +4,14 @@
   "type": "module",
   "description": "Browser wrapper and browser tests for the WebAssembly engine build.",
   "scripts": {
-    "serve": "node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /engine=../build/webgpu/GeneralsMD",
+    "serve": "npm run build && node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /app=app --mount /engine=../build/webgpu/GeneralsMD --mount /dist=dist --mount /harness=tests/harness",
     "test": "playwright test",
-    "test:smoke": "playwright test tests/smoke.spec.ts"
+    "test:smoke": "playwright test tests/smoke.spec.ts",
+    "build": "esbuild src/test-api.ts src/bridge-worker.ts src/engine.ts src/main.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1"
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
   },
   "license": "GPL-3.0-or-later"
 }

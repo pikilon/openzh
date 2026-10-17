@@ -9,7 +9,7 @@ export default defineConfig({
   globalSetup: "./tests/global-setup.ts",
   use: { baseURL: "http://127.0.0.1:4173" },
   webServer: {
-    command: "node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /engine=../build/webgpu/GeneralsMD",
+    command: "npm run serve",
     url: "http://127.0.0.1:4173/smoke/index.html",
     reuseExistingServer: false,
     timeout: 20_000,

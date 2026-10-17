@@ -38,3 +38,13 @@ when it shows up again. Add an entry before closing the issue that found it.
 * Fix: treat `__EMSCRIPTEN__` like iOS in the fontconfig guards; upstream's
   tiered lookup then falls back to bundled fonts, and the WebGPU build uses
   `/fonts/GeneralsX.ttf` when nothing else resolves.
+
+## Browser file access
+
+### The main thread spins while the archive bridge reads
+
+* Cause: `Atomics.wait` is forbidden on the main thread, so `FileBridge`
+  busy-waits on `Atomics.load` for the worker's answer (D-03). If the worker
+  dies mid-request, the page freezes.
+* Fix when it shows up: give the spin a time limit and throw, so the engine
+  sees a read error instead of hanging the tab.

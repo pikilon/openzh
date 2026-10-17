@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Browser Game Port</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html {
+        background: #101214;
+        color: #d7dade;
+      }
+      body {
+        margin: 0 auto;
+        max-width: 48rem;
+        padding: 2rem 1.5rem 3rem;
+        font: 15px/1.6 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.6rem;
+      }
+      h2 {
+        margin: 2rem 0 0.5rem;
+        font-size: 1.15rem;
+      }
+      p {
+        margin: 0.5rem 0;
+      }
+      .note {
+        color: #a7adb5;
+      }
+      #picker {
+        margin-top: 1.5rem;
+      }
+      #folder-input {
+        display: block;
+        margin: 0.75rem 0;
+        color: inherit;
+      }
+      #import-progress {
+        display: block;
+        width: 100%;
+        margin: 0.5rem 0;
+      }
+      #status {
+        min-height: 1.6em;
+        margin: 0.5rem 0;
+      }
+      #stored-summary {
+        margin: 0.5rem 0;
+      }
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+      }
+      button {
+        padding: 0.5rem 1.1rem;
+        border: 1px solid #3a4048;
+        border-radius: 6px;
+        background: #1c2026;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        background: #262c34;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #canvas {
+        display: block;
+        margin-top: 1.5rem;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Browser Game Port</h1>
+      <p class="note">
+        Play the game in your browser, from your own copy of the game data: the
+        files stay on this computer and are never uploaded. The port is
+        compatible with C&amp;C Generals game data.
+      </p>
+
+      <section id="picker">
+        <h2>Game data</h2>
+        <p class="note">Pick the folder of your game installation.</p>
+        <input id="folder-input" type="file" webkitdirectory multiple />
+        <progress id="import-progress" hidden></progress>
+        <p id="status"></p>
+        <p id="stored-summary">Stored: 0 archives</p>
+        <div class="actions">
+          <button id="play" disabled>Play</button>
+          <button id="clear">Clear stored archives</button>
+        </div>
+      </section>
+
+      <canvas id="canvas" width="800" height="600" hidden></canvas>
+    </main>
+    <script type="module" src="/dist/main.js"></script>
+  </body>
+</html>

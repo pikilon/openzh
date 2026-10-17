@@ -1,5 +1,8 @@
 # Ignore everything starting with dot, except specific files.
 .*
+# Agent rules for every harness (AGENTS.md) live in .agents/ and must be tracked.
+!/.agents/
+!/.agents/**
 !.editorconfig
 !.gitignore
 !.gitattributes

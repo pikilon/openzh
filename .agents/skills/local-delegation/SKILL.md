@@ -1,15 +1,13 @@
 ---
 name: local-delegation
-description: How the lead agent hands a small implementation task to a local model (LM Studio) while keeping specs, tests and verification on the stronger model. Use before delegating any implementation work.
+description: How to run a task on the free local model (LM Studio) with scripts/local-agent.sh, and the measured behaviour of the delegated models. The overall flow (who writes specs, tests and code) is the tdd-pipeline skill.
 ---
 
 # Local Delegation
 
-The lead agent (the strongest model available in the session) owns the
-issue, the spec, the tests and the verification. A local model may write the
-implementation for tasks that pass the checklist below. Local models cost
-nothing, so prefer them whenever a task qualifies; never send them the spec
-or the tests to write.
+The overall flow is D-05 and `.agents/skills/tdd-pipeline/SKILL.md`. This
+skill covers the free local model as an optional first try for trivial
+implementations (`local-model-ok`), and records how delegated models behaved.
 
 ## Delegate only when all of these hold
 

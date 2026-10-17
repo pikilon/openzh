@@ -131,12 +131,13 @@ Never send a large or speculative PR upstream without the owner's approval.
   player-facing change merges, label its issue `needs-owner-test` and comment
   numbered steps, each with the expected result and a URL.
 * AI providers: local models may be used freely. A paid remote AI API needs the
-  owner's confirmation for each run. Code, tests, CI and the game never call
-  one.
-* Specs, tests and verification are written by the strongest model in the
-  session. Small, fully specified implementation tasks go to a local model
-  (LM Studio) through `scripts/local-agent.sh`, following
-  `.agents/skills/local-delegation/SKILL.md`.
+  owner's confirmation, with a spending cap, for each working session. Code,
+  tests, CI and the game never call one.
+* Work follows the test-driven pipeline of D-05: the architect (strongest
+  model) writes specs, a flash model writes the tests, another flash model
+  writes the code, and failures escalate up a ladder of models ending in
+  Sonnet. Procedure: `.agents/skills/tdd-pipeline/SKILL.md`; the free local
+  runner is in `.agents/skills/local-delegation/SKILL.md`.
 * Rules live in this file, in `AGENTS.md` files under subdirectories, in
   `.agents/skills/<name>/SKILL.md` and in `.agents/agents/<name>/agent.md`, all
   plain Markdown any harness can read. Never create `CLAUDE.md`, `GEMINI.md`,

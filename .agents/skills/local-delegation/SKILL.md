@@ -117,8 +117,8 @@ Constraints of the `dsh` sandbox (workspace-write):
 * It cannot write outside the working folder, so it cannot run
   `scripts/build-webgpu.sh` (vcpkg and the emscripten cache live elsewhere):
   the lead runs the build and sends back the errors.
-* Firefox cannot start inside it; the agent runs `--project=chromium` and the
-  lead runs both browsers.
+* Tests run in Brave only (D-04). If the browser cannot start inside the
+  sandbox, the lead runs the browser tests.
 * A provider error ("The operation was aborted") is usually transient: retry
   once, then do the task yourself.
 * Track spend against the owner's cap before every paid call.

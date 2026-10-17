@@ -55,9 +55,13 @@ when it shows up again. Add an entry before closing the issue that found it.
 
 * `cd web && npm run bench` (1 GiB file in OPFS), 2026-10-17, M2 Max, headless
   Playwright profiles, warm OS cache:
-  * Chromium: 64 KiB random reads 150 µs each (about 6,700/s); 32 MiB
-    sequential reads 3.4 GB/s; import 0.9 GB/s.
-  * Firefox: 46 µs each (about 21,700/s); 6.3 GB/s; import 3.2 GB/s.
+  * Brave 155: 64 KiB random reads 162 µs each (about 6,200/s); 32 MiB
+    sequential reads 3.3 GB/s; import 0.66 GB/s (256 MiB in-memory Blob).
+  * Earlier run, before D-04: Playwright Chromium 150 µs, 3.4 GB/s;
+    Firefox 46 µs, 6.3 GB/s.
+* Brave cannot read a composed in-memory Blob of 1 GiB in a temporary profile
+  (`NotReadableError`), so the bench writes its big file straight into OPFS.
+  Real imports use disk-backed `File`s from the picker and are not affected.
 * The bridge is not the bottleneck at these numbers, so D-03 stands. Re-run
   with real archives and a cold cache before drawing conclusions about load
   times.

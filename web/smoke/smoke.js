@@ -7,6 +7,7 @@
 
 const params = new URLSearchParams(window.location.search);
 const moduleUrl = params.get("module") ?? "/engine/GeneralsXZH.js";
+const replayUrls = params.getAll("replay");
 
 window.__zhwpLog = [];
 window.__zhwpDone = undefined;
@@ -38,6 +39,26 @@ function reportError(message) {
   window.__zhwpDone = { status: "error", message: String(message ?? "unknown error") };
 }
 
+// Fetches one replay and turns it into a user file under Replays/, named after
+// the last segment of its URL (docs/briefs/39-replay-file.md). The URL is part
+// of every message so a failing page names the file that could not be loaded.
+async function fetchReplay(url) {
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error(
+      `replay ${url}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`replay ${url}: HTTP ${response.status}`);
+  }
+  const name = decodeURIComponent(new URL(url, window.location.href).pathname.split("/").pop() ?? "");
+  if (name.length === 0) throw new Error(`replay ${url}: URL has no file name`);
+  return { path: `Replays/${name}`, data: new Uint8Array(await response.arrayBuffer()) };
+}
+
 window.addEventListener("error", (event) => record("[page] " + event.message));
 window.addEventListener("unhandledrejection", (event) => {
   record("[page] " + String(event.reason ?? "unhandled rejection"));
@@ -45,6 +66,11 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 try {
+  // The replay bytes are fetched before the factory is called: a failed fetch
+  // is reported as an error and the engine never starts.
+  const replayFiles = [];
+  for (const url of replayUrls) replayFiles.push(await fetchReplay(url));
+
   const module = await import(moduleUrl);
   const createGeneralsX = module.default;
   if (typeof createGeneralsX !== "function") {
@@ -70,11 +96,23 @@ try {
   if (params.get("archives") === "opfs") {
     const engine = await import("/dist/engine.js");
     factoryOptions = await engine.prepareEngineOptions(options);
-    factoryOptions.preRun.push((module) => {
-      window.__zhwpModule = module;
-    });
+    // Add the replays after the user data is prepared, so their preRun runs
+    // after the IDBFS load's (docs/briefs/39-replay-file.md).
+    if (replayFiles.length > 0) {
+      factoryOptions = engine.addUserFiles(factoryOptions, replayFiles);
+    }
     window.__zhwpSaveUserData = () => engine.saveUserData(window.__zhwpModule);
+  } else if (replayFiles.length > 0) {
+    const engine = await import("/dist/engine.js");
+    factoryOptions = engine.addUserFiles(factoryOptions, replayFiles);
   }
+  // The module is exposed whether or not archives=opfs was used.
+  const existing = factoryOptions.preRun ?? [];
+  const preRun = typeof existing === "function" ? [existing] : [...existing];
+  preRun.push((module) => {
+    window.__zhwpModule = module;
+  });
+  factoryOptions = { ...factoryOptions, preRun };
   await createGeneralsX(factoryOptions);
   if (window.__zhwpDone === undefined) window.__zhwpDone = { status: "resolved" };
 } catch (error) {

@@ -10,6 +10,8 @@ import { mountArchives } from "./mount";
 import { addUserDataPersistence } from "./user-data";
 
 export { saveUserData } from "./user-data";
+export { addUserFiles } from "./user-files";
+export type { UserFile } from "./user-files";
 
 type Options = {
   preRun?: ((module: any) => void)[] | ((module: any) => void);

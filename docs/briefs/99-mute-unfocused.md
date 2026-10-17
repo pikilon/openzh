@@ -71,6 +71,11 @@ Using a fake engine that exposes `window.__muteCalls` and
 * `web/tests/launcher-mute.spec.ts`: criteria 1-6.
 * `web/tests/harness/mute/`: the fakes (one with the export, one without).
 
+Criterion 5 is a guard: it passes on today's page (which never reads the
+factory result) and must keep passing after the change, where it catches an
+unguarded call on a module without the export. The tests that fail before the
+implementation are 1, 2, 3, 4 and 6.
+
 ## Allowed paths
 * `web/src/main.ts`
 * `GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp`

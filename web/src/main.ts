@@ -106,6 +106,7 @@ async function playNow(): Promise<void> {
   play.disabled = true;
   input.disabled = true;
   canvas.hidden = false;
+  canvas.focus();
   picker.hidden = true;
   status.textContent = "Starting";
   const page = window as Page;
@@ -157,6 +158,12 @@ play.addEventListener("click", () => {
 
 clear.addEventListener("click", () => {
   void clearAll().catch(fail);
+});
+
+// The game plays with the right mouse button: the browser's context menu must
+// never open over the canvas, and only over the canvas.
+canvas.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
 });
 
 void refresh().catch(fail);

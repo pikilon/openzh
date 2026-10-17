@@ -288,9 +288,43 @@ function unfullscreenCanvas(): void {
   canvas.style.height = "";
 }
 
+// Issue #97: while the game runs windowed, the canvas is the largest box with
+// the drawing buffer's aspect ratio that fits between the bottom of
+// #play-controls and the bottom of the window, inside the body's content
+// width; `margin-inline: auto` centres it. The body's horizontal padding is the
+// gap to the window, and the drawing buffer itself is never written.
+function fitWindowedCanvas(): void {
+  if (document.fullscreenElement !== null || canvas.hidden) return;
+  const bufferWidth = canvas.width;
+  const bufferHeight = canvas.height;
+  if (bufferWidth <= 0 || bufferHeight <= 0) return;
+  const bodyStyle = window.getComputedStyle(document.body);
+  const availableWidth =
+    document.documentElement.clientWidth -
+    parseFloat(bodyStyle.paddingLeft) -
+    parseFloat(bodyStyle.paddingRight);
+  const controlsBottom = playControls.hidden ? 0 : playControls.getBoundingClientRect().bottom;
+  const availableHeight = window.innerHeight - controlsBottom;
+  if (availableWidth <= 0 || availableHeight <= 0) return;
+  const scale = Math.min(availableWidth / bufferWidth, availableHeight / bufferHeight);
+  // Whole pixels, rounded down: the layout would otherwise keep the fraction of
+  // a pixel that puts the canvas past the bottom of the window.
+  canvas.style.width = `${Math.floor(bufferWidth * scale)}px`;
+  canvas.style.height = `${Math.floor(bufferHeight * scale)}px`;
+}
+
+// The displayed size the page's current mode needs: the whole screen in
+// fullscreen (#91), the space below the page text while windowed (#97).
+function fitCanvas(): void {
+  if (document.fullscreenElement === screen) fitFullscreenCanvas();
+  else fitWindowedCanvas();
+}
+
 function onFullscreenChange(): void {
   if (document.fullscreenElement !== screen) {
     unfullscreenCanvas();
+    // The windowed playing layout (#97) is what the page returns to.
+    fitWindowedCanvas();
     return;
   }
   // A failed engine must not keep the screen: the message has to stay readable
@@ -336,6 +370,12 @@ async function playNow(): Promise<void> {
   engineFailed = false;
   playControls.hidden = false;
   fullscreen.hidden = !canFullscreen();
+  // Issue #97: from here the page is the window's width and the canvas takes
+  // the space below the controls. The drawing buffer may still have the
+  // attribute's size; the observer below fits it again when the engine writes
+  // it.
+  document.body.classList.add("playing");
+  fitWindowedCanvas();
   status.textContent = "Starting";
   // The `module` query parameter lets tests start a fake engine instead of the
   // real one (docs/briefs/29-launcher-errors.md), the same rule as smoke.js.
@@ -431,12 +471,13 @@ if (missing.length > 0) {
   document.addEventListener("fullscreenchange", onFullscreenChange);
 
   // The engine writes its render resolution into the canvas backing size, so a
-  // change while fullscreen has to re-fit the canvas to the new aspect ratio.
-  new MutationObserver(fitFullscreenCanvas).observe(canvas, {
+  // change re-fits the canvas to the new aspect ratio: on the screen in
+  // fullscreen (#91), in the page while windowed (#97).
+  new MutationObserver(fitCanvas).observe(canvas, {
     attributes: true,
     attributeFilter: ["width", "height"],
   });
-  window.addEventListener("resize", fitFullscreenCanvas);
+  window.addEventListener("resize", fitCanvas);
 
   // The development server may expose the owner's game folder (issue #72):
   // import it on load, exactly as a folder pick, when it is there. Doing it

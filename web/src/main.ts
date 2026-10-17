@@ -6,6 +6,7 @@ import { classifyArchives, REQUIRED, type GameKind, type InstallReport } from ".
 import { storeFiles, listStored, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
+import { available, bytesNeeded, formatBytes } from "./storage";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -20,6 +21,7 @@ const input = byId<HTMLInputElement>("folder-input");
 const status = byId<HTMLElement>("status");
 const progress = byId<HTMLProgressElement>("import-progress");
 const summary = byId<HTMLElement>("stored-summary");
+const storage = byId<HTMLElement>("storage");
 const play = byId<HTMLButtonElement>("play");
 const clear = byId<HTMLButtonElement>("clear");
 const canvas = byId<HTMLCanvasElement>("canvas");
@@ -61,8 +63,33 @@ function fail(message: unknown): void {
   hideProgress();
 }
 
+async function refreshStorage(): Promise<void> {
+  const manager = navigator.storage;
+  if (typeof manager.estimate !== "function") {
+    storage.textContent = "Storage: unknown";
+    return;
+  }
+  let estimate: { usage?: number; quota?: number };
+  try {
+    estimate = await manager.estimate();
+  } catch {
+    storage.textContent = "Storage: unknown";
+    return;
+  }
+  let text = `Storage: ${formatBytes(estimate.usage ?? 0)} of ${formatBytes(estimate.quota ?? 0)}`;
+  if (typeof manager.persisted === "function") {
+    try {
+      if (await manager.persisted()) text += " (persistent)";
+    } catch {
+      // Persistence is only an annotation: show the sizes regardless.
+    }
+  }
+  storage.textContent = text;
+}
+
 async function refresh(): Promise<void> {
   showStored(await listStored());
+  await refreshStorage();
 }
 
 // Classifies the picked folder and writes `#status` before the first await:
@@ -93,12 +120,39 @@ async function importFolder(files: FileList): Promise<void> {
     return;
   }
   const chosen = new Map(picked.map((file) => [pathOf(file), file]));
+  const entries = report.archives.map((entry) => ({
+    kind: entry.kind as GameKind,
+    name: entry.name,
+    file: chosen.get(entry.path) as Blob,
+  }));
+  const manager = navigator.storage;
+  if (typeof manager.persist === "function") {
+    // Asking does not block the import: the result only labels the storage.
+    void manager.persist().catch(() => undefined);
+  }
+  let free: number | undefined;
+  if (typeof manager.estimate === "function") {
+    try {
+      free = available(await manager.estimate());
+    } catch {
+      free = undefined;
+    }
+  }
+  if (free !== undefined) {
+    const stored = await listStored();
+    const needed = bytesNeeded(
+      entries.map((entry) => ({ kind: entry.kind, name: entry.name, size: entry.file.size })),
+      stored,
+    );
+    if (free < needed) {
+      status.textContent = `Not enough storage: need ${formatBytes(needed)}, available ${formatBytes(free)}`;
+      hideProgress();
+      showStored(stored);
+      return;
+    }
+  }
   await storeFiles(
-    report.archives.map((entry) => ({
-      kind: entry.kind as GameKind,
-      name: entry.name,
-      file: chosen.get(entry.path) as Blob,
-    })),
+    entries,
     (doneBytes, totalBytes) => showProgress(doneBytes, totalBytes),
   );
   hideProgress();

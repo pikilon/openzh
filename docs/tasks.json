@@ -723,17 +723,23 @@
       "issue": 79,
       "title": "Browser build: fonts for the game's text",
       "phase": 1,
-      "status": "needs-owner",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
-      "size": "s",
+      "size": "m",
       "local_model_ok": false,
-      "brief": null,
+      "brief": "docs/briefs/79-web-fonts.md",
       "depends_on": [],
-      "check": null,
-      "test_paths": [],
-      "allowed_paths": [],
-      "summary": "The browser build resolves no font (Times New Roman, Arial, ...), so no text renders. Which font files may ship with the build is the owner's decision."
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && npx playwright test tests/real-data-fonts.spec.ts && env -u ZHWP_GAME_DIR npx playwright test",
+      "test_paths": [
+        "web/tests/real-data-fonts.spec.ts"
+      ],
+      "allowed_paths": [
+        "GeneralsMD/Code/Main/CMakeLists.txt",
+        "Core/Libraries/Source/WWVegas/WW3D2/render2dsentence.cpp",
+        "Core/Libraries/Source/Platform/PlatformPaths.h"
+      ],
+      "summary": "Preload the Liberation fonts already in assets/fonts into the browser build and map the game's faces to them, so in-game text renders."
     },
     {
       "issue": 80,

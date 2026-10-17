@@ -4,6 +4,7 @@
 
 import { classifyArchives, REQUIRED, type GameKind, type InstallReport } from "./install";
 import { storeFiles, listStored, clearStored, type StoredFile } from "./opfs-store";
+import { fetchLocalArchive, fetchLocalIndex } from "./local-gamedata";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, bytesNeeded, formatBytes } from "./storage";
@@ -126,21 +127,20 @@ function classifyPicked(files: FileList): { picked: File[]; report: InstallRepor
   return { picked, report };
 }
 
-async function importFolder(files: FileList): Promise<void> {
-  hideStorageWarning();
-  const choice = classifyPicked(files);
-  if (choice === null) return;
-  const { picked, report } = choice;
-  if (report.missing.length > 0) {
-    showStored(await listStored());
-    return;
-  }
-  const chosen = new Map(picked.map((file) => [pathOf(file), file]));
-  const entries = report.archives.map((entry) => ({
-    kind: entry.kind as GameKind,
-    name: entry.name,
-    file: chosen.get(entry.path) as Blob,
-  }));
+// One archive to store, from whichever source. `load` is only called when the
+// archive is actually written, so the local game folder is not fetched again
+// on a reload that already has the files.
+interface ImportEntry {
+  kind: GameKind;
+  name: string;
+  size: number;
+  load(): Promise<Blob>;
+}
+
+// The tail shared by a picked folder and the local game folder: the storage
+// warning (#70), the copies and the same failure handling for both. `entries`
+// holds only the archives that have to be written.
+async function storeEntries(entries: readonly ImportEntry[], stored: readonly StoredFile[]): Promise<void> {
   const manager = navigator.storage;
   if (typeof manager.persist === "function") {
     // Asking does not block the import: the result only labels the storage.
@@ -155,18 +155,23 @@ async function importFolder(files: FileList): Promise<void> {
     }
   }
   if (free !== undefined) {
-    const stored = await listStored();
     const needed = bytesNeeded(
-      entries.map((entry) => ({ kind: entry.kind, name: entry.name, size: entry.file.size })),
+      entries.map((entry) => ({ kind: entry.kind, name: entry.name, size: entry.size })),
       stored,
     );
     if (free < needed) showStorageWarning(free, needed);
   }
+  const total = entries.reduce((sum, entry) => sum + entry.size, 0);
+  let done = 0;
   try {
-    await storeFiles(
-      entries,
-      (doneBytes, totalBytes) => showProgress(doneBytes, totalBytes),
-    );
+    for (const entry of entries) {
+      const file = await entry.load();
+      await storeFiles(
+        [{ kind: entry.kind, name: entry.name, file }],
+        (doneBytes) => showProgress(done + doneBytes, total),
+      );
+      done += file.size;
+    }
   } catch (error) {
     // Whatever was copied before the failure stays; report it and keep Play
     // pointing at the archives that are actually stored.
@@ -179,6 +184,69 @@ async function importFolder(files: FileList): Promise<void> {
   hideProgress();
   status.textContent = "Ready";
   await refresh();
+}
+
+async function importFolder(files: FileList): Promise<void> {
+  hideStorageWarning();
+  const choice = classifyPicked(files);
+  if (choice === null) return;
+  const { picked, report } = choice;
+  const stored = await listStored();
+  if (report.missing.length > 0) {
+    showStored(stored);
+    return;
+  }
+  const chosen = new Map(picked.map((file) => [pathOf(file), file]));
+  const entries: ImportEntry[] = report.archives.map((entry) => {
+    const file = chosen.get(entry.path) as Blob;
+    return {
+      kind: entry.kind as GameKind,
+      name: entry.name,
+      size: file.size,
+      load: async () => file,
+    };
+  });
+  await storeEntries(entries, stored);
+}
+
+// Imports the folder the development server exposes (issue #72) exactly as a
+// folder pick of the same files would. Without an index (or with
+// `?gamedata=off`) it touches nothing and the page behaves as before.
+async function importLocalGameData(): Promise<void> {
+  if (new URLSearchParams(window.location.search).get("gamedata") === "off") return;
+  const index = await fetchLocalIndex();
+  if (index === null) return;
+  hideStorageWarning();
+  const report = classifyArchives(index.map((file) => file.path));
+  play.disabled = true;
+  if (report.missing.length > 0) {
+    // A folder without every required archive stores nothing at all.
+    status.textContent = `Missing: ${report.missing.join(", ")}`;
+    hideProgress();
+    showStored(await listStored());
+    return;
+  }
+  status.textContent = "Importing from the local game folder";
+  showProgress(0, 100);
+  const stored = await listStored();
+  const alreadyStored = new Set(
+    stored.map((file) => `${file.kind}\u0000${file.name}\u0000${file.size}`),
+  );
+  const sizes = new Map(index.map((file) => [file.path, file.size]));
+  const entries: ImportEntry[] = [];
+  for (const archive of report.archives) {
+    const size = sizes.get(archive.path);
+    if (size === undefined) continue;
+    // Same kind, name and size already stored: fetch nothing on a reload.
+    if (alreadyStored.has(`${archive.kind}\u0000${archive.name}\u0000${size}`)) continue;
+    entries.push({
+      kind: archive.kind as GameKind,
+      name: archive.name,
+      size,
+      load: () => fetchLocalArchive(archive.path),
+    });
+  }
+  await storeEntries(entries, stored);
 }
 
 async function playNow(): Promise<void> {
@@ -269,5 +337,10 @@ if (missing.length > 0) {
     event.preventDefault();
   });
 
-  void refresh().catch(fail);
+  // The development server may expose the owner's game folder (issue #72):
+  // import it on load, exactly as a folder pick, when it is there. Doing it
+  // after the first refresh keeps the summary from racing the import.
+  void refresh()
+    .then(() => importLocalGameData())
+    .catch(fail);
 }

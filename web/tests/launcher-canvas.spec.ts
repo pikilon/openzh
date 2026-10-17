@@ -38,23 +38,6 @@ async function startCanvas(page: Page, dir: string): Promise<void> {
 
   await page.locator("#play").click();
   await expect(page.locator("#canvas")).toBeVisible();
-  // Issue #91: Play enters fullscreen, and this spec measures the windowed
-  // layout. Leave fullscreen the way the browser's Esc does, and only when the
-  // page actually entered it.
-  await page.evaluate(async () => {
-    if (document.fullscreenElement !== null) await document.exitFullscreen();
-  });
-  await page.waitForFunction(() => document.fullscreenElement === null);
-  // `fullscreenchange` can be delivered after `exitFullscreen()` resolved, so
-  // wait for the windowed layout itself (canvas below the heading, inside the
-  // viewport) before anything is measured.
-  await page.waitForFunction(() => {
-    const canvas = document.getElementById("canvas");
-    const heading = document.querySelector("h1");
-    if (canvas === null || heading === null) return false;
-    const rect = canvas.getBoundingClientRect();
-    return rect.top >= heading.getBoundingClientRect().bottom && rect.bottom <= window.innerHeight;
-  });
   await page.waitForFunction(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
     return canvas !== null && canvas.width === 1024 && canvas.height === 768;

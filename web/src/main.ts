@@ -5,6 +5,7 @@
 import { classifyArchives, REQUIRED, type GameKind, type InstallReport } from "./install";
 import { storeFiles, listStored, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
+import { currentEnv, missingFeatures } from "./features";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -24,6 +25,7 @@ const clear = byId<HTMLButtonElement>("clear");
 const canvas = byId<HTMLCanvasElement>("canvas");
 const engineError = byId<HTMLElement>("engine-error");
 const picker = byId<HTMLElement>("picker");
+const unsupported = byId<HTMLElement>("unsupported");
 
 // The path the folder picker gives the file under: `webkitRelativePath`
 // (empty when the browser gave none, then the name alone).
@@ -163,22 +165,33 @@ async function clearAll(): Promise<void> {
   await refresh();
 }
 
-input.addEventListener("change", () => {
-  void importFolder(input.files ?? ([] as unknown as FileList)).catch(fail);
-});
+// A browser without every feature cannot import or play: say so before the
+// player spends minutes picking and copying several GB, and touch no stored
+// data at all in that case.
+const missing = missingFeatures(currentEnv());
+if (missing.length > 0) {
+  unsupported.textContent = `Missing browser features: ${missing.join(", ")}`;
+  unsupported.hidden = false;
+  input.disabled = true;
+  play.disabled = true;
+} else {
+  input.addEventListener("change", () => {
+    void importFolder(input.files ?? ([] as unknown as FileList)).catch(fail);
+  });
 
-play.addEventListener("click", () => {
-  void playNow();
-});
+  play.addEventListener("click", () => {
+    void playNow();
+  });
 
-clear.addEventListener("click", () => {
-  void clearAll().catch(fail);
-});
+  clear.addEventListener("click", () => {
+    void clearAll().catch(fail);
+  });
 
-// The game plays with the right mouse button: the browser's context menu must
-// never open over the canvas, and only over the canvas.
-canvas.addEventListener("contextmenu", (event) => {
-  event.preventDefault();
-});
+  // The game plays with the right mouse button: the browser's context menu must
+  // never open over the canvas, and only over the canvas.
+  canvas.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+  });
 
-void refresh().catch(fail);
+  void refresh().catch(fail);
+}

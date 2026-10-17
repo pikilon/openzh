@@ -25,7 +25,8 @@ You run as step 2 of the pipeline in `.agents/skills/tdd-pipeline/SKILL.md`.
    leaves open.
 3. Run the brief's check and confirm every new test fails, for the reason
    the criterion describes (not because of a typo or a missing import in the
-   test itself).
+   test itself). Nobody reviews your tests before the implementer uses them:
+   they are the contract, so make each one exact.
 4. Never write or change product code, the brief, other tests or config.
 5. Do not commit.
 

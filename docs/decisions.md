@@ -87,30 +87,33 @@ Date: 2026-10-17. Owner's instruction.
 
 ## D-05: Test-driven pipeline: architect specs, flash tests, flash code, escalate
 
-Date: 2026-10-17. Owner's instruction. Replaces D-02's split of work.
+Date: 2026-10-17 (updated the same day). Owner's instruction. Replaces D-02's
+split of work.
 
 * The architect (the strongest model, Opus) plans and writes each task's
-  spec at contract level: goal, contract, acceptance criteria, allowed paths
-  and check command, in `docs/briefs/`. It does not write the tests or the
-  code.
-* A test-writer agent on `deepseek-official/deepseek-flash` turns the spec
-  into failing tests. The architect reviews the tests against the spec
-  before any implementation starts; tests that miss a spec sentence or test
-  the wrong thing count as a failed test-writing attempt.
-* A separate implementer agent on `deepseek-official/deepseek-flash` writes
-  the code in a loop until the tests pass. It never edits tests or specs.
-* If either step fails (time-out, cannot make the tests pass, rejected tests,
-  edits outside the allowed paths), the task gets the `escalate` label and
-  the same step is retried one rung up: `openrouter/xiaomi/mimo-v2.6-pro`,
-  then `deepseek-official/deepseek-v4-pro`, and last `sonnet` (the `llm`
-  MCP's `claude_agent`). Trivial tasks labelled `local-model-ok` may try the
-  free local model (`scripts/local-agent.sh`) before the first rung.
-* Every attempt is recorded (`report_outcome` in the `llm` MCP and a row in
-  `docs/model-results.md`) so the owner can see which models do which work
-  well; the ladder changes when the data says so.
+  spec at contract level: goal, contract, acceptance criteria, test paths,
+  allowed paths and check command, in `docs/briefs/`. It does not write,
+  review or fix the tests or the code.
+* A test-writer agent on DeepSeek V4.1 Flash turns the spec into failing
+  tests. A separate implementer agent on DeepSeek V4.1 Flash writes the code
+  until the tests pass. Both run as `deepseek-official/deepseek-flash`
+  through the `llm` MCP's `dsh_agent`: the official DeepSeek API, paid from
+  the owner's DeepSeek credits, never through OpenRouter.
+* If either step fails (time-out, BLOCKED, the check does not pass, tests
+  that do not fail before implementation, edits outside the allowed paths),
+  the task gets the `escalate` label and is retried one rung up:
+  `openrouter/xiaomi/mimo-v2.6-pro`, then `sonnet` (the `llm` MCP's
+  `claude_agent`). DeepSeek V4 Pro is not used: it costs more and did worse
+  than Flash. Trivial tasks labelled `local-model-ok` may try the free local
+  model (`scripts/local-agent.sh`) first for the code.
+* Failed attempts are kept (branch, worktree log, agent output) and recorded
+  (`report_outcome` and `docs/model-results.md`). Whether the tests or the
+  code were at fault is analysed later with Sonnet, when the owner decides;
+  nobody analyses or patches a failure on the spot.
+* The architect only checks results mechanically: the check passes from a
+  clean checkout and only the allowed paths changed. Then it merges.
 * Independent `ready` tasks run in parallel, each in its own worktree with its
-  own test port (`ZHWP_PORT`). The architect verifies every result from a
-  clean checkout before merging, as before.
+  own test port (`ZHWP_PORT`).
 * Paid models run under a spending cap the owner states for each working
   session; work stops at the cap.
 * Procedure: `.agents/skills/tdd-pipeline/SKILL.md`.

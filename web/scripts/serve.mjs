@@ -18,6 +18,7 @@ const TYPES = new Map([
   [".wasm", "application/wasm"],
   [".json", "application/json"],
   [".css", "text/css; charset=utf-8"],
+  [".png", "image/png"],
 ]);
 
 const GAMEDATA_INDEX = "/gamedata/index.json";

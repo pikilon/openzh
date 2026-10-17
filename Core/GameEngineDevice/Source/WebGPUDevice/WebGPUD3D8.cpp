@@ -48,6 +48,13 @@ HRESULT ReturnObject(T *object, T **output)
 	return D3D_OK;
 }
 
+// GeneralsX @bugfix zhwp 17/10/2026 A WebGPU depth-stencil attachment must be created in a depth format, never a colour one.
+bool IsDepthFormat(D3DFORMAT format)
+{
+	return format == D3DFMT_D16 || format == D3DFMT_D24S8 || format == D3DFMT_D24X8 || format == D3DFMT_D32 ||
+		format == D3DFMT_D15S1 || format == D3DFMT_D24X4S4;
+}
+
 UINT FormatRowPitch(D3DFORMAT format, UINT width)
 {
 	switch (format) {
@@ -447,6 +454,8 @@ public:
 	D3DFORMAT format() const { return m_format; }
 	UINT width() const { return level().width; }
 	UINT height() const { return level().height; }
+	// GeneralsX @bugfix zhwp 17/10/2026 Tell a real depth-stencil surface apart from a colour render target.
+	bool isDepthSurface() const;
 	WGPUTextureView renderView();
 	void markDirty();
 
@@ -493,6 +502,8 @@ public:
 	TextureLevel &level(UINT index) { return m_levels[index]; }
 	const TextureLevel &level(UINT index) const { return m_levels[index]; }
 	D3DFORMAT format() const { return m_format; }
+	// GeneralsX @bugfix zhwp 17/10/2026 Let surfaces inherit the depth-stencil usage of their texture.
+	DWORD usage() const { return m_usage; }
 	WGPUTextureView view();
 	WGPUTextureView createRenderView(UINT level);
 	void copyFrom(const WebGPUTexture &source);
@@ -826,15 +837,13 @@ HRESULT WebGPUD3DDevice::ensurePass(DWORD clearFlags, D3DCOLOR color, float dept
 	const bool customColorTarget = m_renderTarget && m_renderTarget != m_backBuffer;
 	WGPUTextureView colorView = customColorTarget ? m_renderTarget->renderView() :
 		(renderSampleCount() > 1 ? m_multisampleView : m_surfaceView);
+	// GeneralsX @bugfix zhwp 17/10/2026 Only attach a real depth surface that has the colour target's size.
+	const bool depthTarget = hasDepthTarget();
 	WGPUTextureView depthView = nullptr;
-	if (customColorTarget) {
-		if (m_depthTarget && m_depthTarget->width() == m_renderTarget->width() && m_depthTarget->height() == m_renderTarget->height()) {
-			depthView = m_depthTarget == m_depthSurface ? m_depthView : m_depthTarget->renderView();
-		}
-	} else {
-		depthView = !m_depthTarget || m_depthTarget == m_depthSurface ? m_depthView : m_depthTarget->renderView();
+	if (depthTarget) {
+		depthView = m_depthTarget && m_depthTarget != m_depthSurface ? m_depthTarget->renderView() : m_depthView;
 	}
-	if (!colorView || (hasDepthTarget() && !depthView)) {
+	if (!colorView || (depthTarget && !depthView)) {
 		return D3DERR_DRIVERINTERNALERROR;
 	}
 
@@ -993,10 +1002,15 @@ WGPUTextureFormat WebGPUD3DDevice::colorTargetFormat() const
 
 bool WebGPUD3DDevice::hasDepthTarget() const
 {
-	if (!m_renderTarget || m_renderTarget == m_backBuffer) {
+	// GeneralsX @bugfix zhwp 17/10/2026 The pipeline depth state must match the attachment ensurePass can provide.
+	const bool customColorTarget = m_renderTarget && m_renderTarget != m_backBuffer;
+	const UINT colorWidth = customColorTarget ? m_renderTarget->width() : m_parameters.BackBufferWidth;
+	const UINT colorHeight = customColorTarget ? m_renderTarget->height() : m_parameters.BackBufferHeight;
+	if (m_depthTarget && m_depthTarget->isDepthSurface() &&
+		m_depthTarget->width() == colorWidth && m_depthTarget->height() == colorHeight) {
 		return true;
 	}
-	return m_depthTarget && m_depthTarget->width() == m_renderTarget->width() && m_depthTarget->height() == m_renderTarget->height();
+	return !customColorTarget && (!m_depthTarget || m_depthTarget == m_depthSurface);
 }
 
 WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
@@ -2638,7 +2652,9 @@ HRESULT WebGPUD3DDevice::SetRenderTarget(IDirect3DSurface8 *renderTarget, IDirec
 	if (m_depthTarget) {
 		m_depthTarget->Release();
 	}
-	m_depthTarget = static_cast<WebGPUSurface *>(depthStencil);
+	// GeneralsX @bugfix zhwp 17/10/2026 Never keep a colour surface as the depth-stencil target.
+	auto *depthSurface = static_cast<WebGPUSurface *>(depthStencil);
+	m_depthTarget = depthSurface && depthSurface->isDepthSurface() ? depthSurface : nullptr;
 	if (m_depthTarget) {
 		m_depthTarget->AddRef();
 	}
@@ -3500,7 +3516,8 @@ WebGPUSurface::WebGPUSurface(WebGPUTexture *texture, UINT levelIndex) :
 	m_texture(texture),
 	m_level(levelIndex),
 	m_format(texture->format()),
-	m_usage(0),
+	// GeneralsX @bugfix zhwp 17/10/2026 Keep the texture's depth-stencil usage on its surfaces.
+	m_usage(texture->usage()),
 	m_pool(D3DPOOL_DEFAULT)
 {
 	m_texture->AddRef();
@@ -3619,25 +3636,33 @@ void WebGPUSurface::markDirty()
 	}
 }
 
+// GeneralsX @bugfix zhwp 17/10/2026 Classify a surface as depth from its D3D format or depth-stencil usage.
+bool WebGPUSurface::isDepthSurface() const
+{
+	return IsDepthFormat(m_format) || (m_usage & D3DUSAGE_DEPTHSTENCIL) != 0;
+}
+
 // GeneralsX @port Codex 04/08/2026 Back Direct3D render and depth surfaces with WebGPU attachments.
 WGPUTextureView WebGPUSurface::renderView()
 {
 	if (m_gpuView) {
 		return m_gpuView;
 	}
-	if (m_texture) {
+	// GeneralsX @bugfix zhwp 17/10/2026 Never expose a colour texture view as the depth-stencil attachment.
+	const bool depth = isDepthSurface();
+	if (m_texture && !depth) {
 		m_gpuView = m_texture->createRenderView(m_level);
 		return m_gpuView;
 	}
-	if (!(m_usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL))) {
+	if (!depth && !(m_usage & D3DUSAGE_RENDERTARGET)) {
 		return nullptr;
 	}
 
-	const bool depth = (m_usage & D3DUSAGE_DEPTHSTENCIL) != 0;
+	const TextureLevel &storage = level();
 	WGPUTextureDescriptor descriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
 	descriptor.usage = WGPUTextureUsage_RenderAttachment;
 	descriptor.dimension = WGPUTextureDimension_2D;
-	descriptor.size = { m_storage.width, m_storage.height, 1 };
+	descriptor.size = { storage.width, storage.height, 1 };
 	descriptor.format = depth ? WGPUTextureFormat_Depth24PlusStencil8 : WGPUTextureFormat_RGBA8Unorm;
 	descriptor.mipLevelCount = 1;
 	descriptor.sampleCount = 1;

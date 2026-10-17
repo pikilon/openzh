@@ -51,16 +51,19 @@ if(SAGE_USE_WEBGPU)
     )
     set_target_properties(z_generals PROPERTIES SUFFIX ".js")
 
-    set(GENERALSX_WEB_FONT_FILE "" CACHE FILEPATH "Font file preloaded by the browser build")
-    if(GENERALSX_WEB_FONT_FILE)
-        if(NOT EXISTS "${GENERALSX_WEB_FONT_FILE}")
-            message(FATAL_ERROR "GENERALSX_WEB_FONT_FILE does not exist: ${GENERALSX_WEB_FONT_FILE}")
+    # GeneralsX @build zhwp 17/10/2026 The browser build has no system fonts, so it embeds the four Liberation
+    # files the game's faces map to, plus their licence, at an absolute path the engine probes (issue #79).
+    # They are embedded instead of preloaded so the engine keeps one .js and one .wasm, which is what the static
+    # package copies and what the no-EA-assets guard accepts.
+    set(GENERALSX_WEB_FONTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/fonts")
+    foreach(web_font_file arial.ttf arialbold.ttf couriernew.ttf timesnewroman.ttf LICENSE.liberation)
+        if(NOT EXISTS "${GENERALSX_WEB_FONTS_DIR}/${web_font_file}")
+            message(FATAL_ERROR "Browser font file not found: ${GENERALSX_WEB_FONTS_DIR}/${web_font_file}")
         endif()
         target_link_options(z_generals PRIVATE
-            --preload-file
-            "${GENERALSX_WEB_FONT_FILE}@/fonts/GeneralsX.ttf"
+            "SHELL:--embed-file \"${GENERALSX_WEB_FONTS_DIR}/${web_font_file}@/fonts/${web_font_file}\""
         )
-    endif()
+    endforeach()
 
     set(GENERALSX_WEB_REPLAY_FILE "" CACHE FILEPATH "Replay preloaded for deterministic browser rendering comparison")
     if(GENERALSX_WEB_REPLAY_FILE)

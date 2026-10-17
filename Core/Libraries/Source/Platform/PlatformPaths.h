@@ -156,6 +156,14 @@ inline bool FindLocalFontFile(const char *const *candidates, int candidateCount,
 	}
 #endif
 
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @bugfix zhwp 17/10/2026 The browser build embeds the Liberation fonts in /fonts, an absolute
+	// directory, so resolving a face does not depend on the engine's current directory.
+	if ( searchDirCount < 24 ) {
+		searchDirs[searchDirCount++] = "/fonts";
+	}
+#endif
+
 	if ( searchDirCount < 24 ) searchDirs[searchDirCount++] = "fonts";
 	if ( searchDirCount < 24 ) searchDirs[searchDirCount++] = "./fonts";
 	if ( searchDirCount < 24 ) searchDirs[searchDirCount++] = "../Resources/fonts";

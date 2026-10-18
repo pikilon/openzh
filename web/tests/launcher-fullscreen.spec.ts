@@ -1,21 +1,23 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { CANVAS_FIT, importInstall, openLauncher, START_TIMEOUT } from "./helpers/launcher";
 
-// Issue #91: a Fullscreen button above the canvas. Play starts the engine
-// windowed; the player presses #fullscreen and the page puts the canvas
-// container (#screen) in the browser's fullscreen mode and displays the canvas
-// at the largest size that fits the screen with the drawing buffer's aspect
-// ratio. The fake engine (`module` query parameter) sets the 1024x768 drawing
-// buffer the real engine uses at start-up.
+// Issue #91: a Fullscreen button above the canvas. Play used to start the
+// engine windowed; since #159 the import starts it by itself, and #fullscreen
+// is an icon button in #topbar, disabled before the game starts. The player
+// presses it and the page puts the canvas container (#screen) in the browser's
+// fullscreen mode and displays the canvas at the largest size that fits the
+// screen with the drawing buffer's aspect ratio. The fake engine (`module`
+// query parameter) sets the 1024x768 drawing buffer the real engine uses at
+// start-up.
 
-const FAKE = "/harness/canvas/fit.js";
+const FAKE = CANVAS_FIT;
 const VIEWPORT = { width: 1280, height: 800 };
 // Criterion 3: a 1024x768 drawing buffer on a 1280x800 screen fills the height.
 const FIT_HEIGHT = 800;
 const FIT_WIDTH = (FIT_HEIGHT * 1024) / 768;
 // The fullscreen fit and the re-fit after a drawing-buffer change are the
 // page's job, so the tests wait for the displayed size, never a fixed delay.
-const WAIT = 10_000;
+const WAIT = START_TIMEOUT;
 
 type Fullscreen = { id: string | null; isScreen: boolean };
 
@@ -30,29 +32,21 @@ async function fullscreen(page: Page): Promise<Fullscreen> {
   });
 }
 
-// Opens the launcher like tests/launcher-canvas.spec.ts, imports a complete
-// synthetic install (which enables Play) and presses Play with a trusted click.
-// Play must start the game windowed; on return the fake engine has started and
-// set its 1024x768 drawing buffer.
+// Opens the launcher at 1280x800 and imports a complete synthetic install,
+// which auto-starts the fake engine and reaches the playing state with its
+// 1024x768 drawing buffer.
 async function startPlaying(page: Page, dir: string): Promise<void> {
   await page.setViewportSize(VIEWPORT);
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-
-  await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(dir));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
-  await expect(page.locator("#canvas")).toBeVisible();
-  await page.waitForFunction(() => {
-    const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
-    return canvas !== null && canvas.width === 1024 && canvas.height === 768;
-  });
+  await openLauncher(page, FAKE);
+  await importInstall(page, dir);
+  await page.waitForFunction(
+    () => {
+      const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+      return canvas !== null && canvas.width === 1024 && canvas.height === 768;
+    },
+    null,
+    { timeout: WAIT },
+  );
 }
 
 // Presses #fullscreen with a trusted click: the browser only grants fullscreen
@@ -60,6 +54,7 @@ async function startPlaying(page: Page, dir: string): Promise<void> {
 // click dispatched in page.evaluate().
 async function enterFullscreen(page: Page): Promise<void> {
   await expect(page.locator("#fullscreen")).toBeVisible({ timeout: WAIT });
+  await expect(page.locator("#fullscreen")).toBeEnabled({ timeout: WAIT });
   await page.locator("#fullscreen").click();
   await expect.poll(async () => (await fullscreen(page)).id, { timeout: WAIT }).toBe("screen");
 }
@@ -79,7 +74,7 @@ type Metrics = {
   scrollWidth: number;
   clientWidth: number;
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
-  headingBottom: number;
+  topbarBottom: number;
   bufferWidth: number;
   bufferHeight: number;
   attrWidth: string | null;
@@ -89,7 +84,7 @@ type Metrics = {
 async function measure(page: Page): Promise<Metrics> {
   return page.evaluate(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-    const heading = document.querySelector("h1") as HTMLElement;
+    const topbar = document.getElementById("topbar") as HTMLElement;
     const inside = document.fullscreenElement;
     const active = document.activeElement;
     const rect = canvas.getBoundingClientRect();
@@ -109,7 +104,7 @@ async function measure(page: Page): Promise<Metrics> {
         width: rect.width,
         height: rect.height,
       },
-      headingBottom: heading.getBoundingClientRect().bottom,
+      topbarBottom: topbar.getBoundingClientRect().bottom,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       attrWidth: canvas.getAttribute("width"),
@@ -133,16 +128,16 @@ async function waitCanvasSize(page: Page, width: number, height: number): Promis
 }
 
 // Waits for the windowed playing layout (#80): the canvas back in the page
-// flow, below the heading, wholly inside the viewport. `fullscreenchange` can
-// be delivered after `exitFullscreen()` resolved, so the layout is what says
-// the page has left fullscreen.
+// flow, below #topbar, wholly inside the viewport. `fullscreenchange` can be
+// delivered after `exitFullscreen()` resolved, so the layout is what says the
+// page has left fullscreen.
 async function waitWindowedFit(page: Page): Promise<void> {
   await expect
     .poll(
       async () => {
         const metrics = await measure(page);
         return (
-          metrics.rect.top >= metrics.headingBottom &&
+          metrics.rect.top >= metrics.topbarBottom &&
           metrics.rect.bottom <= metrics.innerHeight &&
           metrics.rect.left >= 0 &&
           metrics.rect.right <= metrics.innerWidth
@@ -153,23 +148,40 @@ async function waitWindowedFit(page: Page): Promise<void> {
     .toBe(true);
 }
 
-test("1: after Play the game is windowed, with #play-controls and #fullscreen shown", async ({ page }, info) => {
-  await startPlaying(page, info.outputPath());
+test("1: after the automatic start the game is windowed, with #topbar and #fullscreen shown", async ({
+  page,
+}, info) => {
+  // #fullscreen starts disabled until the canvas is visible (issue #159).
+  await page.setViewportSize(VIEWPORT);
+  await openLauncher(page, FAKE);
+  await expect(page.locator("#fullscreen")).toBeDisabled();
 
-  // Play does not ask for fullscreen: the game starts in the page.
+  await importInstall(page, info.outputPath());
+  await page.waitForFunction(
+    () => {
+      const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+      return canvas !== null && canvas.width === 1024 && canvas.height === 768;
+    },
+    null,
+    { timeout: WAIT },
+  );
+
+  // The engine start does not ask for fullscreen: the game runs in the page.
   expect((await fullscreen(page)).id).toBeNull();
   await expect(page.locator("#canvas")).toBeVisible();
-  // The controls above the canvas are what the player uses to go fullscreen.
-  await expect(page.locator("#play-controls")).toBeVisible();
-  await expect(page.locator("#play-controls #fullscreen")).toBeVisible();
+  // #topbar is the chrome above the game; the icon button lives in it and is
+  // enabled while the game plays.
+  await expect(page.locator("#topbar")).toBeVisible();
+  await expect(page.locator("#topbar #fullscreen")).toBeVisible();
+  await expect(page.locator("#fullscreen")).toBeEnabled();
 
-  // #80's windowed fit still holds.
+  // #80's windowed fit still holds, with #topbar as the anchor above it.
   const metrics = await measure(page);
   expect(metrics.fullscreenId).toBeNull();
   expect(metrics.bufferWidth).toBe(1024);
   expect(metrics.bufferHeight).toBe(768);
   expect(metrics.rect.left).toBeGreaterThanOrEqual(0);
-  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.headingBottom);
+  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.topbarBottom);
   expect(metrics.rect.right).toBeLessThanOrEqual(metrics.innerWidth);
   expect(metrics.rect.bottom).toBeLessThanOrEqual(metrics.innerHeight);
   const bufferRatio = metrics.bufferWidth / metrics.bufferHeight;
@@ -178,7 +190,9 @@ test("1: after Play the game is windowed, with #play-controls and #fullscreen sh
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.innerWidth);
 });
 
-test("2: clicking #fullscreen puts #screen in fullscreen and leaves #canvas focused", async ({ page }, info) => {
+test("2: clicking #fullscreen puts #screen in fullscreen and leaves #canvas focused", async ({
+  page,
+}, info) => {
   await startPlaying(page, info.outputPath());
   await enterFullscreen(page);
 
@@ -253,7 +267,9 @@ test("5: a drawing-buffer change while fullscreen re-fits the canvas to 16:9", a
   expect(Math.abs(metrics.rect.top - (metrics.innerHeight - metrics.rect.bottom))).toBeLessThanOrEqual(1);
 });
 
-test("6: leaving fullscreen restores the windowed playing view with #fullscreen offered", async ({ page }, info) => {
+test("6: leaving fullscreen restores the windowed playing view with #fullscreen offered", async ({
+  page,
+}, info) => {
   await startPlaying(page, info.outputPath());
   await enterFullscreen(page);
   await waitCanvasSize(page, FIT_WIDTH, FIT_HEIGHT);
@@ -263,19 +279,20 @@ test("6: leaving fullscreen restores the windowed playing view with #fullscreen 
   await waitWindowedFit(page);
 
   await expect(page.locator("#canvas")).toBeVisible();
-  await expect(page.locator("#play-controls")).toBeVisible();
-  await expect(page.locator("#play-controls #fullscreen")).toBeVisible();
+  await expect(page.locator("#topbar")).toBeVisible();
+  await expect(page.locator("#topbar #fullscreen")).toBeVisible();
+  await expect(page.locator("#fullscreen")).toBeEnabled();
 
   const metrics = await measure(page);
   expect(metrics.fullscreenId).toBeNull();
   // The canvas keeps its drawing buffer.
   expect(metrics.bufferWidth).toBe(1024);
   expect(metrics.bufferHeight).toBe(768);
-  // #80's windowed fit: inside the viewport, below the heading, at the
-  // drawing buffer's aspect ratio, without horizontal scroll.
+  // #80's windowed fit: inside the viewport, below #topbar, at the drawing
+  // buffer's aspect ratio, without horizontal scroll.
   expect(metrics.rect.left).toBeGreaterThanOrEqual(0);
   expect(metrics.rect.top).toBeGreaterThanOrEqual(0);
-  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.headingBottom);
+  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.topbarBottom);
   expect(metrics.rect.right).toBeLessThanOrEqual(metrics.innerWidth);
   expect(metrics.rect.bottom).toBeLessThanOrEqual(metrics.innerHeight);
   const bufferRatio = metrics.bufferWidth / metrics.bufferHeight;

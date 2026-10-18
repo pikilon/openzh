@@ -1,11 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { CANVAS_FIT, importInstall, openLauncher } from "./helpers/launcher";
 
 // Issue #103: the launcher links a PNG icon at /app/favicon.png. The icon is an
 // extra: a 404 for it must never block importing the game data or starting the
-// engine, and the page names no EA trademark.
+// engine, and the page names no EA trademark. Since #159 the import starts the
+// fake engine by itself.
 
-const FAKE = "/harness/canvas/fit.js";
+const FAKE = CANVAS_FIT;
 const ICON_PATH = "/app/favicon.png";
 // The eight bytes every PNG file starts with.
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -45,18 +46,10 @@ test("3: a 404 for the icon still imports the install and starts the fake engine
     await route.fulfill({ status: 404, body: "" });
   });
 
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
+  await openLauncher(page, FAKE);
+  await expect(page.locator("body")).toHaveAttribute("data-state", "no-assets");
 
-  await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
+  await importInstall(page, info.outputPath());
   await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#engine-error")).toHaveCount(1);
   await expect(page.locator("#engine-error")).toBeHidden();

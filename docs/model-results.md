@@ -118,5 +118,7 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-19 | #173 | spec | deepseek-flash (dsh) | ok | brief only | docs/briefs/173-web-1080p-max-graphics.md: web-only 1920x1080, VeryHigh, 4x MSAA, 16x anisotropy, terrain max, dynamic LOD off, log line and real-data canvas check |
 | 2026-10-19 | #173 | tests | deepseek-flash (dsh) | ok | ~8 min | 3 pass, 1 skipped; synthetic log test failed on the old build (no GENERALSX_GRAPHICS), passes with the new engine; real-data canvas spec skips without ZIPs |
 | 2026-10-19 | #173 | code | deepseek-flash (dsh) | ok | ~3 min | build exit 0; 304 pass, 17 skipped; log line `GENERALSX_GRAPHICS xres=1920 yres=1080 lod=VeryHigh aa=4 filter=4 anisotropy=16 dynamicLOD=0` observed |
+| 2026-10-19 | #180 | tests | deepseek-flash (dsh) | ok | ~4.7 min | wav-mp3 lib and --voices-mp3 option; includes a compile-and-decode check with the engine's own miniaudio (call 88) |
+| 2026-10-19 | #180 | code | deepseek-flash (dsh) | ok | ~1.9 min | 41 pass; real game: 8579 wav to 48 kbps MP3, 700 MB saved vs the originals; lite-mp3 1.48 GB; engine real-data specs pass (call 89) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

@@ -1,17 +1,19 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { importInstall, openLauncher, waitForState } from "./helpers/launcher";
 
 // Issue #99: while the page is hidden or the window has lost focus the game is
 // silent; when it is visible and focused again the previous volumes come back.
 // The page tells the engine through `_GeneralsXSetAudioMuted`, the export of
 // the module factory's result. The fake engine (`module` query parameter)
 // records every value the page sends in `window.__muteCalls`; the second fake
-// resolves to an engine object without that export.
+// resolves to an engine object without that export. Since #159 the import
+// starts the engine by itself: no test presses Play, and the user's own mute
+// choice in #mute is T1's concern, not this spec's.
 
 const MUTE_FAKE = "/harness/mute/records.js";
 const NO_EXPORT_FAKE = "/harness/mute/no-export.js";
 const VIEWPORT = { width: 1280, height: 800 };
-const WAIT = 10_000;
+const WAIT = 30_000;
 
 type Probe = Window &
   typeof globalThis & {
@@ -20,24 +22,13 @@ type Probe = Window &
     __unhandledRejections?: string[];
   };
 
-// Opens the launcher like tests/launcher-canvas.spec.ts, imports a complete
-// synthetic install (what enables Play) and presses Play with the given fake
-// engine. On return the canvas is shown and the page is starting the engine.
+// Opens the launcher like tests/launcher-canvas.spec.ts and imports a complete
+// synthetic install with the given fake engine. The import starts the engine
+// automatically, so on return the canvas is shown and the game is playing.
 async function startPlaying(page: Page, dir: string, module: string): Promise<void> {
   await page.setViewportSize(VIEWPORT);
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-
-  await page.goto(`/app/index.html?module=${encodeURIComponent(module)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(dir));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
-  await expect(page.locator("#canvas")).toBeVisible();
+  await openLauncher(page, module);
+  await importInstall(page, dir);
 }
 
 // The recording fake creates window.__muteCalls when its factory runs. The
@@ -50,6 +41,7 @@ async function waitForMuteEngine(page: Page): Promise<void> {
     null,
     { timeout: WAIT },
   );
+  await waitForState(page, "playing", WAIT);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: WAIT });
   await expect(page.locator("#engine-error")).toBeHidden();
 }
@@ -81,7 +73,9 @@ async function nextFrame(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
 
-test("1: a blur on the window after Play makes the engine receive 1", async ({ page }, info) => {
+test("1: a blur on the window after the automatic start makes the engine receive 1", async ({
+  page,
+}, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
 
@@ -101,7 +95,9 @@ test("2: after a blur, a focus on the window makes the engine receive 0", async 
   await waitForLastMuteCall(page, 0);
 });
 
-test("3: a visibilitychange while the document is hidden mutes with 1, and visible again unmutes with 0", async ({ page }, info) => {
+test("3: a visibilitychange while the document is hidden mutes with 1, and visible again unmutes with 0", async ({
+  page,
+}, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
 
@@ -121,9 +117,12 @@ test("3: a visibilitychange while the document is hidden mutes with 1, and visib
   await waitForLastMuteCall(page, 0);
 });
 
-test("4: a page hidden before Play makes the engine receive 1 as its first value", async ({ page }, info) => {
-  // Hidden before the first goto: Play is pressed on a page that never was
-  // visible, so the engine has to be muted as soon as the module is available.
+test("4: a page hidden before the engine starts makes the engine receive 1 as its first value", async ({
+  page,
+}, info) => {
+  // Hidden before the first goto: the import starts the engine on a page that
+  // never was visible, so the engine has to be muted as soon as the module is
+  // available.
   await page.addInitScript(() => {
     Object.defineProperty(document, "visibilityState", { get: () => "hidden", configurable: true });
   });
@@ -158,13 +157,16 @@ test("5: a fake engine without _GeneralsXSetAudioMuted keeps playing with no err
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await nextFrame(page);
 
+  await waitForState(page, "playing", WAIT);
   await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#engine-error")).toBeHidden();
   expect(pageErrors).toEqual([]);
   expect(await page.evaluate(() => (window as unknown as Probe).__unhandledRejections)).toEqual([]);
 });
 
-test("6: a visible but unfocused page is muted, and a focus while hidden keeps it muted", async ({ page }, info) => {
+test("6: a visible but unfocused page is muted, and a focus while hidden keeps it muted", async ({
+  page,
+}, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
 

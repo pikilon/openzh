@@ -3,10 +3,19 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { buildBig } from "./helpers/big";
 import { buildZip, type BuildZipEntry } from "./helpers/zip";
+import {
+  openLauncher,
+  RESOLVES,
+  START_TIMEOUT,
+  waitForState,
+} from "./helpers/launcher";
 
 // Issue #129: a stored install survives reloads and browser restarts, and an
 // interrupted import resumes. The launcher is driven through /app/index.html,
 // in one browser context per test, so a reload keeps the same OPFS profile.
+// Issue #159: a complete install starts the engine by itself (no Play click)
+// and the removed "Clear stored archives" button is replaced by the menu's
+// Reload game data action or the harness reset.
 
 const REQUIRED = ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"] as const;
 const MB = 1024 * 1024;
@@ -52,13 +61,6 @@ function expectedArchives(): Map<string, { size: number; sha256: string }> {
       return [file.path, { size: file.data.length, sha256: sha256(file.data) }];
     }),
   );
-}
-
-async function openLauncher(page: Page): Promise<void> {
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 }
 
 async function pickZips(page: Page, files: { name: string; bytes: Uint8Array }[]): Promise<void> {
@@ -166,16 +168,20 @@ test("1: a stored install survives a reload with no ZIP request", async ({ page 
     if (/\.zip(?:$|\?)/i.test(request.url())) zipRequests.push(request.url());
   });
 
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
 
   zipRequests.length = 0;
   await page.reload();
 
+  // The next page load finds the four archives and starts the engine by
+  // itself; #159 removed the Play button.
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await waitForState(page, "playing");
+  await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#status")).not.toHaveText("Importing");
   expect(zipRequests).toEqual([]);
 });
@@ -218,12 +224,13 @@ test("2: after a forced failure on the third file, a second import writes only t
     };
   });
 
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const zip = await smallZip();
   await pickZips(page, [{ name: "game.zip", bytes: zip }]);
 
   await expect(page.locator("#status")).toHaveText("Import failed", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");
+  await waitForState(page, "no-assets");
   const expected = expectedArchives();
   const first = archivesOf(await storedEntries(page));
   expect(first.map((entry) => entry.path)).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
@@ -245,8 +252,9 @@ test("2: after a forced failure on the third file, a second import writes only t
   await pickZips(page, [{ name: "game.zip", bytes: zip }]);
 
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
 
   const writes = await page.evaluate(
     () => (window as unknown as { __writes: Record<string, number> }).__writes,
@@ -310,7 +318,7 @@ test("3: a reload midway through a 40 MB import leaves only complete archives, a
     };
   });
 
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await page.locator("#zip-input").setInputFiles(zipPath);
 
   // Wait for the first archive to be complete (its expected size), then reload
@@ -330,6 +338,9 @@ test("3: a reload midway through a 40 MB import leaves only complete archives, a
     .toBeGreaterThanOrEqual(1);
 
   await page.reload();
+  // Only the complete archives survived, so the stored install is still
+  // incomplete and the #159 shell shows the loader instead of starting.
+  await waitForState(page, "no-assets");
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
 
   const afterReload = archivesOf(await storedEntries(page));
@@ -351,9 +362,12 @@ test("3: a reload midway through a 40 MB import leaves only complete archives, a
     .toHaveText(`Stored: ${completeAfterReload.length} archives`);
 
   // Picking the same ZIP again writes the missing archives and nothing else.
+  // #159: the completed import starts the engine by itself.
   await page.locator("#zip-input").setInputFiles(zipPath);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 60_000 });
+  await waitForState(page, "playing", 60_000);
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await expect(page.locator("#canvas")).toBeVisible();
 
   const complete = archivesOf(await storedEntries(page));
   expect(complete).toHaveLength(4);
@@ -382,12 +396,14 @@ test("4: persist() is called once per import and before the first OPFS write", a
     };
   });
 
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await page.evaluate(() => {
     (window as unknown as { __events: string[] }).__events.length = 0;
   });
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  // The import auto-starts the fake engine; it writes nothing to OPFS.
+  await waitForState(page, "playing");
 
   const events = await page.evaluate(
     () => (window as unknown as { __events: string[] }).__events,
@@ -414,24 +430,27 @@ test("5: when persist() resolves false the import ends Ready and the storage lin
     });
   });
 
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
 
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#import-error")).toBeHidden();
   await expect(page.locator("#storage")).toContainText(
     /may be cleared by the browser when space is low/i,
   );
 });
 
-test("6: #clear removes the archives, and a reload shows nothing stored", async ({ page }) => {
+test("6: the menu's Reload game data removes the game data, and a reload shows nothing stored", async ({
+  page,
+}) => {
   const extras = [
     { path: "readme.txt", data: new TextEncoder().encode("synthetic install notes\n") },
     { path: "Data/English/strings.csv", data: new TextEncoder().encode("name,value\nlord,1\n") },
   ];
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [
     {
       name: "game.zip",
@@ -442,16 +461,28 @@ test("6: #clear removes the archives, and a reload shows nothing stored", async 
     },
   ]);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   expect(await listExtra(page)).toEqual([]);
 
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-  await expect(page.locator("#play")).toBeDisabled();
+  // #159 removed "Clear stored archives": the menu's "Reload game data" is the
+  // player's replacement, and it only deletes after #reload-confirm.
+  await page.locator("#menu-button").click();
+  await expect(page.locator("#menu")).toHaveAttribute("open", "");
+  await page.locator("#reload").click();
+  await expect(page.locator("#reload-dialog")).toHaveAttribute("open", "");
+  const reloaded = page.waitForEvent("load");
+  await page.locator("#reload-confirm").click();
+  await reloaded;
 
-  await page.reload();
+  await waitForState(page, "no-assets");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-  await expect(page.locator("#play")).toBeDisabled();
+  await expect(page.locator("#canvas")).toBeHidden();
+
+  // The cleared store survives another reload.
+  await page.reload();
+  await waitForState(page, "no-assets");
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
   expect(await listExtra(page)).toEqual([]);
   expect(await storedEntries(page)).toEqual([]);
 });
@@ -465,7 +496,7 @@ test("7: non-.big files are ignored across a reload and listExtra stays empty", 
     { path: "Data/English/strings.csv", data: encoder.encode("name,value\nlord,1\n") },
     { path: "Data/English/deeper/notes.txt", data: encoder.encode("nested extra\n") },
   ];
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [
     {
       name: "game.zip",
@@ -476,11 +507,14 @@ test("7: non-.big files are ignored across a reload and listExtra stays empty", 
     },
   ]);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
 
   await page.reload();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  // The stored install starts again by itself after the reload.
+  await waitForState(page, "playing");
+  await expect(page.locator("#canvas")).toBeVisible();
 
   expect(await listExtra(page)).toEqual([]);
   const bytes = await storedEntries(page);

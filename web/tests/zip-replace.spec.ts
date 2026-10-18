@@ -3,10 +3,24 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { buildZip, corrupt, type BuildZipEntry } from "./helpers/zip";
 import { installZip } from "./helpers/install-zip";
+import {
+  clearStored,
+  launcherUrl,
+  removeStoredArchive,
+  RESOLVES,
+  seedInstall,
+  START_TIMEOUT,
+  waitForState,
+  warningSamples,
+  watchWarning,
+} from "./helpers/launcher";
 
 // Issue #157: loading ZIPs replaces the previous install. Page tests go through
 // /harness/index.html like zip-import.spec.ts; the launcher tests drive
-// /app/index.html like launcher-zip.spec.ts.
+// /app/index.html like launcher-zip.spec.ts. Issue #159: a complete install
+// starts the engine by itself, so a stored previous install is seeded through
+// the harness and one required archive removed to keep the shell on the loader
+// (the same migration launcher-zip.spec.ts uses).
 
 const encoder = new TextEncoder();
 
@@ -143,11 +157,34 @@ async function openHarness(page: Page): Promise<void> {
   await page.evaluate(() => (window as any).zhwp.clearStored());
 }
 
-async function openLauncher(page: Page): Promise<void> {
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
+// Stores a complete install through the harness (no engine holds its files),
+// then removes one required archive so the #159 shell shows the loader instead
+// of starting the game. The launcher tests below pick ZIPs from there.
+const LAUNCHER_ARCHIVES = [
+  "generals/INI.big",
+  "generals/W3D.big",
+  "zh/INIZH.big",
+  "zh/W3DZH.big",
+];
+
+async function seedLauncherInstall(
+  page: Page,
+  entries: BuildZipEntry[],
+  expectedFiles: string[],
+  remainingArchives: number,
+): Promise<void> {
+  await openHarness(page);
+  await importZips(page, entries);
+  expect(await storedFiles(page)).toEqual([...expectedFiles].sort());
+  await removeStoredArchive(page, "generals/INI.big");
+
+  await page.goto(launcherUrl(RESOLVES));
+  await expect(page.locator("#topbar")).toBeVisible();
+  await waitForState(page, "no-assets");
+  // One of the four required archives is gone, so the shell lists the rest.
+  await expect(page.locator("#stored-summary")).toHaveText(
+    `Stored: ${remainingArchives} archives`,
+  );
 }
 
 interface ZipFixture {
@@ -878,8 +915,6 @@ test("7: a legacy extra/ tree is removed by the next import, empty directories i
 test("8: picking ZIPs after an install replaces it and #status shows the removal first", async ({
   page,
 }) => {
-  await openLauncher(page);
-
   const required = requiredFiles();
   const aOnly: RequiredFile = {
     kind: "generals",
@@ -892,10 +927,18 @@ test("8: picking ZIPs after an install replaces it and #status shows the removal
     archiveEntry(aOnly),
     { path: aExtra.path, data: aExtra.data, method: "store" },
   ];
-  await pickZips(page, [{ name: "install-a.zip", bytes: await buildZip(aEntries) }]);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 5 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  // The complete previous install A already fills the store; one required
+  // archive is removed only so the #159 shell stays on the loader for the
+  // second pick instead of starting A by itself.
+  await seedLauncherInstall(
+    page,
+    aEntries,
+    [
+      ...required.map((file) => storedPathOfArchive(file)),
+      storedPathOfArchive(aOnly),
+    ],
+    4,
+  );
 
   const bArchives: RequiredFile[] = [
     { kind: "generals", name: "BONLY1.big", data: bytes(500, 91) },
@@ -911,9 +954,10 @@ test("8: picking ZIPs after an install replaces it and #status shows the removal
   await watchStatus(page);
   await pickZips(page, [{ name: "install-b.zip", bytes: await buildZip(bEntries) }]);
 
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
+  await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 6 archives");
-  await expect(page.locator("#play")).toBeEnabled();
 
   const files = await storedFiles(page);
   expect(files).toEqual(
@@ -938,17 +982,16 @@ test("8: picking ZIPs after an install replaces it and #status shows the removal
   expect(ready).toBeGreaterThan(importing);
 });
 
-test("9: picking a bad ZIP after an install shows the error and keeps #play and the summary", async ({
+test("9: picking a bad ZIP after an install shows the error and keeps the stored install", async ({
   page,
 }) => {
-  await openLauncher(page);
-
   const required = requiredFiles();
-  await pickZips(page, [
-    { name: "install.zip", bytes: await buildZip(zipEntries(required)) },
-  ]);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await seedLauncherInstall(
+    page,
+    zipEntries(required),
+    required.map((file) => storedPathOfArchive(file)),
+    3,
+  );
   const before = await storedFiles(page);
 
   const bad = await buildZip([
@@ -961,8 +1004,10 @@ test("9: picking a bad ZIP after an install shows the error and keeps #play and 
   await expect(error).toBeVisible();
   await expect(error).toHaveAttribute("data-code", "missing-archives");
   await expect(page.locator("#status")).toHaveText("Import failed");
-  await expect(page.locator("#play")).toBeEnabled();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  // #159 removed #play: the failed pick leaves the shell on the loader and the
+  // stored install untouched, so the player can pick a complete set instead.
+  await waitForState(page, "no-assets");
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 3 archives");
   expect(await storedFiles(page)).toEqual(before);
 });
 
@@ -999,22 +1044,29 @@ test("10: the storage warning is hidden when free space plus the bytes to remove
       configurable: true,
     });
   });
-  await openLauncher(page);
+  // #159: seed the complete previous install through the harness, remove one
+  // required archive so the shell shows the loader, then pick B. The automatic
+  // start would otherwise hide the loader before the pick.
+  await clearStored(page);
+  await seedInstall(page, aPath);
+  expect(await storedFiles(page)).toEqual([...LAUNCHER_ARCHIVES].sort());
+  await removeStoredArchive(page, "generals/INI.big");
 
-  await page.locator("#zip-input").setInputFiles(aPath);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await page.goto(launcherUrl(RESOLVES));
+  await expect(page.locator("#topbar")).toBeVisible();
+  await waitForState(page, "no-assets");
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 3 archives");
+  await watchWarning(page);
 
   await page.locator("#zip-input").setInputFiles(bPath);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#storage-warning")).toBeHidden();
-  expect(await storedFiles(page)).toEqual([
-    "generals/INI.big",
-    "generals/W3D.big",
-    "zh/INIZH.big",
-    "zh/W3DZH.big",
-  ]);
+  // The loader hides with the auto-started game, so the recorded samples prove
+  // the warning never appeared instead of a visibility check on a hidden panel.
+  const shown = (await warningSamples(page)).filter((sample) => sample.visible);
+  expect(shown).toEqual([]);
+  expect(await storedFiles(page)).toEqual([...LAUNCHER_ARCHIVES].sort());
 });
 
 test("10: the storage warning is shown when free space plus the bytes to remove does not cover it", async ({
@@ -1048,18 +1100,41 @@ test("10: the storage warning is shown when free space plus the bytes to remove 
       configurable: true,
     });
   });
-  await openLauncher(page);
+  // Same #159 setup as the hidden case: seed A through the harness, leave the
+  // shell on the loader and pick B.
+  await clearStored(page);
+  await seedInstall(page, aPath);
+  expect(await storedFiles(page)).toEqual([...LAUNCHER_ARCHIVES].sort());
+  await removeStoredArchive(page, "generals/INI.big");
 
-  await page.locator("#zip-input").setInputFiles(aPath);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await page.goto(launcherUrl(RESOLVES));
+  await expect(page.locator("#topbar")).toBeVisible();
+  await waitForState(page, "no-assets");
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 3 archives");
+  await watchWarning(page);
 
   await page.locator("#zip-input").setInputFiles(bPath);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await waitForState(page, "playing");
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
 
   const warning = page.locator("#storage-warning");
-  await expect(warning).toBeVisible();
   await expect(warning).toHaveText(
     /^The browser reports 1 B available; the import needs \d+(?:\.\d+)? (?:B|KB|MB|GB)\.$/,
   );
+  // The warning is shown before the writes; the auto-started game then hides
+  // the loader, so the samples are what proves it appeared.
+  await expect
+    .poll(
+      async () =>
+        (await warningSamples(page)).some(
+          (sample) =>
+            sample.visible &&
+            /^The browser reports 1 B available; the import needs \d+(?:\.\d+)? (?:B|KB|MB|GB)\.$/.test(
+              sample.text,
+            ),
+        ),
+      { timeout: START_TIMEOUT },
+    )
+    .toBe(true);
 });

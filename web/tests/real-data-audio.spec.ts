@@ -1,16 +1,18 @@
 import { gameZips } from "./helpers/real-game";
+import { openLauncher, START_TIMEOUT, waitForState } from "./helpers/launcher";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 
-// Issue #35: with the owner's real game data, after the Play click (the user
-// gesture) the engine's audio backend must create a running AudioContext whose
-// clock advances, and the engine must log the sounds it plays. Local only:
-// skipped unless ZHWP_GAME_ZIPS lists the game ZIPs (make-game-zip.mjs --split), which hold both game
-// installs. Nothing from the game is copied into the repository.
+// Issue #35: with the owner's real game data, after the automatic engine start
+// (the ZIP import is the user gesture) the engine's audio backend must create a
+// running AudioContext whose clock advances, and the engine must log the sounds
+// it plays. Local only: skipped unless ZHWP_GAME_ZIPS lists the game ZIPs
+// (make-game-zip.mjs --split), which hold both game installs. Nothing from the
+// game is copied into the repository.
 const gameZipPaths = gameZips();
 
 test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
-// The five criteria describe one run: from Play until 5 s after
+// The five criteria describe one run: from the automatic start until 5 s after
 // GENERALSX_LOAD_DONE and 5 s more for the clock to advance. The run happens
 // once in beforeAll and each test checks its own criterion against the same
 // snapshots and log.
@@ -28,7 +30,7 @@ async function readAudioContexts(page: Page): Promise<AudioContextSnapshot[]> {
 test.describe("audio on the real engine", () => {
   let context: BrowserContext;
   let page: Page;
-  let beforePlay: AudioContextSnapshot[] = [];
+  let beforeEngine: AudioContextSnapshot[] = [];
   let afterLoad: AudioContextSnapshot[] = [];
   let later: AudioContextSnapshot[] = [];
   let log: string[] = [];
@@ -53,18 +55,18 @@ test.describe("audio on the real engine", () => {
         });
       }
     });
-    await page.goto("/app/index.html");
-    await page.locator("#clear").click();
+    await openLauncher(page);
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
+    // Criterion 1: the launcher itself must not have created a context before
+    // the ZIP import starts the engine (#159 removed the Play click).
+    beforeEngine = await readAudioContexts(page);
+
     await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
-    await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
-    await expect(page.locator("#play")).toBeEnabled();
+    // The complete import starts the engine by itself.
+    await waitForState(page, "playing", 10 * 60_000);
+    await expect(page.locator("#status")).toContainText("Ready", { timeout: START_TIMEOUT });
 
-    // Criterion 1: the launcher itself must not have created a context yet.
-    beforePlay = await readAudioContexts(page);
-
-    await page.locator("#play").click();
     // The shell map loads behind the main menu; its end is GENERALSX_LOAD_DONE.
     await page.waitForFunction(
       () => ((window as unknown as { __zhwpLog?: string[] }).__zhwpLog ?? []).some((line) => line.includes("GENERALSX_LOAD_DONE")),
@@ -85,8 +87,8 @@ test.describe("audio on the real engine", () => {
     await context?.close();
   });
 
-  test("1: no AudioContext exists before #play is clicked", () => {
-    expect(beforePlay, `AudioContexts created before #play: ${JSON.stringify(beforePlay)}`).toEqual([]);
+  test("1: no AudioContext exists before the engine starts", () => {
+    expect(beforeEngine, `AudioContexts created before the engine started: ${JSON.stringify(beforeEngine)}`).toEqual([]);
   });
 
   test("2: at least one AudioContext is running after the engine loaded", () => {

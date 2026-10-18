@@ -1,21 +1,20 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { importInstall, openLauncher, START_TIMEOUT, WIDE_LAYOUT } from "./helpers/launcher";
 
 // Issue #97: while the game runs windowed, the canvas is the largest rectangle
-// with the drawing buffer's aspect ratio that fits below the page text and the
-// playing controls, inside the window, and the page does not scroll. The fake
-// engine (`module` query parameter) sets a 1280x720 drawing buffer, the shape a
-// wide window has to show; the page only scales it.
+// with the drawing buffer's aspect ratio that fits below the top bar, inside
+// the window, and the page does not scroll. Issue #159 replaced
+// #play-controls with #topbar and removed Play: the import starts the engine.
+// The fake engine (`module` query parameter) sets a 1280x720 drawing buffer,
+// the shape a wide window has to show; the page only scales it.
 
-const FAKE = "/harness/layout/wide.js";
+const FAKE = WIDE_LAYOUT;
 const BUFFER = { width: 1280, height: 720 };
 const SMALL_VIEWPORT = { width: 1280, height: 800 };
 const LARGE_VIEWPORT = { width: 1920, height: 1080 };
-// The launcher's readable column: 48rem at the browser's default 16 px root.
-const READABLE_COLUMN = 768;
 const ONE_PX = 1;
 const ASPECT_TOLERANCE = 0.01;
-const WAIT = 10_000;
+const WAIT = START_TIMEOUT;
 
 type Rect = { left: number; top: number; right: number; bottom: number; width: number; height: number };
 
@@ -24,16 +23,9 @@ type Metrics = {
   innerHeight: number;
   scrollWidth: number;
   scrollHeight: number;
-  // The space the brief gives the game: horizontally the body's content width,
-  // which is the viewport minus its horizontal padding; vertically, from the
-  // bottom of the playing controls to the bottom of the viewport.
-  contentLeft: number;
-  contentRight: number;
-  contentWidth: number;
-  controlsBottom: number | null;
+  // The space the brief gives the game: the whole window below #topbar.
+  topbarBottom: number;
   canvas: Rect;
-  headingWidth: number;
-  introWidth: number;
   bufferWidth: number;
   bufferHeight: number;
   attrWidth: string | null;
@@ -41,28 +33,18 @@ type Metrics = {
 };
 
 // Everything the criteria measure, read from the page's own layout: element
-// boxes and the computed horizontal padding of the body, never a scroll offset
-// or a guessed size.
+// boxes, never a scroll offset or a guessed size.
 async function measure(page: Page): Promise<Metrics> {
   return page.evaluate(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-    const controls = document.getElementById("play-controls");
-    const bodyStyle = getComputedStyle(document.body);
-    const paddingLeft = parseFloat(bodyStyle.paddingLeft);
-    const paddingRight = parseFloat(bodyStyle.paddingRight);
-    const layoutWidth = document.documentElement.clientWidth;
+    const topbar = document.getElementById("topbar") as HTMLElement;
     const rect = canvas.getBoundingClientRect();
-    const heading = document.querySelector("h1") as HTMLElement;
-    const intro = document.querySelector("main p.note") as HTMLElement;
     return {
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       scrollWidth: document.documentElement.scrollWidth,
       scrollHeight: document.documentElement.scrollHeight,
-      contentLeft: paddingLeft,
-      contentRight: layoutWidth - paddingRight,
-      contentWidth: layoutWidth - paddingLeft - paddingRight,
-      controlsBottom: controls === null ? null : controls.getBoundingClientRect().bottom,
+      topbarBottom: topbar.getBoundingClientRect().bottom,
       canvas: {
         left: rect.left,
         top: rect.top,
@@ -71,8 +53,6 @@ async function measure(page: Page): Promise<Metrics> {
         width: rect.width,
         height: rect.height,
       },
-      headingWidth: heading.getBoundingClientRect().width,
-      introWidth: intro.getBoundingClientRect().width,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       attrWidth: canvas.getAttribute("width"),
@@ -94,8 +74,7 @@ async function waitForSettledLayout(page: Page): Promise<void> {
           metrics.canvas,
           metrics.scrollWidth,
           metrics.scrollHeight,
-          metrics.contentWidth,
-          metrics.controlsBottom,
+          metrics.topbarBottom,
         ]);
         const settled = current === previous;
         previous = current;
@@ -107,31 +86,16 @@ async function waitForSettledLayout(page: Page): Promise<void> {
 }
 
 // Opens the launcher at the target viewport, imports a complete synthetic
-// install (what enables Play) and starts the fake engine, exactly like
-// tests/launcher-canvas.spec.ts. On return the canvas is shown and its drawing
-// buffer is 1280x720.
-async function startPlaying(page: Page, viewport: { width: number; height: number }, dir: string): Promise<void> {
+// install (which auto-starts the fake engine) and waits for its 1280x720
+// drawing buffer. On return the canvas is shown and playing, without Play.
+async function startPlaying(
+  page: Page,
+  viewport: { width: number; height: number },
+  dir: string,
+): Promise<void> {
   await page.setViewportSize(viewport);
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-
-  await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(dir));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
-  await expect(page.locator("#canvas")).toBeVisible();
-  // Issue #91: Play may enter fullscreen, and this spec measures the windowed
-  // playing view. Leave it the way the browser's Esc does, and only when the
-  // page actually entered it.
-  await page.evaluate(async () => {
-    if (document.fullscreenElement !== null) await document.exitFullscreen();
-  });
-  await page.waitForFunction(() => document.fullscreenElement === null);
+  await openLauncher(page, FAKE);
+  await importInstall(page, dir);
   // The engine writes the drawing buffer the page has to display.
   await page.waitForFunction(
     (buffer) => {
@@ -144,23 +108,24 @@ async function startPlaying(page: Page, viewport: { width: number; height: numbe
   await waitForSettledLayout(page);
 }
 
-// The vertical space the brief gives the game: from the bottom of the playing
-// controls (#91's bar) to the bottom of the viewport. Without that bar there is
-// no anchor above the canvas, so the space is unknown.
-function spaceBelowControls(metrics: Metrics): number | null {
-  return metrics.controlsBottom === null ? null : metrics.innerHeight - metrics.controlsBottom;
-}
-
 // The drawing buffer's aspect ratio the displayed canvas has to keep.
 function bufferRatio(metrics: Metrics): number {
   return metrics.bufferWidth / metrics.bufferHeight;
 }
 
-test("1: at 1280x800 the playing page does not scroll and the canvas is inside the viewport", async ({ page }, info) => {
+// The vertical space the brief gives the game: from the bottom of #topbar to
+// the bottom of the viewport.
+function spaceBelowTopbar(metrics: Metrics): number {
+  return metrics.innerHeight - metrics.topbarBottom;
+}
+
+test("1: at 1280x800 the playing page does not scroll and the canvas is inside the viewport", async ({
+  page,
+}, info) => {
   await startPlaying(page, SMALL_VIEWPORT, info.outputPath());
   const metrics = await measure(page);
 
-  // The state the criterion describes: a 1280x720 buffer after Play.
+  // The state the criterion describes: a 1280x720 buffer after the import.
   expect(metrics.innerWidth).toBe(SMALL_VIEWPORT.width);
   expect(metrics.innerHeight).toBe(SMALL_VIEWPORT.height);
   expect(metrics.bufferWidth).toBe(BUFFER.width);
@@ -175,7 +140,7 @@ test("1: at 1280x800 the playing page does not scroll and the canvas is inside t
   expect(metrics.canvas.bottom).toBeLessThanOrEqual(metrics.innerHeight + ONE_PX);
 });
 
-test("2: at 1280x800 the canvas is the largest 16:9 rectangle below the playing controls", async ({ page }, info) => {
+test("2: at 1280x800 the canvas is the largest 16:9 rectangle below #topbar", async ({ page }, info) => {
   await startPlaying(page, SMALL_VIEWPORT, info.outputPath());
   const metrics = await measure(page);
 
@@ -187,27 +152,22 @@ test("2: at 1280x800 the canvas is the largest 16:9 rectangle below the playing 
   const ratio = bufferRatio(metrics);
   const shownRatio = metrics.canvas.width / metrics.canvas.height;
   expect(Math.abs(shownRatio - ratio) / ratio).toBeLessThanOrEqual(ASPECT_TOLERANCE);
-  // It is the largest such rectangle: as tall as the space below the playing
-  // controls, or as wide as the body's content width.
-  const availableHeight = spaceBelowControls(metrics);
-  const availableWidth = metrics.contentWidth;
-  const fillsHeight = availableHeight !== null && Math.abs(metrics.canvas.height - availableHeight) <= ONE_PX;
+  // It is the largest such rectangle: as tall as the space below #topbar, or
+  // as wide as the window.
+  const availableHeight = spaceBelowTopbar(metrics);
+  const availableWidth = metrics.innerWidth;
+  const fillsHeight = Math.abs(metrics.canvas.height - availableHeight) <= ONE_PX;
   const fillsWidth = Math.abs(metrics.canvas.width - availableWidth) <= ONE_PX;
   expect(
     fillsHeight || fillsWidth,
     `the canvas is ${metrics.canvas.width}x${metrics.canvas.height}, ` +
-      `neither ${availableWidth} wide nor ` +
-      (availableHeight === null ? "anchored to #play-controls" : `${availableHeight} tall`),
+      `neither ${availableWidth} wide nor ${availableHeight} tall`,
   ).toBe(true);
-  // The canvas starts at the bottom of the playing controls (#91), within 1 px.
-  // Without that bar nothing takes space above the canvas, so the size rule
-  // above is what the criterion leaves to check.
-  if (metrics.controlsBottom !== null) {
-    expect(Math.abs(metrics.canvas.top - metrics.controlsBottom)).toBeLessThanOrEqual(ONE_PX);
-  }
+  // The canvas starts at the bottom of #topbar, within 1 px.
+  expect(Math.abs(metrics.canvas.top - metrics.topbarBottom)).toBeLessThanOrEqual(ONE_PX);
 });
 
-test("3: at 1280x800 the canvas is horizontally centred in the body's content area", async ({ page }, info) => {
+test("3: at 1280x800 the canvas is horizontally centred in the window", async ({ page }, info) => {
   await startPlaying(page, SMALL_VIEWPORT, info.outputPath());
   const metrics = await measure(page);
 
@@ -215,16 +175,15 @@ test("3: at 1280x800 the canvas is horizontally centred in the body's content ar
   expect(metrics.innerHeight).toBe(SMALL_VIEWPORT.height);
   expect(metrics.bufferWidth).toBe(BUFFER.width);
   expect(metrics.bufferHeight).toBe(BUFFER.height);
-  // The canvas sits inside the body's content area ...
-  const leftGap = metrics.canvas.left - metrics.contentLeft;
-  const rightGap = metrics.contentRight - metrics.canvas.right;
-  expect(leftGap).toBeGreaterThanOrEqual(-ONE_PX);
-  expect(rightGap).toBeGreaterThanOrEqual(-ONE_PX);
-  // ... and the two side gaps are the same, within 1 px.
-  expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(ONE_PX);
+  // The two side gaps are the same, within 1 px.
+  expect(Math.abs(metrics.canvas.left - (metrics.innerWidth - metrics.canvas.right))).toBeLessThanOrEqual(
+    ONE_PX,
+  );
 });
 
-test("4: at 1920x1080 the canvas fills the height below the controls and is wider than 768 px", async ({ page }, info) => {
+test("4: at 1920x1080 the canvas fills the height below #topbar without scrolling", async ({
+  page,
+}, info) => {
   await startPlaying(page, LARGE_VIEWPORT, info.outputPath());
   const metrics = await measure(page);
 
@@ -232,30 +191,29 @@ test("4: at 1920x1080 the canvas fills the height below the controls and is wide
   expect(metrics.innerHeight).toBe(LARGE_VIEWPORT.height);
   expect(metrics.bufferWidth).toBe(BUFFER.width);
   expect(metrics.bufferHeight).toBe(BUFFER.height);
-  // A wide window is not capped by the launcher's readable column.
-  expect(metrics.canvas.width).toBeGreaterThan(READABLE_COLUMN);
+  // A wide window is height-limited: the canvas is exactly as tall as the
+  // space #topbar leaves, within 1 px.
+  const availableHeight = spaceBelowTopbar(metrics);
+  expect(Math.abs(metrics.canvas.height - availableHeight)).toBeLessThanOrEqual(ONE_PX);
   // It keeps the drawing buffer's aspect ratio, within 1%.
   const ratio = bufferRatio(metrics);
   const shownRatio = metrics.canvas.width / metrics.canvas.height;
   expect(Math.abs(shownRatio - ratio) / ratio).toBeLessThanOrEqual(ASPECT_TOLERANCE);
-  // It fills the height the playing controls leave (#91's bar above the
-  // canvas); without that bar, the width and aspect rules above are the ones
-  // the criterion leaves to check.
-  const availableHeight = spaceBelowControls(metrics);
-  if (availableHeight !== null) {
-    expect(Math.abs(metrics.canvas.height - availableHeight)).toBeLessThanOrEqual(ONE_PX);
-  }
+  // No page scrollbar from the larger window either.
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.innerHeight + ONE_PX);
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.innerWidth + ONE_PX);
 });
 
-test("5: at 1920x1080 the heading and the intro paragraph stay within 768 px", async ({ page }, info) => {
+test("5: at 1920x1080 the canvas is horizontally centred in the window", async ({ page }, info) => {
   await startPlaying(page, LARGE_VIEWPORT, info.outputPath());
   const metrics = await measure(page);
 
   expect(metrics.innerWidth).toBe(LARGE_VIEWPORT.width);
   expect(metrics.innerHeight).toBe(LARGE_VIEWPORT.height);
-  // The text keeps its readable column while the game gets the window.
-  expect(metrics.headingWidth).toBeLessThanOrEqual(READABLE_COLUMN);
-  expect(metrics.introWidth).toBeLessThanOrEqual(READABLE_COLUMN);
+  // The letterbox gaps on the left and on the right are the same, within 1 px.
+  expect(Math.abs(metrics.canvas.left - (metrics.innerWidth - metrics.canvas.right))).toBeLessThanOrEqual(
+    ONE_PX,
+  );
 });
 
 test("6: at 1920x1080 the canvas drawing buffer is still 1280x720", async ({ page }, info) => {

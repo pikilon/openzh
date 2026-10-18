@@ -1,36 +1,31 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { CANVAS_FIT, importInstall, openLauncher, START_TIMEOUT } from "./helpers/launcher";
 
 // Issue #80: while the game runs, the whole canvas is visible without
-// scrolling at 1280x800, keeping its drawing-buffer aspect ratio. The fake
-// engine (`module` query parameter) sizes the canvas to 1024x768 like the real
-// engine, so the page has to fit it; the engine never resizes it back.
+// scrolling at 1280x800, keeping its drawing-buffer aspect ratio. Issue #159
+// moved the anchor above the game from the page heading to #topbar and made
+// the import start the engine, so no test presses Play. The fake engine
+// (`module` query parameter) sizes the canvas to 1024x768 like the real engine,
+// so the page has to fit it; the engine never resizes it back.
 
-const FAKE = "/harness/canvas/fit.js";
+const FAKE = CANVAS_FIT;
 const VIEWPORT = { width: 1280, height: 800 };
 
 // Opens the launcher at the target viewport, imports a complete synthetic
-// install (what enables Play) and starts the fake engine. On return the canvas
-// is shown and its drawing buffer is 1024x768.
+// install (which auto-starts the fake engine) and waits for its 1024x768
+// drawing buffer. On return the canvas is shown and playing.
 async function startCanvas(page: Page, dir: string): Promise<void> {
   await page.setViewportSize(VIEWPORT);
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-
-  await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(dir));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
-  await expect(page.locator("#canvas")).toBeVisible();
-  await page.waitForFunction(() => {
-    const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
-    return canvas !== null && canvas.width === 1024 && canvas.height === 768;
-  });
+  await openLauncher(page, FAKE);
+  await importInstall(page, dir);
+  await page.waitForFunction(
+    () => {
+      const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
+      return canvas !== null && canvas.width === 1024 && canvas.height === 768;
+    },
+    null,
+    { timeout: START_TIMEOUT },
+  );
 }
 
 type Metrics = {
@@ -38,7 +33,7 @@ type Metrics = {
   viewportWidth: number;
   clientWidth: number;
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
-  headingBottom: number;
+  topbarBottom: number;
   bufferWidth: number;
   bufferHeight: number;
   attrWidth: string | null;
@@ -48,7 +43,7 @@ type Metrics = {
 async function measure(page: Page): Promise<Metrics> {
   return page.evaluate(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-    const heading = document.querySelector("h1") as HTMLElement;
+    const topbar = document.getElementById("topbar") as HTMLElement;
     const rect = canvas.getBoundingClientRect();
     return {
       scrollWidth: document.documentElement.scrollWidth,
@@ -62,7 +57,7 @@ async function measure(page: Page): Promise<Metrics> {
         width: rect.width,
         height: rect.height,
       },
-      headingBottom: heading.getBoundingClientRect().bottom,
+      topbarBottom: topbar.getBoundingClientRect().bottom,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       attrWidth: canvas.getAttribute("width"),
@@ -86,7 +81,7 @@ test("1: the page does not scroll sideways while the 1024x768 canvas is shown", 
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
 });
 
-test("2: the canvas is fully inside a 1280x800 viewport, below the heading", async ({ page }, info) => {
+test("2: the canvas is fully inside a 1280x800 viewport, below #topbar", async ({ page }, info) => {
   await startCanvas(page, info.outputPath());
   const metrics = await measure(page);
 
@@ -96,8 +91,9 @@ test("2: the canvas is fully inside a 1280x800 viewport, below the heading", asy
   expect(metrics.rect.top).toBeGreaterThanOrEqual(0);
   expect(metrics.rect.right).toBeLessThanOrEqual(metrics.viewportWidth);
   expect(metrics.rect.bottom).toBeLessThanOrEqual(VIEWPORT.height);
-  // The whole canvas fits in the area the page leaves below its heading.
-  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.headingBottom);
+  // #topbar is the only chrome above the game: the whole canvas fits in the
+  // area the page leaves below it.
+  expect(metrics.rect.top).toBeGreaterThanOrEqual(metrics.topbarBottom);
 });
 
 test("3: the displayed canvas keeps the drawing-buffer aspect ratio", async ({ page }, info) => {

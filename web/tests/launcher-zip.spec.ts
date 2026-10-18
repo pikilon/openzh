@@ -3,10 +3,26 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildBig } from "./helpers/big";
+import {
+  launcherUrl,
+  openLauncher,
+  removeStoredArchive,
+  RESOLVES,
+  seedInstall,
+  START_TIMEOUT,
+  storedPaths,
+  waitForState,
+  warningSamples,
+  watchWarning,
+} from "./helpers/launcher";
 import { buildZip, corrupt, type BuildZipEntry } from "./helpers/zip";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #128: the launcher loads the game from one or more ZIP files. The
-// element ids are the contract (docs/briefs/128-launcher-zip.md).
+// element ids are the contract (docs/briefs/128-launcher-zip.md). Issue #157: a
+// new import replaces the previous install and the status says so. Issue #159:
+// a complete import starts the engine by itself, so no test presses Play and
+// the removed "Clear stored archives" button is replaced by the harness reset.
 
 const REQUIRED = ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"];
 const ZH = ["INIZH.big", "W3DZH.big"];
@@ -29,8 +45,6 @@ interface Sample {
   current: string | null;
   currentVisible: boolean;
   cancelVisible: boolean;
-  playDisabled: boolean;
-  clearDisabled: boolean;
   zipDisabled: boolean;
   progressHidden: boolean;
   progressValue: number;
@@ -56,13 +70,6 @@ function smallZipEntries(): BuildZipEntry[] {
 
 async function smallZip(): Promise<Uint8Array> {
   return buildZip(smallZipEntries());
-}
-
-async function openLauncher(page: Page): Promise<void> {
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 }
 
 async function pickZips(page: Page, files: FixtureFile[]): Promise<void> {
@@ -104,39 +111,10 @@ async function dropFiles(page: Page, files: FixtureFile[]): Promise<void> {
   );
 }
 
-// Every file stored under zhwp, as paths relative to it ("zh/INIZH.big").
-async function storedFiles(page: Page): Promise<string[]> {
-  return page.evaluate(async () => {
-    const paths: string[] = [];
-    const walk = async (dir: FileSystemDirectoryHandle, prefix: string) => {
-      for await (const [name, handle] of (dir as any).entries()) {
-        const path = prefix === "" ? name : `${prefix}/${name}`;
-        if (handle.kind === "directory") {
-          await walk(handle as FileSystemDirectoryHandle, path);
-        } else {
-          paths.push(path as string);
-        }
-      }
-    };
-    try {
-      const root = await navigator.storage.getDirectory();
-      let zhwp: FileSystemDirectoryHandle;
-      try {
-        zhwp = await root.getDirectoryHandle("zhwp");
-      } catch {
-        return paths.sort();
-      }
-      await walk(zhwp, "");
-    } catch {
-      // No storage at all: nothing is stored.
-    }
-    return paths.sort();
-  });
-}
-
 // Records what the page shows on every DOM mutation, before the import starts:
-// transient states (the detail line, disabled buttons) would otherwise race the
-// assertions. It only reads the page, exactly like a player watching it.
+// transient states (the detail line, the disabled input, the replace status)
+// would otherwise race the assertions. It only reads the page, exactly like a
+// player watching it.
 async function watch(page: Page): Promise<void> {
   await page.evaluate(() => {
     const byId = (id: string) => document.getElementById(id);
@@ -162,8 +140,6 @@ async function watch(page: Page): Promise<void> {
       const current = byId("import-current");
       const cancel = byId("import-cancel");
       const progress = byId("import-progress") as HTMLProgressElement | null;
-      const play = byId("play");
-      const clear = byId("clear");
       const zip = byId("zip-input");
       const status = byId("status");
       const error = byId("import-error");
@@ -174,8 +150,6 @@ async function watch(page: Page): Promise<void> {
         current: valueOf(current),
         currentVisible: visible(current),
         cancelVisible: visible(cancel),
-        playDisabled: disabled(play),
-        clearDisabled: disabled(clear),
         zipDisabled: disabled(zip),
         progressHidden: progress === null ? true : progress.hidden,
         progressValue: progress === null ? 0 : progress.value,
@@ -203,10 +177,26 @@ async function samples(page: Page): Promise<Sample[]> {
   );
 }
 
-// One ~40 MB ZIP with the four REQUIRED archives around 2000 extra files: the
-// many small writes keep the import running long enough to see the detail line,
-// the ETA and the disabled controls, and to cancel halfway. It also leaves the
-// first two archives stored when it is cancelled between the two games.
+// Whether one archive has been committed under zhwp yet. A small targeted read
+// instead of walking the whole tree: the cancel test polls it while the import
+// is still writing.
+async function archiveStored(page: Page, kind: string, name: string): Promise<boolean> {
+  return page.evaluate(async ({ kind, name }: { kind: string; name: string }) => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const dir = await (await root.getDirectoryHandle("zhwp")).getDirectoryHandle(kind);
+      await dir.getFileHandle(name);
+      return true;
+    } catch {
+      return false;
+    }
+  }, { kind, name });
+}
+
+// One ~40 MB ZIP with the four REQUIRED archives around 2000 extra files. Since
+// issue #162 the extras are ignored by the import; they only make the archive
+// large enough for the progress tests. The cancel test slows the second
+// archive's close so the cancel lands after the first one is complete.
 let bigDir: string | undefined;
 let bigZip: string | undefined;
 
@@ -243,17 +233,19 @@ test.afterAll(() => {
 });
 
 test("1: the page offers a labelled multi-ZIP picker and a visible drop zone", async ({ page }) => {
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
 
   const input = page.locator("#zip-input");
   await expect(input).toHaveCount(1);
   await expect(input).toHaveAttribute("type", "file");
   await expect(input).toHaveAttribute("accept", /\.zip/i);
   await expect(input).toHaveJSProperty("multiple", true);
-  await expect(page.getByLabel("Pick the game ZIP files")).toHaveCount(1);
-  await expect(
-    page.locator("label", { hasText: "Pick the game ZIP files" }).first(),
-  ).toBeVisible();
+  // The brief leaves the label text open, but the picker must stay labelled.
+  const label = page.locator('label[for="zip-input"]');
+  await expect(label).toHaveCount(1);
+  await expect(label.first()).toBeVisible();
+  expect((await label.first().innerText()).trim()).not.toBe("");
+  await expect(input).toHaveAccessibleName(/.+/);
   await expect(page.locator("#drop-zone")).toBeVisible();
 
   const error = page.locator("#import-error");
@@ -266,12 +258,13 @@ test("1: the page offers a labelled multi-ZIP picker and a visible drop zone", a
 });
 
 test("2: one picked ZIP with the four archives ends Ready and stores four archives", async ({ page }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
 
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
 });
 
 test("contract: the storage warning is shown before a ZIP import that does not fit", async ({ page }) => {
@@ -281,15 +274,27 @@ test("contract: the storage warning is shown before a ZIP import that does not f
       configurable: true,
     });
   });
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
+  await watchWarning(page);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
 
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
-  const warning = page.locator("#storage-warning");
-  await expect(warning).toBeVisible();
-  await expect(warning).toHaveText(
-    /^The browser reports 16 B available; the import needs \d+(?:\.\d+)? (?:B|KB|MB|GB)\.$/,
-  );
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
+  // The warning is shown before the writes; the loader then hides it with the
+  // game, so the recorded samples are what proves it appeared.
+  await expect
+    .poll(
+      async () =>
+        (await warningSamples(page)).some(
+          (sample) =>
+            sample.visible &&
+            /^The browser reports 16 B available; the import needs \d+(?:\.\d+)? (?:B|KB|MB|GB)\.$/.test(
+              sample.text,
+            ),
+        ),
+      { timeout: START_TIMEOUT },
+    )
+    .toBe(true);
 });
 
 test("contract: a ZIP import requests persistent storage once, before writing", async ({ page }) => {
@@ -304,10 +309,11 @@ test("contract: a ZIP import requests persistent storage once, before writing", 
       configurable: true,
     });
   });
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
 
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   expect(
     await page.evaluate(
       () => (window as unknown as { __persistCalls: number }).__persistCalls,
@@ -316,7 +322,7 @@ test("contract: a ZIP import requests persistent storage once, before writing", 
 });
 
 test("3: two picked ZIPs, one per game, import as one install", async ({ page }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const entries = smallZipEntries();
   const zh = entries.filter((entry) => ZH.includes(entry.path));
   const generals = entries.filter((entry) => GENERALS.includes(entry.path));
@@ -325,10 +331,10 @@ test("3: two picked ZIPs, one per game, import as one install", async ({ page })
     { name: "generals.zip", bytes: await buildZip(generals) },
   ]);
 
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
-  expect((await storedFiles(page)).sort()).toEqual([
+  expect(await storedPaths(page)).toEqual([
     "generals/INI.big",
     "generals/W3D.big",
     "zh/INIZH.big",
@@ -339,10 +345,11 @@ test("3: two picked ZIPs, one per game, import as one install", async ({ page })
 test("4: a ~40 MB ZIP shows the detail line and current file while importing and hides them when done", async ({
   page,
 }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await watch(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 60_000 });
+  await waitForState(page, "playing", 60_000);
 
   const seen = await samples(page);
   const details = seen.filter(
@@ -379,8 +386,8 @@ test("4: a ~40 MB ZIP shows the detail line and current file while importing and
 });
 
 test("5: the ETA reads calculating… early and m:ss later", async ({ page }) => {
-  // The four archives are all that is imported now (issue #162), so slow
-  // closing them enough for the ETA to appear.
+  // Only the four archives are imported now (issue #162), so slow their close
+  // enough for the ETA to appear. The fake engine auto-starts at the end.
   await page.addInitScript(() => {
     const original = FileSystemFileHandle.prototype.createWritable;
     FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
@@ -393,10 +400,11 @@ test("5: the ETA reads calculating… early and m:ss later", async ({ page }) =>
       return stream;
     };
   });
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await watch(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 60_000 });
+  await waitForState(page, "playing", 60_000);
 
   const seen = await samples(page);
   const details = seen.filter(
@@ -412,39 +420,35 @@ test("5: the ETA reads calculating… early and m:ss later", async ({ page }) =>
   expect(details[eta].at - details[calculating].at).toBeGreaterThanOrEqual(1000);
 });
 
-test("6: while importing #play, #clear and #zip-input are disabled", async ({
-  page,
-}) => {
-  await openLauncher(page);
+test("6: while importing #zip-input is disabled", async ({ page }) => {
+  await openLauncher(page, RESOLVES);
   await watch(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 60_000 });
+  await waitForState(page, "playing", 60_000);
 
   const seen = await samples(page);
   const importing = seen.filter((sample) => sample.detailVisible);
   expect(importing.length).toBeGreaterThan(0);
   for (const [index, sample] of importing.entries()) {
-    expect(sample.playDisabled, `play disabled at sample ${index}`).toBe(true);
-    expect(sample.clearDisabled, `clear disabled at sample ${index}`).toBe(true);
     expect(sample.zipDisabled, `zip input disabled at sample ${index}`).toBe(true);
   }
 
-  await expect(page.locator("#play")).toBeEnabled();
-  await expect(page.locator("#clear")).toBeEnabled();
   await expect(page.locator("#zip-input")).toBeEnabled();
 });
 
 test("7: cancelling midway leaves Cancelled, keeps the completed archives and hides the error", async ({
   page,
 }) => {
-  // Hold the second archive's close so the cancel lands after the first one is
-  // complete; the archives after it are never committed. Non-.big files are
-  // ignored now (issue #162), so only the four archives count.
+  // Hold the first generals archive's close: both ZH archives are already
+  // complete when it starts, so the cancel lands with exactly those two stored
+  // and before the last archive is written. Non-.big files are ignored now
+  // (issue #162), so only the four archives count.
   await page.addInitScript(() => {
     const original = FileSystemFileHandle.prototype.createWritable;
     FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
       const stream = await original.call(this, options);
-      if (this.name === "W3DZH.big") {
+      if (this.name === "INI.big") {
         const close = stream.close.bind(stream);
         stream.close = async () => {
           await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -454,40 +458,59 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
       return stream;
     };
   });
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#import-cancel")).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
-      async () => {
-        const text = await page.locator("#import-detail").innerText();
-        const match = text.match(/· (\d+) of (\d+) files ·/);
-        return match === null ? 0 : Number(match[1]);
-      },
+      async () =>
+        (await archiveStored(page, "zh", "INIZH.big")) &&
+        (await archiveStored(page, "zh", "W3DZH.big")),
       { timeout: 30_000 },
     )
-    .toBeGreaterThanOrEqual(1);
+    .toBe(true);
 
-  await page.locator("#import-cancel").click();
+  // The loader layout moves as the progress lines appear, so Playwright's
+  // stability wait can outlast the import; the button is visible and the click
+  // handler is the real one. Force skips only the stability wait.
+  await page.locator("#import-cancel").click({ force: true });
 
   await expect(page.locator("#status")).toHaveText("Cancelled", { timeout: 30_000 });
   await expect(page.locator("#import-error")).toBeHidden();
   await expect(page.locator("#import-cancel")).toBeHidden();
   await expect(page.locator("#import-detail")).toBeHidden();
+  await waitForState(page, "no-assets");
 
-  // The first two archives stay; nothing is stored under extra/.
-  const paths = await storedFiles(page);
-  expect(paths).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
+  // The archives completed before the cancel stay; the import writes a small
+  // group ahead, so the third archive may already have committed. What must
+  // never happen is an extra file or an incomplete archive, and the cancelled
+  // import cannot have all four.
+  const paths = await storedPaths(page);
+  const allowed = new Set([
+    "generals/INI.big",
+    "generals/W3D.big",
+    "zh/INIZH.big",
+    "zh/W3DZH.big",
+  ]);
+  expect(paths.every((path) => allowed.has(path))).toBe(true);
+  expect(paths).toEqual(
+    expect.arrayContaining(["zh/INIZH.big", "zh/W3DZH.big"]),
+  );
+  expect(paths.length).toBeGreaterThanOrEqual(2);
+  expect(paths.length).toBeLessThan(4);
   expect(paths.some((path) => path.startsWith("extra/"))).toBe(false);
 
   await page.reload();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");
+  await waitForState(page, "no-assets");
+  await expect(page.locator("#stored-summary")).toHaveText(
+    `Stored: ${paths.length} archives`,
+  );
 });
 
 test("8: a ZIP missing a REQUIRED archive shows missing-archives, names them and stores nothing", async ({
   page,
 }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const zip = await buildZip([
     { path: "INIZH.big", data: archiveData("INIZH"), method: "store" },
     { path: "readme.txt", data: "extra files must not be stored\n", method: "store" },
@@ -501,14 +524,14 @@ test("8: a ZIP missing a REQUIRED archive shows missing-archives, names them and
     await expect(error).toContainText(name);
   }
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-  await expect(page.locator("#play")).toBeDisabled();
-  expect(await storedFiles(page)).toEqual([]);
+  await waitForState(page, "no-assets");
+  expect(await storedPaths(page)).toEqual([]);
 });
 
 test("9: a non-ZIP, a truncated ZIP and a bad CRC each show their code, message and hint", async ({
   page,
 }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const valid = await smallZip();
   const cases = [
     {
@@ -544,7 +567,7 @@ test("9: a non-ZIP, a truncated ZIP and a bad CRC each show their code, message 
     expect(text, testCase.code).toContain(testCase.message);
     expect(text, testCase.code).toContain(testCase.hint);
   }
-  await expect(page.locator("#play")).toBeDisabled();
+  await waitForState(page, "no-assets");
 });
 
 test("10: a forced quota failure shows data-code quota-exceeded and Import failed", async ({ page }) => {
@@ -570,7 +593,7 @@ test("10: a forced quota failure shows data-code quota-exceeded and Import faile
       };
     };
   });
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
 
   const error = page.locator("#import-error");
@@ -578,13 +601,14 @@ test("10: a forced quota failure shows data-code quota-exceeded and Import faile
   await expect(error).toHaveAttribute("data-code", "quota-exceeded");
   await expect(page.locator("#status")).toHaveText("Import failed");
   expect((await error.innerText()).trim().length).toBeGreaterThan(0);
-  expect(await storedFiles(page)).toEqual([]);
+  expect(await storedPaths(page)).toEqual([]);
+  await waitForState(page, "no-assets");
 });
 
 test("11: dropping a ZIP on #drop-zone imports it and dropping only a .txt shows not-a-zip", async ({
   page,
 }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const error = page.locator("#import-error");
 
   await dropFiles(page, [
@@ -595,14 +619,15 @@ test("11: dropping a ZIP on #drop-zone imports it and dropping only a .txt shows
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
   await dropFiles(page, [{ name: "game.zip", bytes: await smallZip() }]);
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   await expect(error).toBeHidden();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
 });
 
 test("12: starting a new import hides the previous #import-error", async ({ page }) => {
-  await openLauncher(page);
+  await openLauncher(page, RESOLVES);
   const error = page.locator("#import-error");
   const incomplete = await buildZip([
     { path: "INIZH.big", data: archiveData("INIZH"), method: "store" },
@@ -613,6 +638,47 @@ test("12: starting a new import hides the previous #import-error", async ({ page
 
   await pickZips(page, [{ name: "complete.zip", bytes: await smallZip() }]);
   await expect(error).toBeHidden();
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+});
+
+test("13: a new import replaces the previous install and reports Removing the previous install", async ({
+  page,
+}, info) => {
+  // The previous install has different sizes and an extra file the new ZIPs do
+  // not bring. It is seeded through the harness so no engine holds its files
+  // open, and one required archive is removed so the launcher stays on the
+  // loader instead of starting the old install.
+  await seedInstall(
+    page,
+    await installZip(info.outputPath("previous"), undefined, {
+      extraFiles: [{ path: "old/notes.txt", data: "previous install\n" }],
+    }),
+  );
+  await removeStoredArchive(page, "generals/INI.big");
+  await page.goto(launcherUrl(RESOLVES));
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 3 archives");
+  await waitForState(page, "no-assets");
+
+  await watch(page);
+  await pickZips(page, [{ name: "game.zip", bytes: await smallZip() }]);
+  await expect(page.locator("#status")).toHaveText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
+
+  // #157's phase is part of the launcher's status line.
+  const seen = await samples(page);
+  expect(
+    seen.some((sample) => sample.status.includes("Removing the previous install")),
+    "the page never reported Removing the previous install",
+  ).toBe(true);
+
+  // The old extra and the old archives are gone: the new install is the store.
+  expect(await storedPaths(page)).toEqual([
+    "generals/INI.big",
+    "generals/W3D.big",
+    "zh/INIZH.big",
+    "zh/W3DZH.big",
+  ]);
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
 });

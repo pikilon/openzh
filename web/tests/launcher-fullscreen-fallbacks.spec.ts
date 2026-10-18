@@ -1,13 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
-import { installZip } from "./helpers/install-zip";
+import { importInstall, openLauncher, START_TIMEOUT } from "./helpers/launcher";
 
 // Issue #91: the Fullscreen button above the canvas is a progressive
 // enhancement. These are its degraded paths: a browser that offers no
 // fullscreen at all (criterion 7), a browser that refuses the request
 // (criterion 8), and an engine that aborts after the page asked for fullscreen
-// (criterion 9). In every one the playing view must stay usable, a refused
-// request must not be shown as an error, and a failed engine must end out of
-// fullscreen with its message readable and no button offered.
+// (criterion 9). Since #159 the import starts the engine and #fullscreen is an
+// icon button in #topbar. In every fallback the playing view must stay usable,
+// a refused request must not be shown as an error, and a failed engine must end
+// out of fullscreen with its message readable and no button offered.
 //
 // `addInitScript` replaces the Fullscreen API before the page loads, which is
 // the only way to test a browser that lacks it or rejects it. The `module`
@@ -16,44 +17,60 @@ import { installZip } from "./helpers/install-zip";
 const FIT = "/harness/canvas/fit.js";
 const ABORT_LATE = "/harness/errors/abort-late.js";
 const VIEWPORT = { width: 1280, height: 800 };
-const WAIT = 10_000;
+const WAIT = START_TIMEOUT;
 
 type Done = { status: "resolved" | "error"; message?: string };
 
-// Opens the launcher at 1280x800, clears whatever a previous test stored and
-// imports a complete synthetic install (what enables Play) in the page that
-// loads the fake engine. The viewport is set before the first `goto`, so the
+// Opens the launcher at 1280x800 with a clean store, imports a complete
+// synthetic install (the import auto-starts the fake engine) and waits until
+// the game is playing. The viewport is set before the first `goto`, so the
 // windowed fit is measured at the size the criteria name.
 async function prepareLauncher(page: Page, dir: string, module: string): Promise<void> {
   await page.setViewportSize(VIEWPORT);
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-
-  await page.goto(`/app/index.html?module=${encodeURIComponent(module)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#zip-input").setInputFiles(await installZip(dir));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#play")).toBeEnabled();
-}
-
-// Play with a trusted user gesture. On return the fake engine has started and
-// set its 1024x768 drawing buffer.
-async function playAndWaitForCanvas(page: Page): Promise<void> {
-  await page.locator("#play").click();
-  await expect(page.locator("#canvas")).toBeVisible();
-  await page.waitForFunction(() => {
-    const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;
-    return canvas !== null && canvas.width === 1024 && canvas.height === 768;
-  });
+  await openLauncher(page, module);
+  await importInstall(page, dir);
 }
 
 // Presses #fullscreen with a trusted click: the browser only grants fullscreen
 // to a user gesture, so a click dispatched from page.evaluate() would not count.
 async function pressFullscreen(page: Page): Promise<void> {
   await expect(page.locator("#fullscreen")).toBeVisible({ timeout: WAIT });
+  await expect(page.locator("#fullscreen")).toBeEnabled({ timeout: WAIT });
   await page.locator("#fullscreen").click({ timeout: WAIT });
+}
+
+// The late-abort fake aborts one second after its factory resolved. With the
+// automatic engine start there is no Play click before the fullscreen request
+// any more, so the test defers that one timer and releases it when the page is
+// already fullscreen: the scenario is exact instead of racing a one-second
+// window. The fake itself is the module the `module` query parameter selects.
+async function deferAbortIfNeeded(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const original = window.setTimeout;
+    const delayed: (() => void)[] = [];
+    (window as unknown as { __releaseDelayedTimers?: () => void }).__releaseDelayedTimers = () => {
+      for (const callback of delayed.splice(0)) callback();
+    };
+    Object.defineProperty(window, "setTimeout", {
+      configurable: true,
+      writable: true,
+      value: (handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        if (timeout === 1000 && typeof handler === "function") {
+          delayed.push(() => (handler as (...values: unknown[]) => void)(...args));
+          return 0;
+        }
+        return original.call(window, handler, timeout, ...args);
+      },
+    });
+  });
+}
+
+async function releaseDelayedTimers(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const release = (window as unknown as { __releaseDelayedTimers?: () => void }).__releaseDelayedTimers;
+    if (release === undefined) throw new Error("the test never installed the timer gate");
+    release();
+  });
 }
 
 async function doneWhen(page: Page, status: Done["status"], timeout = 20_000): Promise<Done | undefined> {
@@ -111,6 +128,7 @@ async function fullscreenGrants(page: Page): Promise<(string | null)[]> {
 
 type Layout = {
   rect: { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  topbarBottom: number;
   bufferWidth: number;
   bufferHeight: number;
   scrollWidth: number;
@@ -122,6 +140,7 @@ type Layout = {
 async function measure(page: Page): Promise<Layout> {
   return page.evaluate(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+    const topbar = document.getElementById("topbar") as HTMLElement;
     const rect = canvas.getBoundingClientRect();
     return {
       rect: {
@@ -132,6 +151,7 @@ async function measure(page: Page): Promise<Layout> {
         width: rect.width,
         height: rect.height,
       },
+      topbarBottom: topbar.getBoundingClientRect().bottom,
       bufferWidth: canvas.width,
       bufferHeight: canvas.height,
       scrollWidth: document.documentElement.scrollWidth,
@@ -144,12 +164,12 @@ async function measure(page: Page): Promise<Layout> {
 
 // #80's windowed playing layout, which a fallback must keep: the whole canvas
 // visible inside the viewport, displayed at its drawing-buffer aspect ratio,
-// below the heading and without a horizontal scrollbar.
+// below #topbar and without a horizontal scrollbar.
 async function expectWindowedFit(page: Page): Promise<void> {
   const layout = await measure(page);
   expect(layout.bufferWidth).toBe(1024);
   expect(layout.bufferHeight).toBe(768);
-  expect(layout.rect.top).toBeGreaterThanOrEqual(0);
+  expect(layout.rect.top).toBeGreaterThanOrEqual(layout.topbarBottom);
   expect(layout.rect.left).toBeGreaterThanOrEqual(0);
   expect(layout.rect.right).toBeLessThanOrEqual(layout.viewportWidth);
   expect(layout.rect.bottom).toBeLessThanOrEqual(layout.viewportHeight);
@@ -159,20 +179,21 @@ async function expectWindowedFit(page: Page): Promise<void> {
   expect(Math.abs(shownRatio - bufferRatio) / bufferRatio).toBeLessThanOrEqual(0.01);
 }
 
-test("7: without requestFullscreen Play starts the game windowed and #fullscreen is hidden", async ({ page }, info) => {
+test("7: without requestFullscreen the auto-started game is windowed and #fullscreen is hidden", async ({
+  page,
+}, info) => {
   // A browser where the Fullscreen API is not a function at all.
   await page.addInitScript(() => {
     Object.defineProperty(Element.prototype, "requestFullscreen", { value: undefined, configurable: true });
   });
   await prepareLauncher(page, info.outputPath(), FIT);
-  await playAndWaitForCanvas(page);
 
   // The game plays windowed, with nothing offered that the browser cannot do:
-  // the button is part of the page either way and must stay hidden.
+  // the button is part of the top bar either way and must stay hidden.
   expect(await fullscreenElementId(page)).toBeNull();
   await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#engine-error")).toBeHidden();
-  await expect(page.locator("#fullscreen")).toHaveCount(1);
+  await expect(page.locator("#topbar #fullscreen")).toHaveCount(1);
   await expect(page.locator("#fullscreen")).toBeHidden();
   await expectWindowedFit(page);
 });
@@ -192,7 +213,6 @@ test("8: a refused fullscreen request leaves the game windowed with #fullscreen 
     });
   });
   await prepareLauncher(page, info.outputPath(), FIT);
-  await playAndWaitForCanvas(page);
 
   await pressFullscreen(page);
   // The click really asked the browser for #screen, and the refusal changed
@@ -203,17 +223,18 @@ test("8: a refused fullscreen request leaves the game windowed with #fullscreen 
   await expect(page.locator("#canvas")).toBeVisible();
   await expect(page.locator("#engine-error")).toBeHidden();
   await expect(page.locator("#fullscreen")).toBeVisible();
+  await expect(page.locator("#fullscreen")).toBeEnabled();
   await expectWindowedFit(page);
 });
 
-test("9: a late abort after the game was fullscreen ends with a visible #engine-error and no #fullscreen", async ({
+test("9: an abort after the game was fullscreen ends with a visible #engine-error and no #fullscreen", async ({
   page,
 }, info) => {
   await recordFullscreenEvents(page);
+  await deferAbortIfNeeded(page);
   await prepareLauncher(page, info.outputPath(), ABORT_LATE);
-  // Play leaves the game windowed; the player presses the button and the page
-  // is fullscreen before the engine aborts, one second after it started.
-  await page.locator("#play").click();
+  // The automatic start leaves the game windowed; the player presses the
+  // button and the page is fullscreen before the engine aborts.
   await pressFullscreen(page);
   await expect.poll(() => fullscreenElementId(page), { timeout: WAIT }).toBe("screen");
   // Recorded from the init script while the page ran, never read from a poll
@@ -222,10 +243,12 @@ test("9: a late abort after the game was fullscreen ends with a visible #engine-
     .poll(async () => (await fullscreenEvents(page)).includes("screen"), { timeout: WAIT })
     .toBe(true);
 
+  await releaseDelayedTimers(page);
   await doneWhen(page, "error", 20_000);
   // The abort must leave fullscreen so the message stays readable, and the
   // button goes away with it.
   await expect.poll(() => fullscreenElementId(page), { timeout: WAIT }).toBeNull();
+  await expect(page.locator("#error-panel")).toBeVisible();
   await expect(page.locator("#engine-error")).toBeVisible();
   await expect(page.locator("#engine-error")).toContainText("late boom");
   await expect(page.locator("#fullscreen")).toBeHidden();
@@ -242,7 +265,9 @@ test("9: a late abort after the game was fullscreen ends with a visible #engine-
     .toBeNull();
 });
 
-test("9: a fullscreen grant that lands after the abort also ends with no #fullscreen", async ({ page }, info) => {
+test("9: a fullscreen grant that lands after the abort also ends with no #fullscreen", async ({
+  page,
+}, info) => {
   // A browser that grants fullscreen only when the test releases it: the page
   // asks for #screen, the engine aborts while the request is still pending,
   // and the grant lands afterwards.
@@ -291,13 +316,14 @@ test("9: a fullscreen grant that lands after the abort also ends with no #fullsc
       },
     });
   });
+  await deferAbortIfNeeded(page);
   await prepareLauncher(page, info.outputPath(), ABORT_LATE);
-  await page.locator("#play").click();
   await pressFullscreen(page);
   // The page asked the browser on #screen and is still waiting for the grant.
   await expect.poll(() => requestedElement(page), { timeout: WAIT }).toBe("screen");
 
   // The abort arrives first.
+  await releaseDelayedTimers(page);
   await doneWhen(page, "error", 20_000);
   expect(await fullscreenElementId(page)).toBeNull();
 
@@ -315,6 +341,7 @@ test("9: a fullscreen grant that lands after the abort also ends with no #fullsc
     .poll(async () => (await fullscreenGrants(page)).includes("screen"), { timeout: WAIT })
     .toBe(true);
   await expect.poll(() => fullscreenElementId(page), { timeout: WAIT }).toBeNull();
+  await expect(page.locator("#error-panel")).toBeVisible();
   await expect(page.locator("#engine-error")).toBeVisible();
   await expect(page.locator("#engine-error")).toContainText("late boom");
   await expect(page.locator("#fullscreen")).toBeHidden();

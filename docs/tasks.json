@@ -1405,6 +1405,26 @@
         "GeneralsMD/Code/Main/SDL3Main.cpp"
       ],
       "summary": "Fresh web profiles start at 1920x1080 with StaticGameLOD VeryHigh, 4x MSAA, 16x anisotropic filtering, terrain LOD max and dynamic LOD off; saved Options.ini values win and native defaults are unchanged."
+    },
+    {
+      "issue": 175,
+      "title": "BIG rewrite accepts zero-size entries (real PatchZH.big)",
+      "phase": 1,
+      "status": "done",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/175-big-zero-size.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/big-archive.spec.ts",
+      "test_paths": [
+        "web/tests/big-archive.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/big-archive.mjs"
+      ],
+      "summary": "Zero-size BIG entries are exempt from the header-offset check and keep their offset on rewrite."
     }
   ]
 }

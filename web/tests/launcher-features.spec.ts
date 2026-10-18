@@ -1,22 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #30: before a player spends minutes importing several GB, the launcher
 // must name the browser features it needs: WebGPU, cross-origin isolation (for
 // SharedArrayBuffer) and OPFS. Element ids are part of the page's contract.
 
 type MissingFeature = "gpu" | "isolation" | "opfs";
-
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
 
 // Overrides the page's environment before any page script runs, which is the
 // only way to simulate a browser that lacks these features in Brave.
@@ -44,8 +33,8 @@ test("1: with every feature present, #unsupported stays hidden and import works"
   await expect(unsupported).toHaveAttribute("role", "alert");
   await expect(unsupported).toBeHidden();
 
-  await expect(page.locator("#folder-input")).toBeEnabled();
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await expect(page.locator("#zip-input")).toBeEnabled();
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
@@ -68,11 +57,11 @@ test("3: without navigator.storage.getDirectory, #unsupported contains Origin pr
   await expect(unsupported).toContainText("Origin private file system");
 });
 
-test("4: when a feature is missing, #folder-input and #play are disabled and stay disabled", async ({ page }, info) => {
+test("4: when a feature is missing, #zip-input and #play are disabled and stay disabled", async ({ page }, info) => {
   // Store a complete install first: after the reload it would enable Play if
   // the launcher still read OPFS despite the missing feature.
   await openLauncher(page);
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
@@ -83,7 +72,7 @@ test("4: when a feature is missing, #folder-input and #play are disabled and sta
   await page.goto("/app/index.html");
 
   await expect(page.locator("#unsupported")).toBeVisible();
-  await expect(page.locator("#folder-input")).toBeDisabled();
+  await expect(page.locator("#zip-input")).toBeDisabled();
   await expect(page.locator("#play")).toBeDisabled();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 });

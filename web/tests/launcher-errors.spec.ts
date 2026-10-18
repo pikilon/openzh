@@ -1,8 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #29: the launcher shows engine failures on the page, and its outcome is
 // readable as window.__zhwpDone like on the smoke page. A `module` query
@@ -14,15 +12,6 @@ const DEFAULT_ENGINE_FAKE = fileURLToPath(new URL("./harness/errors/default-engi
 
 type Done = { status: "resolved" | "error"; message?: string };
 
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
-
 // Opens the launcher with the optional `module` query parameter and imports a
 // complete synthetic install, which is what enables Play.
 async function prepareLauncher(page: Page, dir: string, module?: string): Promise<void> {
@@ -31,7 +20,7 @@ async function prepareLauncher(page: Page, dir: string, module?: string): Promis
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
   await page.locator("#clear").click();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
-  await page.locator("#folder-input").setInputFiles(makeInstall(dir));
+  await page.locator("#zip-input").setInputFiles(await installZip(dir));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 }

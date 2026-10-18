@@ -1,13 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildBig } from "./helpers/big";
 import { buildZip, corrupt, type BuildZipEntry } from "./helpers/zip";
 
-// Issue #128: the launcher loads the game from one or more ZIP files, next to
-// the folder pick that keeps working. The element ids are the contract
-// (docs/briefs/128-launcher-zip.md).
+// Issue #128: the launcher loads the game from one or more ZIP files. The
+// element ids are the contract (docs/briefs/128-launcher-zip.md).
 
 const REQUIRED = ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"];
 const ZH = ["INIZH.big", "W3DZH.big"];
@@ -33,7 +32,6 @@ interface Sample {
   playDisabled: boolean;
   clearDisabled: boolean;
   zipDisabled: boolean;
-  folderDisabled: boolean;
   progressHidden: boolean;
   progressValue: number;
   progressMax: number;
@@ -58,15 +56,6 @@ function smallZipEntries(): BuildZipEntry[] {
 
 async function smallZip(): Promise<Uint8Array> {
   return buildZip(smallZipEntries());
-}
-
-function installFolder(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of REQUIRED) {
-    writeFileSync(join(root, name), archiveData(name.replace(/\.big$/i, "")));
-  }
-  return root;
 }
 
 async function openLauncher(page: Page): Promise<void> {
@@ -176,7 +165,6 @@ async function watch(page: Page): Promise<void> {
       const play = byId("play");
       const clear = byId("clear");
       const zip = byId("zip-input");
-      const folder = byId("folder-input");
       const status = byId("status");
       const error = byId("import-error");
       samples.push({
@@ -189,7 +177,6 @@ async function watch(page: Page): Promise<void> {
         playDisabled: disabled(play),
         clearDisabled: disabled(clear),
         zipDisabled: disabled(zip),
-        folderDisabled: disabled(folder),
         progressHidden: progress === null ? true : progress.hidden,
         progressValue: progress === null ? 0 : progress.value,
         progressMax: progress === null ? 0 : progress.max,
@@ -411,7 +398,7 @@ test("5: the ETA reads calculating… early and m:ss later", async ({ page }) =>
   expect(details[eta].at - details[calculating].at).toBeGreaterThanOrEqual(1000);
 });
 
-test("6: while importing #play, #clear, #zip-input and the folder input are disabled", async ({
+test("6: while importing #play, #clear and #zip-input are disabled", async ({
   page,
 }) => {
   await openLauncher(page);
@@ -426,13 +413,11 @@ test("6: while importing #play, #clear, #zip-input and the folder input are disa
     expect(sample.playDisabled, `play disabled at sample ${index}`).toBe(true);
     expect(sample.clearDisabled, `clear disabled at sample ${index}`).toBe(true);
     expect(sample.zipDisabled, `zip input disabled at sample ${index}`).toBe(true);
-    expect(sample.folderDisabled, `folder input disabled at sample ${index}`).toBe(true);
   }
 
   await expect(page.locator("#play")).toBeEnabled();
   await expect(page.locator("#clear")).toBeEnabled();
   await expect(page.locator("#zip-input")).toBeEnabled();
-  await expect(page.locator("#folder-input")).toBeEnabled();
 });
 
 test("7: cancelling midway leaves Cancelled, keeps the completed archives and hides the error", async ({
@@ -603,16 +588,4 @@ test("12: starting a new import hides the previous #import-error", async ({ page
   await expect(error).toBeHidden();
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-});
-
-test("13: picking the install folder still imports every archive next to the ZIP path", async ({
-  page,
-}, info) => {
-  await openLauncher(page);
-  await expect(page.locator("#zip-input")).toHaveCount(1);
-
-  await page.locator("#folder-input").setInputFiles(installFolder(info.outputPath()));
-  await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
 });

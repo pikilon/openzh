@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #99: while the page is hidden or the window has lost focus the game is
 // silent; when it is visible and focused again the previous volumes come back.
@@ -22,15 +20,6 @@ type Probe = Window &
     __unhandledRejections?: string[];
   };
 
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
-
 // Opens the launcher like tests/launcher-canvas.spec.ts, imports a complete
 // synthetic install (what enables Play) and presses Play with the given fake
 // engine. On return the canvas is shown and the page is starting the engine.
@@ -43,7 +32,7 @@ async function startPlaying(page: Page, dir: string, module: string): Promise<vo
 
   await page.goto(`/app/index.html?module=${encodeURIComponent(module)}`);
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#folder-input").setInputFiles(makeInstall(dir));
+  await page.locator("#zip-input").setInputFiles(await installZip(dir));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

@@ -1,20 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
-// The launcher page (/app/index.html): pick the install folder, import into
-// OPFS, play. Element ids are part of the contract (docs/briefs/5c-launcher.md).
-
-function makeInstall(dir: string, names: string[]): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of names) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  writeFileSync(join(root, "readme.txt"), "not an archive");
-  return root;
-}
+// The launcher page (/app/index.html): pick the install ZIP, import into OPFS,
+// play. Element ids are part of the contract (docs/briefs/5c-launcher.md).
 
 async function openLauncher(page: Page) {
   await page.goto("/app/index.html");
@@ -27,20 +15,21 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 });
 
-test("an incomplete folder is rejected and nothing is stored", async ({ page }, info) => {
-  const dir = makeInstall(info.outputPath(), ["INIZH.big"]);
-  await page.locator("#folder-input").setInputFiles(dir);
-  await expect(page.locator("#status")).toContainText("Missing");
+test("an incomplete ZIP is rejected and nothing is stored", async ({ page }, info) => {
+  const zip = await installZip(info.outputPath(), ["INIZH.big"]);
+  await page.locator("#zip-input").setInputFiles(zip);
+  await expect(page.locator("#status")).toContainText("Import failed");
+  await expect(page.locator("#import-error")).toContainText("missing required archives");
   for (const name of ["W3DZH.big", "INI.big", "W3D.big"]) {
-    await expect(page.locator("#status")).toContainText(name);
+    await expect(page.locator("#import-error")).toContainText(name);
   }
   await expect(page.locator("#play")).toBeDisabled();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 });
 
-test("a complete folder is imported, survives a reload and starts the engine", async ({ page }, info) => {
-  const dir = makeInstall(info.outputPath(), ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]);
-  await page.locator("#folder-input").setInputFiles(dir);
+test("a complete ZIP is imported, survives a reload and starts the engine", async ({ page }, info) => {
+  const zip = await installZip(info.outputPath());
+  await page.locator("#zip-input").setInputFiles(zip);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();

@@ -1,16 +1,16 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect } from "@playwright/test";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Issue #6: run the launcher against the owner's real game files. Local only:
-// skipped unless ZHWP_GAME_DIR points to a folder that contains both game
+// skipped unless ZHWP_GAME_ZIPS lists the game ZIPs (make-game-zip.mjs --split), which hold both game
 // installs (the Zero Hour folder and the Generals folder, at any depth).
 // Nothing from the game is copied into the repository; the screenshot goes to
 // the system temp folder.
-const gameDir = process.env.ZHWP_GAME_DIR;
+const gameZipPaths = gameZips();
 
-test.skip(!gameDir || !existsSync(gameDir), "set ZHWP_GAME_DIR to run against real game data");
+test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
 test("real game data reaches the main menu", async ({ page }) => {
   test.setTimeout(15 * 60_000);
@@ -18,7 +18,7 @@ test("real game data reaches the main menu", async ({ page }) => {
   await page.locator("#clear").click();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-  await page.locator("#folder-input").setInputFiles(gameDir as string);
+  await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

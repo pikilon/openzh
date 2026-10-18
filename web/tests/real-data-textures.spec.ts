@@ -1,14 +1,14 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
 
 // Issue #78: with the owner's real game data, every mip level of a
 // block-compressed (DXT/BC) texture must upload as a full 4x4 block, so WebGPU
-// does not reject the small levels. Local only: skipped unless ZHWP_GAME_DIR
+// does not reject the small levels. Local only: skipped unless ZHWP_GAME_ZIPS
 // points to a folder that contains both game installs. Nothing from the game is
 // copied into the repository.
-const gameDir = process.env.ZHWP_GAME_DIR;
+const gameZipPaths = gameZips();
 
-test.skip(!gameDir || !existsSync(gameDir), "set ZHWP_GAME_DIR to run against real game data");
+test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
 // Criterion 1 describes one run from Play until 20 s after
 // GENERALSX_LOAD_DONE; the run happens once in beforeAll.
@@ -26,7 +26,7 @@ test.describe("compressed texture mip uploads on the real engine", () => {
     await page.locator("#clear").click();
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-    await page.locator("#folder-input").setInputFiles(gameDir as string);
+    await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
     await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
     await expect(page.locator("#play")).toBeEnabled();
 

@@ -122,15 +122,17 @@ for (const name of ENGINE_REQUIRED) {
 }
 
 const dist = join(WEB_ROOT, "dist");
-const appIndex = join(WEB_ROOT, "app", "index.html");
-const appIcon = join(WEB_ROOT, "app", "favicon.png");
+const appDir = join(WEB_ROOT, "app");
+const appIndex = join(appDir, "index.html");
+const appIcon = join(appDir, "favicon.png");
 requireDirectory(dist, "dist");
+requireDirectory(appDir, "app");
 statSync(appIndex).isFile() || fail(`launcher page is not a file: ${appIndex}`);
 statSync(appIcon).isFile() || fail(`launcher icon is not a file: ${appIcon}`);
 
-mkdirSync(join(out, "app"), { recursive: true });
-copyFileSync(appIndex, join(out, "app", "index.html"));
-copyFileSync(appIcon, join(out, "app", "favicon.png"));
+// The whole app folder goes out: the page links its local stylesheet next to
+// the favicon, so a new asset there must not be forgotten by the packager.
+copyDirectory(appDir, join(out, "app"), () => true);
 copyDirectory(dist, join(out, "dist"), () => true);
 
 mkdirSync(join(out, "engine"), { recursive: true });

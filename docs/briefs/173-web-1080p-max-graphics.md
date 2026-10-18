@@ -126,8 +126,9 @@ Tests are written separately. No page/UI change is expected.
 
 `cd web && npm ci && ZHWP_PORT=4193 npx playwright test tests/launcher-graphics-defaults.spec.ts tests/launcher-1080p.spec.ts tests/real-data-resolution.spec.ts`
 
-The two specs must pass in Brave. The real-data specs are not needed for this
-task; the synthetic archives are enough to reach engine initialization.
+The `launcher-graphics-defaults` and `launcher-1080p` specs must pass in Brave
+with synthetic data. `real-data-resolution.spec.ts` skips without
+`ZHWP_GAME_ZIPS`; it is the owner's canvas check with the real game data.
 
 ## Out of scope
 

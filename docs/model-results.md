@@ -103,5 +103,6 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #159 | tests T1 | deepseek-flash (dsh) | ok | ~8 min | 34 tests in the new shell/menu/style/overlay specs, all fail on the old page at #topbar; About and support tips included after the owner's addition |
 | 2026-10-18 | #159 | tests T2 | deepseek-flash (dsh) | ok | ~7.2 min | 74 fail on the old page at body[data-state]; 7 guards pass; the migration keeps #157's replace-on-import expectations |
 | 2026-10-18 | #159 | code engine | deepseek-flash (dsh) | ok | ~3 min | GeneralsXSetDebugOverlay; scripts/build-webgpu.sh exit 0, symbol present in GeneralsXZH.js |
+| 2026-10-18 | #159 | tests T3 | deepseek-flash (dsh) | ok | ~6 min | 12 fail on the old page at #topbar/body[data-state], 16 real-data skipped without ZIPs, 11 guards pass; migrates zip-replace/zip-persistence/folder-removed/real-data |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

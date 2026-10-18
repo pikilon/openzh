@@ -1143,6 +1143,69 @@
         "AGENTS.md"
       ],
       "summary": "D-10, web/AGENTS.md and README describe ZIP-only loading."
+    },
+    {
+      "issue": 149,
+      "title": "Tool lib: IMA ADPCM encoder for PCM WAV files",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/149-ima-adpcm-encoder.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/ima-adpcm.spec.ts",
+      "test_paths": [
+        "web/tests/ima-adpcm.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/ima-adpcm.mjs"
+      ],
+      "summary": "Dependency-free Node encoder from PCM WAV to IMA ADPCM WAV (dr_wav compatible)."
+    },
+    {
+      "issue": 150,
+      "title": "Tool lib: read and rewrite BIG archives with replaced entries",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/150-big-rewrite.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/big-archive.spec.ts",
+      "test_paths": [
+        "web/tests/big-archive.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/big-archive.mjs"
+      ],
+      "summary": "Node module that lists a BIG archive and rewrites it with replaced entries, streaming."
+    },
+    {
+      "issue": 151,
+      "title": "make-game-zip: --no-videos and --recode-audio options",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/151-make-game-zip-options.md",
+      "depends_on": [
+        149,
+        150
+      ],
+      "check": "cd web && npm ci && npx playwright test tests/make-game-zip-options.spec.ts tests/make-game-zip.spec.ts",
+      "test_paths": [
+        "web/tests/make-game-zip-options.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/make-game-zip.mjs"
+      ],
+      "summary": "make-game-zip can skip .bik videos and recode speech/audio WAV entries to IMA ADPCM while packing."
     }
   ]
 }

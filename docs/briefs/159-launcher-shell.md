@@ -354,6 +354,8 @@ import module directly and are not part of this task.
 * `web/src/main.ts`
 * `web/src/shell.ts` (new, optional)
 * `web/src/prefs.ts` (new, optional)
+* `web/scripts/package.mjs` (only so the packaged app copies `shell.css` with
+  the page; `npm run package` must keep working)
 
 ### I2 — engine export
 

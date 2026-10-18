@@ -215,7 +215,7 @@ test("70.4: after a warning, Clear hides #storage-warning", async ({ page }, inf
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 });
 
-test("70.5: a QuotaExceededError during storing is reported and keeps what is stored", async ({ page }, info) => {
+test("70.5: a QuotaExceededError during storing is reported and leaves only the files committed before it", async ({ page }, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 2 * GB },
     persisted: false,
@@ -223,19 +223,28 @@ test("70.5: a QuotaExceededError during storing is reported and keeps what is st
   });
   await page.goto("/app/index.html");
 
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath("first")));
+  // The first install also has a file the second ZIPs do not bring.
+  await page.locator("#zip-input").setInputFiles(
+    await installZip(info.outputPath("first"), undefined, {
+      extraFiles: [{ path: "old/notes.txt", data: "previous install\n" }],
+    }),
+  );
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
 
-  // Make every OPFS writable stream fail after the first import, as a full
-  // disk would, and pick archives whose sizes force a rewrite.
+  // Fail only the third archive's writable, as a full disk would after the
+  // first two have committed. The new sizes force the replace rule to remove
+  // the previous install before the first write.
   await page.evaluate(() => {
-    Object.defineProperty(FileSystemFileHandle.prototype, "createWritable", {
-      value: () => Promise.reject(new DOMException("quota exceeded", "QuotaExceededError")),
-      configurable: true,
-      writable: true,
-    });
+    const prototype = FileSystemFileHandle.prototype as unknown as {
+      createWritable(options?: { keepExistingData?: boolean }): Promise<FileSystemWritableFileStream>;
+    };
+    const original = prototype.createWritable;
+    prototype.createWritable = function (this: FileSystemFileHandle, options?: { keepExistingData?: boolean }) {
+      if (this.name !== "INI.big") return original.call(this, options);
+      return Promise.reject(new DOMException("quota exceeded", "QuotaExceededError"));
+    };
   });
 
   await page.locator("#zip-input").setInputFiles(
@@ -245,8 +254,34 @@ test("70.5: a QuotaExceededError during storing is reported and keeps what is st
   await expect(page.locator("#status")).toHaveText("Import failed");
   await expect(page.locator("#import-error")).toHaveAttribute("data-code", "quota-exceeded");
   await expect(page.locator("#import-progress")).toBeHidden();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+
+  // The old-only extra and the old INI.big/W3D.big are gone; only the two
+  // archives committed before the failure remain.
+  const stored = await page.evaluate(async () => {
+    const paths: string[] = [];
+    const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+      for await (const entry of (dir as any).entries()) {
+        const [name, handle] = entry as [string, FileSystemHandle];
+        const path = prefix === "" ? name : `${prefix}/${name}`;
+        if (handle.kind === "directory") {
+          await walk(handle as FileSystemDirectoryHandle, path);
+        } else {
+          paths.push(path);
+        }
+      }
+    };
+    try {
+      const root = await navigator.storage.getDirectory();
+      const zhwp = await root.getDirectoryHandle("zhwp");
+      await walk(zhwp, "");
+    } catch {
+      // No stored tree at all.
+    }
+    return paths.sort();
+  });
+  expect(stored).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");
+  await expect(page.locator("#play")).toBeDisabled();
 });
 
 test("70.6: no path of the page writes Not enough storage into #status", async ({ page }, info) => {

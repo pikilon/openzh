@@ -834,7 +834,7 @@
       "issue": 99,
       "title": "Launcher: mute the game when the page is not focused",
       "phase": 1,
-      "status": "ready",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "s",

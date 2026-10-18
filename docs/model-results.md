@@ -105,5 +105,14 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #159 | code engine | deepseek-flash (dsh) | ok | ~3 min | GeneralsXSetDebugOverlay; scripts/build-webgpu.sh exit 0, symbol present in GeneralsXZH.js |
 | 2026-10-18 | #159 | tests T3 | deepseek-flash (dsh) | ok | ~6 min | 12 fail on the old page at #topbar/body[data-state], 16 real-data skipped without ZIPs, 11 guards pass; migrates zip-replace/zip-persistence/folder-removed/real-data |
 | 2026-10-18 | #159 | code web | deepseek-flash (dsh) | ok | ~30 min | 281 pass, 16 skipped, package green; fixed the #screen overlay z-index and the FileBridge release before retry/clear; visual polish applied |
+| 2026-10-19 | #162 | code | deepseek-flash (dsh) | ok | ~10 min | no new tests by owner decision; suite 245 pass; extras no longer stored (call 79) |
+| 2026-10-19 | #164 | tests | deepseek-flash (dsh) | ok | ~5.4 min | 10 tests with a reference RLE decoder and an ffmpeg cross-check (call 80) |
+| 2026-10-19 | #164 | code | deepseek-flash (dsh) | ok | ~1.3 min | 10 pass; real game: 601 tga encodable, 115 MB saved, main menu screenshot byte-identical (call 82) |
+| 2026-10-19 | #166 | tests | deepseek-flash (dsh) | ok | ~4.8 min | 10 tests (call 81) |
+| 2026-10-19 | #166 | code | deepseek-flash (dsh) | ok | ~0.8 min | 10 pass; real game: 55 mp3 at 128 kbps, 65 MB saved (call 83) |
+| 2026-10-19 | #167 | tests | deepseek-flash (dsh) | ok | ~4.6 min | 10 criteria (call 84) |
+| 2026-10-19 | #167 | code | deepseek-flash (dsh) | ok | ~2.2 min | 29 pass (call 85) |
+| 2026-10-19 | #175 | tests | deepseek-flash (dsh) | ok | ~1.9 min | bug found on the real game: PatchZH.big has a zero-size entry at offset 0 (call 86) |
+| 2026-10-19 | #175 | code | deepseek-flash (dsh) | ok | ~0.5 min | 37 pass; all 32 real archives now read (call 87) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

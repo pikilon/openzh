@@ -1261,6 +1261,69 @@
         "web/tests/store.spec.ts"
       ],
       "summary": "Import stores only .big archives; extras are ignored and any old extra/ tree is removed at start. No new tests by owner decision."
+    },
+    {
+      "issue": 164,
+      "title": "Tool lib: lossless TGA RLE encoder",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/164-tga-rle.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/tga-rle.spec.ts",
+      "test_paths": [
+        "web/tests/tga-rle.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/tga-rle.mjs"
+      ],
+      "summary": "Dependency-free lossless re-encoding of uncompressed true-colour TGAs as RLE TGAs (engine Targa reads them)."
+    },
+    {
+      "issue": 166,
+      "title": "Tool lib: MP3 re-encoder for music (ffmpeg)",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/166-mp3-reencode.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/mp3-reencode.spec.ts",
+      "test_paths": [
+        "web/tests/mp3-reencode.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/mp3-reencode.mjs"
+      ],
+      "summary": "Re-encode MP3 music to a lower constant bitrate with ffmpeg; never re-encodes up."
+    },
+    {
+      "issue": 167,
+      "title": "make-game-zip: --tga-rle and --music-kbps options",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/167-make-game-zip-gfx-music.md",
+      "depends_on": [
+        164,
+        166
+      ],
+      "check": "cd web && npm ci && npx playwright test tests/make-game-zip-gfx-music.spec.ts tests/make-game-zip-options.spec.ts tests/make-game-zip.spec.ts",
+      "test_paths": [
+        "web/tests/make-game-zip-gfx-music.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/make-game-zip.mjs"
+      ],
+      "summary": "make-game-zip can store TGAs RLE-encoded (lossless) and re-encode music at a lower bitrate while packing."
     }
   ]
 }

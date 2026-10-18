@@ -128,8 +128,20 @@ target is the dialog itself (backdrop); closing returns focus to
   `Reload game data` with a one-line warning that it deletes the local data;
 * **Performance**: `#fps-toggle`, a checkbox with `role="switch"`, labelled
   `Performance overlay (FPS)`, and a one-line explanation;
-* **About**: `OpenZH browser port`, one sentence that the game files stay on
-  this device, and one line saying Escape closes the menu.
+* **About and support**: `#about` opens `#about-dialog`; `#support` holds
+  three tip links, `#tip-1`, `#tip-2` and `#tip-5`, labelled `Tip €1`,
+  `Tip €2`, `Tip €5`, pointing at `https://paypal.me/pikilongeorgia/1`,
+  `/2` and `/5` with `target="_blank"` and
+  `rel="noopener noreferrer"`; one line says the tip is optional and unlocks
+  nothing.
+
+`#about-dialog` is a native `<dialog>` with `#about-close`. It shows
+`#about-name` (`OpenZH`), `#about-version` (`0.1.0`, the web shell version),
+`#about-license` (`GPL-3.0-or-later`), `#about-source` (a link to
+`https://github.com/pikilon/openzh`, new tab, `rel="noopener noreferrer"`) and
+`#about-disclaimer` (the project is unofficial and the player supplies the
+game files, which never leave this device). Closing it returns focus to
+`#about`. The top bar is unchanged; About and tips live in the menu.
 
 `#reload` is disabled while no archives are stored. It never deletes
 anything by itself: it opens `#reload-dialog`, another native `<dialog>`,
@@ -241,7 +253,10 @@ No page text sits above the canvas.
 `#status`, `#storage`, `#storage-warning`, `#stored-summary`, `#loading`,
 `#error-panel`, `#engine-error`, `#retry`, `#screen`, `#canvas`, `#menu`,
 `#menu-close`, `#menu-stored`, `#menu-storage`, `#reload`, `#reload-dialog`,
-`#reload-warning`, `#reload-cancel`, `#reload-confirm`, `#fps-toggle`.
+`#reload-warning`, `#reload-cancel`, `#reload-confirm`, `#fps-toggle`,
+`#about`, `#about-dialog`, `#about-close`, `#about-name`, `#about-version`,
+`#about-license`, `#about-source`, `#about-disclaimer`, `#support`, `#tip-1`,
+`#tip-2`, `#tip-5`.
 
 There is no `#play`, `#clear` or `#play-controls` element. `#engine-error`
 still precedes `#canvas` in document order. Hidden elements really use the
@@ -287,13 +302,16 @@ imports accumulate.
 25. The existing storage estimate, storage warning, importer progress/cancel and typed import-error behaviour still pass in the migrated specs.
 26. Loading the page makes no request to an external origin: every request stays on the dev server origin (the shell CSS is local, icons are inline SVG, and no font or image is fetched from the network).
 27. No element with id `play`, `clear` or `play-controls` exists in the document.
+28. Clicking `#about` opens `#about-dialog` with `#about-name` containing `OpenZH`, a non-empty `#about-version`, `GPL-3.0-or-later` in `#about-license`, a `#about-source` link to `https://github.com/pikilon/openzh` with `target="_blank"` and `rel` containing `noopener` and `noreferrer`, and an `#about-disclaimer` that says the project is unofficial and the player supplies the game files; `#about-close` closes it and returns focus to `#about`.
+29. `#support` contains `#tip-1`, `#tip-2` and `#tip-5` as links whose `href` values are exactly `https://paypal.me/pikilongeorgia/1`, `/2` and `/5`, each with `target="_blank"` and `rel` containing `noopener` and `noreferrer`; the test never activates them.
+30. The page title, every `h1`/`h2`, and the visible text of `#menu`/`#about-dialog` match neither `/Command\s*&\s*Conquer/i` nor `/Generals|Zero Hour/i`.
 
 ## Test paths
 
 ### T1 — new coverage (write only these)
 
 * `web/tests/launcher-shell.spec.ts`: criteria 1-7, 23, 27.
-* `web/tests/launcher-menu.spec.ts`: criteria 8-11, 14-15.
+* `web/tests/launcher-menu.spec.ts`: criteria 8-11, 14-15, 28-30.
 * `web/tests/launcher-debug-overlay.spec.ts`: criteria 12-13.
 * `web/tests/launcher-style.spec.ts`: criteria 16, 19-22, 26.
 * `web/tests/harness/overlay/records.js`: a fake engine that records

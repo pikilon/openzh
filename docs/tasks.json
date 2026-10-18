@@ -1276,7 +1276,7 @@
         "web/src/prefs.ts",
         "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp"
       ],
-      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload and a persisted FPS overlay toggle."
+      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and \u20ac1/\u20ac2/\u20ac5 PayPal support tips."
     }
   ]
 }

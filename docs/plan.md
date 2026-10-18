@@ -91,8 +91,7 @@ and reports the first diverging frame.
 
 ## Phase 4: modifiable
 
-Starts only after phase 3. Issues blocked until then. Clean art, AI tooling
-and the process for adding an army are planned in `docs/asset-pipeline.md`.
+Starts only after phase 3. Issues blocked until then.
 
 | Milestone | Tasks |
 | --- | --- |

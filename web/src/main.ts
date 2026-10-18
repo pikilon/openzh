@@ -8,6 +8,8 @@ import { fetchLocalArchive, fetchLocalIndex } from "./local-gamedata";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, bytesNeeded, formatBytes } from "./storage";
+import { ImportError, describeImportError } from "./import-error";
+import { importZips, type ImportProgress } from "./zip-import";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -33,6 +35,12 @@ const unsupported = byId<HTMLElement>("unsupported");
 const playControls = byId<HTMLElement>("play-controls");
 const screen = byId<HTMLElement>("screen");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
+const importDetail = byId<HTMLElement>("import-detail");
+const importCurrent = byId<HTMLElement>("import-current");
+const importCancel = byId<HTMLButtonElement>("import-cancel");
+const importError = byId<HTMLElement>("import-error");
+const zipInput = byId<HTMLInputElement>("zip-input");
+const dropZone = byId<HTMLElement>("drop-zone");
 
 // The path the folder picker gives the file under: `webkitRelativePath`
 // (empty when the browser gave none, then the name alone).
@@ -75,6 +83,63 @@ function showStorageWarning(availableBytes: number, neededBytes: number): void {
 function showStored(stored: StoredFile[]): void {
   summary.textContent = `Stored: ${stored.length} archives`;
   play.disabled = !hasRequired(stored);
+}
+
+function hideImportError(): void {
+  importError.hidden = true;
+  importError.removeAttribute("data-code");
+  importError.textContent = "";
+}
+
+// Issue #128: the typed failure's message and, below it, its hint; the code
+// goes on `data-code` so the failure is machine-readable.
+function showImportError(error: unknown): void {
+  const text = describeImportError(error);
+  const message = document.createElement("p");
+  message.textContent = text.message;
+  const hint = document.createElement("p");
+  hint.textContent = text.hint;
+  importError.replaceChildren(message, hint);
+  importError.setAttribute("data-code", text.code);
+  importError.hidden = false;
+}
+
+function hideImportDetail(): void {
+  importDetail.hidden = true;
+  importDetail.textContent = "";
+  importCurrent.hidden = true;
+  importCurrent.textContent = "";
+  importCancel.hidden = true;
+  hideProgress();
+}
+
+function megabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+// `calculating…` until the importer has a speed, then m:ss or h:mm:ss.
+function formatEta(seconds: number | null): string {
+  if (seconds === null) return "calculating…";
+  const whole = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const rest = String(whole % 60).padStart(2, "0");
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${rest}`;
+  return `${minutes}:${rest}`;
+}
+
+// "<doneMB> MB of <totalMB> MB · <filesDone> of <filesTotal> files · <speed> MB/s · <eta> left"
+function showImportProgress(state: ImportProgress): void {
+  showProgress(state.doneBytes, Math.max(state.totalBytes, 1));
+  importDetail.textContent =
+    `${megabytes(state.doneBytes)} MB of ${megabytes(state.totalBytes)} MB · ` +
+    `${state.filesDone} of ${state.filesTotal} files · ` +
+    `${megabytes(state.bytesPerSecond)} MB/s · ${formatEta(state.etaSeconds)} left`;
+  importDetail.hidden = false;
+  if (state.currentFile !== "") {
+    importCurrent.textContent = state.currentFile;
+    importCurrent.hidden = false;
+  }
 }
 
 function fail(message: unknown): void {
@@ -190,6 +255,8 @@ async function storeEntries(entries: readonly ImportEntry[], stored: readonly St
 }
 
 async function importFolder(files: FileList): Promise<void> {
+  hideImportError();
+  hideImportDetail();
   hideStorageWarning();
   const choice = classifyPicked(files);
   if (choice === null) return;
@@ -210,6 +277,117 @@ async function importFolder(files: FileList): Promise<void> {
     };
   });
   await storeEntries(entries, stored);
+}
+
+// Issue #128: imports picked or dropped ZIPs through importZips, next to the
+// folder path, and owns the progress line, the cancel button and the typed
+// failure display. Nothing is stored by the page itself here: importZips writes
+// the archives and extra files and reads every ZIP before the first write.
+let importAbort: AbortController | null = null;
+let importing = false;
+
+function requestPersist(): void {
+  const manager = navigator.storage;
+  if (typeof manager.persist === "function") {
+    // Asking does not block the import: the result only labels the storage.
+    void manager.persist().catch(() => undefined);
+  }
+}
+
+// The estimate is a hint, not a limit (#70): warn when the ZIPs do not fit and
+// let the import try anyway.
+async function warnIfZipsDoNotFit(zips: readonly Blob[]): Promise<void> {
+  const manager = navigator.storage;
+  if (typeof manager.estimate !== "function") return;
+  let free: number | undefined;
+  try {
+    free = available(await manager.estimate());
+  } catch {
+    return;
+  }
+  if (free === undefined) return;
+  const needed = zips.reduce((sum, zip) => sum + zip.size, 0);
+  if (free < needed) showStorageWarning(free, needed);
+}
+
+function beginZipImport(): AbortController {
+  hideImportError();
+  hideStorageWarning();
+  importing = true;
+  status.textContent = "Importing";
+  play.disabled = true;
+  clear.disabled = true;
+  input.disabled = true;
+  zipInput.disabled = true;
+  importCancel.hidden = false;
+  importCurrent.hidden = true;
+  importCurrent.textContent = "";
+  showProgress(0, 100);
+  importDetail.textContent =
+    `${megabytes(0)} MB of ${megabytes(0)} MB · 0 of 0 files · ` +
+    `${megabytes(0)} MB/s · ${formatEta(null)} left`;
+  importDetail.hidden = false;
+  const controller = new AbortController();
+  importAbort = controller;
+  return controller;
+}
+
+function endZipImport(): void {
+  importing = false;
+  importAbort = null;
+  hideImportDetail();
+  clear.disabled = false;
+  input.disabled = false;
+  zipInput.disabled = false;
+  zipInput.value = "";
+}
+
+async function importZipFiles(files: readonly File[]): Promise<void> {
+  const controller = beginZipImport();
+  // Both are asked before the first write, as with the folder path.
+  requestPersist();
+  await warnIfZipsDoNotFit(files);
+  try {
+    await importZips([...files], {
+      signal: controller.signal,
+      onProgress: showImportProgress,
+    });
+  } catch (error) {
+    endZipImport();
+    if (describeImportError(error).code === "aborted") {
+      // Issue #128: a cancelled import is not a failure; what was written
+      // before the cancel stays stored.
+      status.textContent = "Cancelled";
+    } else {
+      status.textContent = "Import failed";
+      showImportError(error);
+    }
+    await refresh();
+    return;
+  }
+  endZipImport();
+  status.textContent = "Ready";
+  await refresh();
+}
+
+// A dropped file counts as a ZIP by its extension alone, case-insensitive.
+function droppedZips(files: FileList | null): File[] {
+  return Array.from(files ?? []).filter((file) => file.name.toLowerCase().endsWith(".zip"));
+}
+
+function dropZipFiles(event: DragEvent): void {
+  event.preventDefault();
+  if (importing) return;
+  const zips = droppedZips(event.dataTransfer?.files ?? null);
+  if (zips.length === 0) {
+    // Nothing is imported and the failure names the reason.
+    hideImportError();
+    hideImportDetail();
+    status.textContent = "Import failed";
+    showImportError(new ImportError("not-a-zip"));
+    return;
+  }
+  void importZipFiles(zips).catch(fail);
 }
 
 // Imports the folder the development server exposes (issue #72) exactly as a
@@ -475,10 +653,28 @@ if (missing.length > 0) {
   unsupported.textContent = `Missing browser features: ${missing.join(", ")}`;
   unsupported.hidden = false;
   input.disabled = true;
+  zipInput.disabled = true;
   play.disabled = true;
 } else {
   input.addEventListener("change", () => {
     void importFolder(input.files ?? ([] as unknown as FileList)).catch(fail);
+  });
+
+  zipInput.addEventListener("change", () => {
+    const files = Array.from(zipInput.files ?? []);
+    if (files.length === 0) return;
+    void importZipFiles(files).catch(fail);
+  });
+
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+  dropZone.addEventListener("drop", (event) => {
+    dropZipFiles(event);
+  });
+
+  importCancel.addEventListener("click", () => {
+    importAbort?.abort();
   });
 
   play.addEventListener("click", () => {

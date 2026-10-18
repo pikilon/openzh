@@ -39,8 +39,9 @@ function reportError(message) {
   window.__zhwpDone = { status: "error", message: String(message ?? "unknown error") };
 }
 
-// Fetches one replay and turns it into a user file under Replays/, named after
-// the last segment of its URL (docs/briefs/39-replay-file.md). The URL is part
+// Fetches one replay and turns it into a user file under GeneralsZH/Replays/,
+// named after the last segment of its URL (docs/briefs/39-replay-file.md).
+// Zero Hour reads replays from that folder, not from Replays/. The URL is part
 // of every message so a failing page names the file that could not be loaded.
 async function fetchReplay(url) {
   let response;
@@ -56,7 +57,7 @@ async function fetchReplay(url) {
   }
   const name = decodeURIComponent(new URL(url, window.location.href).pathname.split("/").pop() ?? "");
   if (name.length === 0) throw new Error(`replay ${url}: URL has no file name`);
-  return { path: `Replays/${name}`, data: new Uint8Array(await response.arrayBuffer()) };
+  return { path: `GeneralsZH/Replays/${name}`, data: new Uint8Array(await response.arrayBuffer()) };
 }
 
 window.addEventListener("error", (event) => record("[page] " + event.message));

@@ -186,7 +186,7 @@
       "issue": 34,
       "title": "Real data: a replay plays in the browser with rendering",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",

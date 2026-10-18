@@ -1379,6 +1379,31 @@
         "web/scripts/make-game-zip.mjs"
       ],
       "summary": "make-game-zip can store TGAs RLE-encoded (lossless) and re-encode music at a lower bitrate while packing."
+    },
+    {
+      "issue": 173,
+      "title": "Web: default 1920x1080 and maximum graphics",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/173-web-1080p-max-graphics.md",
+      "depends_on": [],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && ZHWP_PORT=4193 npx playwright test tests/launcher-graphics-defaults.spec.ts tests/launcher-1080p.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-graphics-defaults.spec.ts",
+        "web/tests/launcher-1080p.spec.ts",
+        "web/tests/harness/canvas/hd.js"
+      ],
+      "allowed_paths": [
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp",
+        "Core/GameEngine/Source/Common/OptionPreferences.cpp",
+        "GeneralsMD/Code/GameEngine/Source/Common/GameLOD.cpp",
+        "GeneralsMD/Code/Main/SDL3Main.cpp"
+      ],
+      "summary": "Fresh web profiles start at 1920x1080 with StaticGameLOD VeryHigh, 4x MSAA, 16x anisotropic filtering, terrain LOD max and dynamic LOD off; saved Options.ini values win and native defaults are unchanged."
     }
   ]
 }

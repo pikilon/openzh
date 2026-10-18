@@ -231,17 +231,19 @@
       "issue": 36,
       "title": "Real data: frame-time baseline",
       "phase": 1,
-      "status": "needs-spec",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
       "local_model_ok": false,
-      "brief": null,
+      "brief": "docs/briefs/36-frame-baseline.md",
       "depends_on": [
         34
       ],
-      "check": null,
-      "test_paths": [],
+      "check": "cd web && ZHWP_REPLAY=<file.rep> npm run bench -- real-replay",
+      "test_paths": [
+        "web/bench/real-replay.bench.ts"
+      ],
       "allowed_paths": [],
       "summary": "Measure frame times of a real replay in Brave and record them in docs/porting-notes.md, to know whether phase 1 needs performance work."
     },

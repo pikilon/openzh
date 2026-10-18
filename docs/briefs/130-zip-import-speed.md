@@ -46,4 +46,4 @@ bytes, and tune the import until it is within bounds.
 `web/src/zip.ts`, `web/src/zip-import.ts`, `web/src/opfs-store.ts`
 
 ## Check
-`cd web && npx playwright test --config playwright.bench.config.ts bench/zip-import.bench.ts && npx playwright test tests/zip.spec.ts tests/zip-import.spec.ts`
+`cd web && npm ci && npx playwright test --config playwright.bench.config.ts bench/zip-import.bench.ts && npx playwright test tests/zip.spec.ts tests/zip-import.spec.ts`

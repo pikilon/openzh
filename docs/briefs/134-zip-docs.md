@@ -38,4 +38,4 @@ The written project knowledge matches the ZIP-only loading.
 `docs/decisions.md`, `web/AGENTS.md`, `README.md`, `docs/briefs/README.md`, `AGENTS.md`
 
 ## Check
-`cd web && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh`
+`cd web && npm ci && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh`

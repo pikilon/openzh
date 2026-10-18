@@ -34,4 +34,4 @@ can be removed in #133.
 `web/tests/real-data*.spec.ts`, `web/tests/helpers/real-game.ts`, `web/AGENTS.md`
 
 ## Check
-`cd web && env -u ZHWP_GAME_ZIPS npx playwright test && ../scripts/check-no-ea-assets.sh`, then the real-data specs with `ZHWP_GAME_ZIPS` set.
+`cd web && npm ci && env -u ZHWP_GAME_ZIPS npx playwright test && ../scripts/check-no-ea-assets.sh`, then the real-data specs with `ZHWP_GAME_ZIPS` set.

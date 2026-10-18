@@ -896,7 +896,7 @@
       "local_model_ok": false,
       "brief": "docs/briefs/125-import-errors.md",
       "depends_on": [],
-      "check": "cd web && npx playwright test tests/import-error.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/import-error.spec.ts",
       "test_paths": [
         "web/tests/import-error.spec.ts"
       ],
@@ -919,7 +919,7 @@
       "depends_on": [
         125
       ],
-      "check": "cd web && npx playwright test tests/zip.spec.ts tests/import-error.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/zip.spec.ts tests/import-error.spec.ts",
       "test_paths": [
         "web/tests/zip.spec.ts",
         "web/tests/helpers/zip.ts"
@@ -944,7 +944,7 @@
         125,
         126
       ],
-      "check": "cd web && npx playwright test tests/zip-import.spec.ts tests/zip.spec.ts tests/store.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/zip-import.spec.ts tests/zip.spec.ts tests/store.spec.ts",
       "test_paths": [
         "web/tests/zip-import.spec.ts"
       ],
@@ -968,7 +968,7 @@
       "depends_on": [
         127
       ],
-      "check": "cd web && npx playwright test tests/launcher-zip.spec.ts tests/launcher.spec.ts tests/launcher-errors.spec.ts tests/launcher-storage.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/launcher-zip.spec.ts tests/launcher.spec.ts tests/launcher-errors.spec.ts tests/launcher-storage.spec.ts",
       "test_paths": [
         "web/tests/launcher-zip.spec.ts"
       ],
@@ -991,7 +991,7 @@
       "depends_on": [
         128
       ],
-      "check": "cd web && npx playwright test tests/zip-persistence.spec.ts tests/launcher-zip.spec.ts tests/launcher-storage.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/zip-persistence.spec.ts tests/launcher-zip.spec.ts tests/launcher-storage.spec.ts",
       "test_paths": [
         "web/tests/zip-persistence.spec.ts"
       ],
@@ -1016,7 +1016,7 @@
       "depends_on": [
         127
       ],
-      "check": "cd web && npx playwright test --config playwright.bench.config.ts bench/zip-import.bench.ts && npx playwright test tests/zip.spec.ts tests/zip-import.spec.ts",
+      "check": "cd web && npm ci && npx playwright test --config playwright.bench.config.ts bench/zip-import.bench.ts && npx playwright test tests/zip.spec.ts tests/zip-import.spec.ts",
       "test_paths": [
         "web/bench/zip-import.bench.ts"
       ],
@@ -1040,7 +1040,7 @@
       "depends_on": [
         126
       ],
-      "check": "cd web && npx playwright test tests/make-game-zip.spec.ts tests/zip.spec.ts",
+      "check": "cd web && npm ci && npx playwright test tests/make-game-zip.spec.ts tests/zip.spec.ts",
       "test_paths": [
         "web/tests/make-game-zip.spec.ts"
       ],
@@ -1131,7 +1131,7 @@
       "depends_on": [
         133
       ],
-      "check": "cd web && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh",
+      "check": "cd web && npm ci && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh",
       "test_paths": [
         "web/tests/docs-zip.spec.ts"
       ],

@@ -67,4 +67,4 @@ Ids are the contract. New elements in `web/app/index.html`:
 `web/app/index.html`, `web/src/main.ts`
 
 ## Check
-`cd web && npx playwright test tests/launcher-zip.spec.ts tests/launcher.spec.ts tests/launcher-errors.spec.ts tests/launcher-storage.spec.ts`
+`cd web && npm ci && npx playwright test tests/launcher-zip.spec.ts tests/launcher.spec.ts tests/launcher-errors.spec.ts tests/launcher-storage.spec.ts`

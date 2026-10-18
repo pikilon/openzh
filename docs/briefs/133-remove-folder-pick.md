@@ -59,4 +59,4 @@ the development server's game-folder import is gone.
 `web/scripts/serve.mjs`, `web/package.json`, `web/playwright.config.ts`
 
 ## Check
-`cd web && npm ci && npx playwright test`
+`cd web && npm ci && npm ci && npx playwright test`

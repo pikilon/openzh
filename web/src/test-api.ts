@@ -2,7 +2,8 @@
 // re-exports the wrapper's modules so tests exercise the real code.
 export { classifyArchives, REQUIRED } from "./install";
 export { ImportError, describeImportError, isRecoverable } from "./import-error";
-export { storeFiles, listStored, clearStored } from "./opfs-store";
+export { storeFiles, listStored, listExtra, clearStored } from "./opfs-store";
 export { formatBytes, bytesNeeded, available } from "./storage";
 export { FileBridge } from "./bridge";
 export { openZip, entryStream } from "./zip";
+export { importZips } from "./zip-import";

@@ -1268,7 +1268,16 @@
         "web/tests/launcher-storage.spec.ts",
         "web/tests/launcher-zip.spec.ts",
         "web/tests/launcher-visibility.spec.ts",
-        "web/tests/launcher-favicon.spec.ts"
+        "web/tests/launcher-favicon.spec.ts",
+        "web/tests/folder-removed.spec.ts",
+        "web/tests/zip-persistence.spec.ts",
+        "web/tests/zip-replace.spec.ts",
+        "web/tests/real-data.spec.ts",
+        "web/tests/real-data-audio.spec.ts",
+        "web/tests/real-data-fonts.spec.ts",
+        "web/tests/real-data-textures.spec.ts",
+        "web/tests/real-data-webgpu.spec.ts",
+        "web/tests/real-data-replay.spec.ts"
       ],
       "allowed_paths": [
         "web/app/index.html",

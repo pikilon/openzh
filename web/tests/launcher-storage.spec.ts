@@ -1,10 +1,26 @@
 import { test, expect, type Page } from "@playwright/test";
 import { statSync } from "node:fs";
+import {
+  importInstall,
+  launcherUrl,
+  openLauncher,
+  removeStoredArchive,
+  RESOLVES,
+  seedInstall,
+  START_TIMEOUT,
+  storedPaths,
+  waitForState,
+  warningSamples,
+  watchWarning,
+} from "./helpers/launcher";
 import { installZip } from "./helpers/install-zip";
 
 // Issue #31: persistent storage and a storage estimate before import. Issue
-// #70: the estimate warns instead of refusing the import. The pure helpers are
-// exercised through the harness page; the launcher through stubbed
+// #70: the estimate warns instead of refusing the import. Issue #157: an import
+// replaces the previous install. Issue #159: the import starts the engine by
+// itself, so no test presses Play and a clean store is reset through the
+// harness page instead of the removed "Clear stored archives" button. The pure
+// helpers are exercised through the harness page; the launcher through stubbed
 // StorageManager methods.
 
 const MB = 1024 * 1024;
@@ -67,11 +83,6 @@ async function mockStorage(page: Page, mock: StorageMock): Promise<void> {
   }, mock);
 }
 
-test.beforeEach(async ({ page }) => {
-  await openHarness(page);
-  await page.evaluate(() => (window as unknown as { zhwp: { clearStored(): Promise<void> } }).zhwp.clearStored());
-});
-
 test("1: formatBytes uses 1024-based B, KB, MB and GB with one decimal", async ({ page }) => {
   await openHarness(page);
   const formatted = await page.evaluate(() => {
@@ -81,7 +92,9 @@ test("1: formatBytes uses 1024-based B, KB, MB and GB with one decimal", async (
   expect(formatted).toEqual(["0 B", "1023 B", "1.0 KB", "1.5 MB", "2.0 GB"]);
 });
 
-test("2: bytesNeeded skips only entries with the same kind, case-insensitive name and size", async ({ page }) => {
+test("2: bytesNeeded skips only entries with the same kind, case-insensitive name and size", async ({
+  page,
+}) => {
   await openHarness(page);
   const needed = await page.evaluate(() => {
     const z = (window as unknown as { zhwp: { bytesNeeded(picked: unknown[], stored: unknown[]): number } }).zhwp;
@@ -101,7 +114,9 @@ test("2: bytesNeeded skips only entries with the same kind, case-insensitive nam
   expect(needed).toBe(900);
 });
 
-test("3: available is quota minus usage, missing usage counts as 0 and no quota is undefined", async ({ page }) => {
+test("3: available is quota minus usage, missing usage counts as 0 and no quota is undefined", async ({
+  page,
+}) => {
   await openHarness(page);
   const values = await page.evaluate(() => {
     const z = (window as unknown as { zhwp: { available(estimate: unknown): number | undefined } }).zhwp;
@@ -121,9 +136,10 @@ test("4: on load, #storage shows the formatted usage and quota", async ({ page }
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
 
-  await expect(page.locator("#picker #storage")).toHaveText("Storage: 512.0 MB of 2.0 GB");
+  await expect(page.locator("body")).toHaveAttribute("data-state", "no-assets");
+  await expect(page.locator("#loader #storage")).toHaveText("Storage: 512.0 MB of 2.0 GB");
 });
 
 test("5: when persisted resolves true, #storage ends with (persistent)", async ({ page }) => {
@@ -132,110 +148,144 @@ test("5: when persisted resolves true, #storage ends with (persistent)", async (
     persisted: true,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
 
-  await expect(page.locator("#storage")).toHaveText(/^Storage: 512\.0 MB of 2\.0 GB \(persistent\)$/);
+  await expect(page.locator("#loader #storage")).toHaveText(
+    /^Storage: 512\.0 MB of 2\.0 GB \(persistent\)$/,
+  );
 });
 
-test("6: when estimate rejects, #storage reads Storage: unknown and import still works", async ({ page }, info) => {
+test("6: when estimate rejects, #storage reads Storage: unknown and import still works", async ({
+  page,
+}, info) => {
   await mockStorage(page, { estimate: "reject", persisted: false, persist: false });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
 
-  await expect(page.locator("#picker #storage")).toHaveText("Storage: unknown");
+  await expect(page.locator("#loader #storage")).toHaveText("Storage: unknown");
 
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await importInstall(page, info.outputPath());
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
 });
 
-test("70.1: when the estimate is smaller than needed, the import finishes and counts the archives", async ({ page }, info) => {
+test("70.1: when the estimate is smaller than needed, the import finishes and counts the archives", async ({
+  page,
+}, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 16 },
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
 
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
+  await importInstall(page, info.outputPath());
 
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  await expect(page.locator("#canvas")).toBeVisible();
 });
 
-test("70.2: when the estimate is smaller than needed, #storage-warning shows both formatted sizes", async ({ page }, info) => {
+test("70.2: when the estimate is smaller than needed, #storage-warning shows both formatted sizes", async ({
+  page,
+}, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 16 },
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
   const zip = await installZip(info.outputPath());
   const needed = zipBytes(zip);
+  await watchWarning(page);
 
   await page.locator("#zip-input").setInputFiles(zip);
 
-  const warning = page.locator("#picker #storage-warning");
-  await expect(warning).toBeVisible();
+  const warning = page.locator("#loader #storage-warning");
   await expect(warning).toHaveAttribute("role", "status");
-  await expect(warning).toHaveText(`The browser reports 16 B available; the import needs ${needed} B.`);
+  const expected = `The browser reports 16 B available; the import needs ${needed} B.`;
+  await expect
+    .poll(
+      async () =>
+        (await warningSamples(page)).some((sample) => sample.visible && sample.text === expected),
+      { timeout: START_TIMEOUT },
+    )
+    .toBe(true);
+  await waitForState(page, "playing");
 });
 
-test("70.3: when the estimate leaves enough space, #storage-warning stays hidden", async ({ page }, info) => {
+test("70.3: when the estimate leaves enough space, #storage-warning stays hidden", async ({
+  page,
+}, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 2 * GB },
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
-  const warning = page.locator("#picker #storage-warning");
+  await openLauncher(page, RESOLVES);
+  const warning = page.locator("#loader #storage-warning");
   await expect(warning).toHaveCount(1);
   await expect(warning).toBeHidden();
+  await watchWarning(page);
 
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(warning).toBeHidden();
+  await importInstall(page, info.outputPath());
+
+  const shown = (await warningSamples(page)).filter((sample) => sample.visible);
+  expect(shown).toEqual([]);
 });
 
-test("70.4: after a warning, Clear hides #storage-warning", async ({ page }, info) => {
+test("70.4: after a warning, reloading the game data shows a clean loader with no warning", async ({
+  page,
+}, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 16 },
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
   await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  const warning = page.locator("#picker #storage-warning");
-  await expect(warning).toBeVisible();
+  await waitForState(page, "playing");
+  await expect(page.locator("#loader")).toBeHidden();
 
-  await page.locator("#clear").click();
+  // #159 removed "Clear stored archives"; the menu's "Reload game data" is the
+  // player's replacement, and the reloaded loader must not keep the warning.
+  await page.locator("#menu-button").click();
+  await expect(page.locator("#menu")).toHaveAttribute("open", "");
+  await page.locator("#reload").click();
+  await expect(page.locator("#reload-dialog")).toHaveAttribute("open", "");
+  await page.locator("#reload-confirm").click();
 
-  await expect(warning).toBeHidden();
+  await expect(page.locator("body")).toHaveAttribute("data-state", "no-assets", {
+    timeout: START_TIMEOUT,
+  });
+  await expect(page.locator("#loader")).toBeVisible();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
+  await expect(page.locator("#storage-warning")).toBeHidden();
 });
 
-test("70.5: a QuotaExceededError during storing is reported and leaves only the files committed before it", async ({ page }, info) => {
+test("70.5: a QuotaExceededError during storing leaves only the files committed before it", async ({
+  page,
+}, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 2 * GB },
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
 
-  // The first install also has a file the second ZIPs do not bring.
-  await page.locator("#zip-input").setInputFiles(
-    await installZip(info.outputPath("first"), undefined, {
-      extraFiles: [{ path: "old/notes.txt", data: "previous install\n" }],
-    }),
-  );
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
+  // The previous install also has a file the second ZIPs do not bring. It is
+  // seeded through the harness so no engine holds its files open, and one
+  // required archive is removed: the launcher then shows the loader instead of
+  // starting the game.
+  const previous = await installZip(info.outputPath("previous"), undefined, {
+    extraFiles: [{ path: "old/notes.txt", data: "previous install\n" }],
+  });
+  await seedInstall(page, previous);
+  await removeStoredArchive(page, "generals/INI.big");
+  await page.goto(launcherUrl(RESOLVES));
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 3 archives");
+  await waitForState(page, "no-assets");
 
-  // Fail only the third archive's writable, as a full disk would after the
-  // first two have committed. The new sizes force the replace rule to remove
-  // the previous install before the first write.
+  // Fail only INI.big's writable, as a full disk would after the first two
+  // archives committed. The new sizes force the replace rule to remove the
+  // previous install before the first write.
   await page.evaluate(() => {
     const prototype = FileSystemFileHandle.prototype as unknown as {
       createWritable(options?: { keepExistingData?: boolean }): Promise<FileSystemWritableFileStream>;
@@ -255,33 +305,11 @@ test("70.5: a QuotaExceededError during storing is reported and leaves only the 
   await expect(page.locator("#import-error")).toHaveAttribute("data-code", "quota-exceeded");
   await expect(page.locator("#import-progress")).toBeHidden();
 
-  // The old-only extra and the old INI.big/W3D.big are gone; only the two
-  // archives committed before the failure remain.
-  const stored = await page.evaluate(async () => {
-    const paths: string[] = [];
-    const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
-      for await (const entry of (dir as any).entries()) {
-        const [name, handle] = entry as [string, FileSystemHandle];
-        const path = prefix === "" ? name : `${prefix}/${name}`;
-        if (handle.kind === "directory") {
-          await walk(handle as FileSystemDirectoryHandle, path);
-        } else {
-          paths.push(path);
-        }
-      }
-    };
-    try {
-      const root = await navigator.storage.getDirectory();
-      const zhwp = await root.getDirectoryHandle("zhwp");
-      await walk(zhwp, "");
-    } catch {
-      // No stored tree at all.
-    }
-    return paths.sort();
-  });
-  expect(stored).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
+  // The old-only extra and the old archives are gone; only the two archives
+  // committed before the failure remain, with the new sizes.
+  expect(await storedPaths(page)).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");
-  await expect(page.locator("#play")).toBeDisabled();
+  await expect(page.locator("body")).toHaveAttribute("data-state", "no-assets");
 });
 
 test("70.6: no path of the page writes Not enough storage into #status", async ({ page }, info) => {
@@ -290,7 +318,7 @@ test("70.6: no path of the page writes Not enough storage into #status", async (
     persisted: false,
     persist: false,
   });
-  await page.goto("/app/index.html");
+  await openLauncher(page, RESOLVES);
   await page.evaluate(() => {
     const status = document.getElementById("status");
     if (status === null) throw new Error("missing #status");
@@ -304,9 +332,7 @@ test("70.6: no path of the page writes Not enough storage into #status", async (
   });
 
   await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect
-    .poll(async () => page.locator("#status").textContent(), { timeout: 30_000 })
-    .not.toBe("Importing");
+  await waitForState(page, "playing");
 
   const seen = await page.evaluate(() => (window as unknown as { __statusSeen: string[] }).__statusSeen);
   expect(seen.some((text) => text.includes("Not enough storage"))).toBe(false);
@@ -318,15 +344,13 @@ test("8: a complete ZIP pick calls navigator.storage.persist() once", async ({ p
     persisted: false,
     persist: "count",
   });
-  await page.goto("/app/index.html");
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
+  await openLauncher(page, RESOLVES);
 
   // Ignore anything the page did while loading: the pick must call it.
   await page.evaluate(() => {
     (window as unknown as { __persistCalls: number }).__persistCalls = 0;
   });
-  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await importInstall(page, info.outputPath());
 
   const calls = await page.evaluate(() => (window as unknown as { __persistCalls: number }).__persistCalls);
   expect(calls).toBe(1);

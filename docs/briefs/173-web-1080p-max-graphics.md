@@ -90,7 +90,7 @@ scroll at 1280x800 (width-limited, 1280x720 at y=56) and at 1920x1080
 ## Acceptance criteria
 
 1. On a fresh web profile with synthetic archives, the real engine logs exactly one `GENERALSX_GRAPHICS xres=1920 yres=1080 lod=VeryHigh aa=4 filter=4 anisotropy=16 dynamicLOD=0` line.
-2. In that run `#canvas.width` is 1920 and `#canvas.height` is 1080, even if the engine later fails on the synthetic assets.
+2. In a real-data run, after the engine reaches the shell, `#canvas.width` is 1920 and `#canvas.height` is 1080. The synthetic install stops before display init, so its canvas is not checked.
 3. With a fake engine that sets a 1920x1080 buffer, at 1280x800 the page does not scroll, the canvas keeps 16:9, starts at the top bar's bottom (within 1 px), and is 1280 wide.
 4. With the same fake engine at 1920x1080, the canvas is height-limited to the viewport minus the top bar (1024 px tall, about 1820 px wide, 16:9), starts at the top bar's bottom, the page does not scroll, and it is horizontally centred.
 5. The `GENERALSX_GRAPHICS` line is absent on the old build (the test fails before the implementation).
@@ -98,10 +98,15 @@ scroll at 1280x800 (width-limited, 1280x720 at y=56) and at 1920x1080
 
 ## Test paths
 
-* `web/tests/launcher-graphics-defaults.spec.ts`: criteria 1, 2, 5. It imports
-  the synthetic install with no `module` parameter (the real engine), waits
-  for `window.__zhwpLog` to contain `GENERALSX_GRAPHICS`, and checks the values
-  and canvas buffer. It must not require real game data.
+* `web/tests/launcher-graphics-defaults.spec.ts`: criteria 1 and 5. It imports a
+  small synthetic install (the four archives plus the pre-GameLOD INI files)
+  with no `module` parameter (the real engine), waits for
+  `window.__zhwpLog` to contain `GENERALSX_GRAPHICS`, and checks the values. It
+  must not require real game data.
+* `web/tests/real-data-resolution.spec.ts`: criterion 2. Skips unless
+  `ZHWP_GAME_ZIPS` is set; imports the owner's real ZIPs, waits for the
+  `GENERALSX_GRAPHICS` line after the shell loads, and checks the canvas buffer
+  is 1920x1080.
 * `web/tests/launcher-1080p.spec.ts`: criteria 3, 4, using a fake engine that
   sets 1920x1080 and the existing synthetic install.
 * `web/tests/harness/canvas/hd.js`: the fake engine.
@@ -119,7 +124,7 @@ Tests are written separately. No page/UI change is expected.
 
 `scripts/build-webgpu.sh` exits 0, then:
 
-`cd web && npm ci && ZHWP_PORT=4193 npx playwright test tests/launcher-graphics-defaults.spec.ts tests/launcher-1080p.spec.ts`
+`cd web && npm ci && ZHWP_PORT=4193 npx playwright test tests/launcher-graphics-defaults.spec.ts tests/launcher-1080p.spec.ts tests/real-data-resolution.spec.ts`
 
 The two specs must pass in Brave. The real-data specs are not needed for this
 task; the synthetic archives are enough to reach engine initialization.

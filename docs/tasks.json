@@ -1265,7 +1265,6 @@
         "web/tests/launcher-input.spec.ts",
         "web/tests/launcher-mute.spec.ts",
         "web/tests/launcher-storage.spec.ts",
-        "web/tests/launcher-zip.spec.ts",
         "web/tests/launcher-visibility.spec.ts",
         "web/tests/launcher-favicon.spec.ts"
       ],

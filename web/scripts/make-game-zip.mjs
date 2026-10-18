@@ -3,16 +3,23 @@
 //
 // Usage (from web/):
 //   node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split] [--zip64]
+//                                   [--no-videos] [--recode-audio]
 //
 // --src defaults to $ZHWP_GAME_DIR. --out must be outside the repository: the
 // game files are the player's and never become part of this project. Entries
 // are stored (method 0), written by hand, and streamed from disk in chunks so
 // memory stays flat; ZIP64 records appear when a size, an offset or the file
 // count needs them, or when --zip64 forces them for tests.
-import { mkdir, open, readdir, rename, stat, unlink } from "node:fs/promises";
+//
+// --no-videos leaves out .bik files. --recode-audio rebuilds speech*/audio*
+// .big archives with the IMA ADPCM encoder while packing, keeping the original
+// relative paths and never touching the source folder.
+import { mkdir, open, readdir, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { rewriteBig } from "./lib/big-archive.mjs";
+import { encodeImaWav } from "./lib/ima-adpcm.mjs";
 
 const LOCAL_SIGNATURE = 0x04034b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -295,10 +302,57 @@ async function collectFiles(root) {
   return { files, warnings };
 }
 
+// A .big is an audio archive when its lower-cased file name (not its folder)
+// starts with speech or audio.
+function isAudioArchive(path) {
+  const name = path.split("/").pop().toLowerCase();
+  return name.endsWith(".big") && (name.startsWith("speech") || name.startsWith("audio"));
+}
+
+// Rebuilds every speech*/audio* .big under tmpDir, recoding each .wav entry
+// that encodeImaWav can make smaller. Returns the original path -> temporary
+// file map plus the counters for the summary line.
+async function recodeAudio(files, tmpDir) {
+  const recoded = new Map();
+  let wav = 0;
+  let archives = 0;
+  let saved = 0;
+  let index = 0;
+
+  for (const file of files) {
+    if (!isAudioArchive(file.path)) continue;
+    await mkdir(tmpDir, { recursive: true });
+    const tempPath = join(tmpDir, `${index++}-${file.path.split("/").pop()}`);
+    let result;
+    try {
+      result = await rewriteBig(file.absolute, tempPath, {
+        select: (entry) => entry.name.toLowerCase().endsWith(".wav"),
+        transform: (entry, data) => {
+          const encoded = encodeImaWav(data);
+          return encoded !== null && encoded.length < data.length ? encoded : null;
+        },
+      });
+    } catch (error) {
+      throw new Error(
+        `${file.path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    recoded.set(file.path, tempPath);
+    if (result.replaced > 0) {
+      wav += result.replaced;
+      archives += 1;
+      saved += result.savedBytes;
+    }
+  }
+
+  return { recoded, wav, archives, saved };
+}
+
 function usage(message) {
   console.error(message);
   console.error(
-    "usage: node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split] [--zip64]",
+    "usage: node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split] [--zip64] " +
+      "[--no-videos] [--recode-audio]",
   );
   return 2;
 }
@@ -320,6 +374,8 @@ async function main() {
         out: { type: "string" },
         split: { type: "boolean" },
         zip64: { type: "boolean" },
+        "no-videos": { type: "boolean" },
+        "recode-audio": { type: "boolean" },
       },
       strict: true,
       allowPositionals: false,
@@ -363,49 +419,101 @@ async function main() {
   const { files, warnings } = await collectFiles(source);
   for (const warning of warnings) console.warn(warning);
 
-  const targets = [];
-  if (values.split) {
-    const groups = new Map([
-      ["zero-hour.zip", []],
-      ["generals.zip", []],
-    ]);
+  let packed = files;
+  let skippedVideos = null;
+  if (values["no-videos"] === true) {
+    packed = [];
+    let count = 0;
+    let bytes = 0;
     for (const file of files) {
-      const segments = file.path.split("/").slice(0, -1);
-      const zeroHour = segments.some((segment) =>
-        segment.toLowerCase().includes("zero hour"),
-      );
-      groups.get(zeroHour ? "zero-hour.zip" : "generals.zip").push(file);
-    }
-
-    const missing = [];
-    for (const [name, group] of groups) {
-      if (group.length === 0) continue; // The folder does not hold that install.
-      const basenames = new Set(
-        group.map((file) => file.path.split("/").pop().toLowerCase()),
-      );
-      for (const required of REQUIRED.get(name)) {
-        if (!basenames.has(required.toLowerCase())) {
-          missing.push(`${name}: missing ${required}`);
-        }
+      if (file.path.toLowerCase().endsWith(".bik")) {
+        count += 1;
+        bytes += (await stat(file.absolute)).size;
+      } else {
+        packed.push(file);
       }
     }
-    if (missing.length > 0) {
-      for (const line of missing) console.error(line);
-      return 3;
-    }
-
-    for (const [name, group] of groups) {
-      if (group.length > 0) targets.push({ finalPath: join(out, name), files: group });
-    }
-  } else {
-    targets.push({ finalPath: join(out, "game.zip"), files });
+    skippedVideos = { count, bytes };
   }
 
-  for (const target of targets) {
-    const result = await writeArchive(target.finalPath, target.files, values.zip64 === true);
-    console.log(`${target.finalPath} ${result.count} files ${result.bytes} bytes`);
+  const tmpDir = join(out, ".recode-tmp");
+  let recoded = new Map();
+  let recodeSummary = null;
+
+  try {
+    if (values["recode-audio"] === true) {
+      try {
+        const summary = await recodeAudio(packed, tmpDir);
+        recoded = summary.recoded;
+        recodeSummary = summary;
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        return 4;
+      }
+    }
+
+    const packedFiles = packed.map((file) => {
+      const tempPath = recoded.get(file.path);
+      return tempPath === undefined ? file : { ...file, absolute: tempPath };
+    });
+
+    const targets = [];
+    if (values.split) {
+      const groups = new Map([
+        ["zero-hour.zip", []],
+        ["generals.zip", []],
+      ]);
+      for (const file of packedFiles) {
+        const segments = file.path.split("/").slice(0, -1);
+        const zeroHour = segments.some((segment) =>
+          segment.toLowerCase().includes("zero hour"),
+        );
+        groups.get(zeroHour ? "zero-hour.zip" : "generals.zip").push(file);
+      }
+
+      const missing = [];
+      for (const [name, group] of groups) {
+        if (group.length === 0) continue; // The folder does not hold that install.
+        const basenames = new Set(
+          group.map((file) => file.path.split("/").pop().toLowerCase()),
+        );
+        for (const required of REQUIRED.get(name)) {
+          if (!basenames.has(required.toLowerCase())) {
+            missing.push(`${name}: missing ${required}`);
+          }
+        }
+      }
+      if (missing.length > 0) {
+        for (const line of missing) console.error(line);
+        return 3;
+      }
+
+      for (const [name, group] of groups) {
+        if (group.length > 0) targets.push({ finalPath: join(out, name), files: group });
+      }
+    } else {
+      targets.push({ finalPath: join(out, "game.zip"), files: packedFiles });
+    }
+
+    for (const target of targets) {
+      const result = await writeArchive(target.finalPath, target.files, values.zip64 === true);
+      console.log(`${target.finalPath} ${result.count} files ${result.bytes} bytes`);
+    }
+    if (skippedVideos !== null) {
+      console.log(
+        `skipped videos: ${skippedVideos.count} files, ${skippedVideos.bytes} bytes`,
+      );
+    }
+    if (recodeSummary !== null) {
+      console.log(
+        `recoded audio: ${recodeSummary.wav} wav in ${recodeSummary.archives} archives, ` +
+          `saved ${recodeSummary.saved} bytes`,
+      );
+    }
+    return 0;
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
   }
-  return 0;
 }
 
 main().then(

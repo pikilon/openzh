@@ -1,6 +1,7 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,15 +10,15 @@ import { fileURLToPath } from "node:url";
 // every font face the game asks for to the bundled Liberation files, so no
 // "[Font] WARNING: Unable to resolve font" line is logged, and the four
 // Liberation fonts plus their licence are in the engine's file system. Local
-// only: skipped unless ZHWP_GAME_DIR points to a folder that contains both game
+// only: skipped unless ZHWP_GAME_ZIPS lists the game ZIPs (make-game-zip.mjs --split), which hold both game
 // installs. Nothing from the game is copied into the repository; the screenshot
 // goes to the system temp folder.
 //
 // Criterion 3 (the synthetic suite still passes) is covered by the rest of the
-// suite, which runs without ZHWP_GAME_DIR: this file covers criteria 1 and 2.
-const gameDir = process.env.ZHWP_GAME_DIR;
+// suite, which runs without ZHWP_GAME_ZIPS: this file covers criteria 1 and 2.
+const gameZipPaths = gameZips();
 
-test.skip(!gameDir || !existsSync(gameDir), "set ZHWP_GAME_DIR to run against real game data");
+test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
 // Criterion 1 describes one run from Play until 20 s after GENERALSX_LOAD_DONE,
 // so that run happens once in beforeAll and test 1 checks the captured log.
@@ -79,7 +80,7 @@ test.describe("fonts on the real engine", () => {
     await page.locator("#clear").click();
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-    await page.locator("#folder-input").setInputFiles(gameDir as string);
+    await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
     await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
     await expect(page.locator("#play")).toBeEnabled();
 

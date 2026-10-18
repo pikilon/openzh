@@ -6,7 +6,7 @@ the browser tests. Root `AGENTS.md` rules apply; these add to them.
 
 * Nothing here comes from wasm-generals' `web/` (D-01): write it here.
 * No game data in this directory, its fixtures or test output. Tests use
-  synthetic data; real data only through `ZHWP_GAME_DIR`, locally.
+  synthetic data; real data only through `ZHWP_GAME_ZIPS` (the ZIPs built by `scripts/make-game-zip.mjs`), locally.
 * Every response the dev server sends carries COOP `same-origin`, COEP
   `require-corp` and CORP `same-origin`: threads and `SharedArrayBuffer`
   need cross-origin isolation.

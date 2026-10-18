@@ -1,5 +1,5 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inflateSync } from "node:zlib";
@@ -7,12 +7,12 @@ import { inflateSync } from "node:zlib";
 // Issue #77: with the owner's real game data, every WebGPU render pass must get
 // no depth-stencil attachment or a real depth/depth-stencil one, so the frame
 // is not dropped and the shell map behind the main menu is drawn. Local only:
-// skipped unless ZHWP_GAME_DIR points to a folder that contains both game
+// skipped unless ZHWP_GAME_ZIPS lists the game ZIPs (make-game-zip.mjs --split), which hold both game
 // installs. Nothing from the game is copied into the repository; the screenshot
 // goes to the system temp folder.
-const gameDir = process.env.ZHWP_GAME_DIR;
+const gameZipPaths = gameZips();
 
-test.skip(!gameDir || !existsSync(gameDir), "set ZHWP_GAME_DIR to run against real game data");
+test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
 // The three criteria describe one run from Play until 20 s after
 // GENERALSX_LOAD_DONE, so the run happens once in beforeAll and each test
@@ -136,7 +136,7 @@ test.describe("depth-stencil format on the real engine", () => {
     await page.locator("#clear").click();
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-    await page.locator("#folder-input").setInputFiles(gameDir as string);
+    await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
     await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
     await expect(page.locator("#play")).toBeEnabled();
 

@@ -1,14 +1,14 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
 
 // Issue #35: with the owner's real game data, after the Play click (the user
 // gesture) the engine's audio backend must create a running AudioContext whose
 // clock advances, and the engine must log the sounds it plays. Local only:
-// skipped unless ZHWP_GAME_DIR points to a folder that contains both game
+// skipped unless ZHWP_GAME_ZIPS lists the game ZIPs (make-game-zip.mjs --split), which hold both game
 // installs. Nothing from the game is copied into the repository.
-const gameDir = process.env.ZHWP_GAME_DIR;
+const gameZipPaths = gameZips();
 
-test.skip(!gameDir || !existsSync(gameDir), "set ZHWP_GAME_DIR to run against real game data");
+test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
 // The five criteria describe one run: from Play until 5 s after
 // GENERALSX_LOAD_DONE and 5 s more for the clock to advance. The run happens
@@ -57,7 +57,7 @@ test.describe("audio on the real engine", () => {
     await page.locator("#clear").click();
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-    await page.locator("#folder-input").setInputFiles(gameDir as string);
+    await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
     await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
     await expect(page.locator("#play")).toBeEnabled();
 

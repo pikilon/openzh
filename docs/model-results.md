@@ -80,5 +80,11 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #131 | tests | deepseek-flash (dsh) | ok | ~2.7 min | 9 tests (call 56) |
 | 2026-10-18 | #131 | code | deepseek-flash (dsh) | ok | ~3.5 min | 21 pass (call 58) |
 | 2026-10-18 | #127 | analysis+fix | sonnet (claude_agent, owner-authorised) | ok | ~0.7 min | the test was wrong (progress filtered by absolute performance.now()); flash's code kept; 29 pass twice (call 59) |
+| 2026-10-18 | #128 | tests | deepseek-flash (dsh) | ok | ~19 min | 13 tests (call 60) |
+| 2026-10-18 | #128 | code | deepseek-flash (dsh) | ok | ~3.8 min | 38 pass (call 62) |
+| 2026-10-18 | #130 | tests | deepseek-flash (dsh) | ok | ~6 min | bench found the ZIP import at 4.5x the folder copy (call 61) |
+| 2026-10-18 | #130 | code | deepseek-flash (dsh) | ok | ~29 min | stored 1.03x, deflated 1.60x of the folder copy (call 63) |
+| 2026-10-18 | #129 | tests | deepseek-flash (dsh) | ok | ~6.8 min | found real bug: Stored counted empty files after a mid-import reload (call 64) |
+| 2026-10-18 | #129 | code | deepseek-flash (dsh) | ok | ~9 min | 52 pass (call 65) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

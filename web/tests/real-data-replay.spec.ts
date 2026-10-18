@@ -1,3 +1,4 @@
+import { gameZips } from "./helpers/real-game";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,16 +7,16 @@ import { inflateSync } from "node:zlib";
 
 // Issue #34: with the owner's real game files and one real Zero Hour replay,
 // the windowed engine plays the replay in Brave. Local only: skipped unless
-// ZHWP_GAME_DIR points to the game installs and ZHWP_REPLAY to one .rep file.
+// ZHWP_GAME_ZIPS lists the game ZIPs and ZHWP_REPLAY to one .rep file.
 // Nothing from the game is copied into the repository; the screenshot goes to
 // the system temp folder.
-const gameDir = process.env.ZHWP_GAME_DIR;
+const gameZipPaths = gameZips();
 const replayFile = process.env.ZHWP_REPLAY;
 const DATA = "/home/web_user/.local/share/GeneralsX";
 
 test.skip(
-  !gameDir || !existsSync(gameDir) || !replayFile || !existsSync(replayFile),
-  "set ZHWP_GAME_DIR and ZHWP_REPLAY to run against real game data",
+  gameZipPaths === null || !replayFile || !existsSync(replayFile),
+  "set ZHWP_GAME_ZIPS and ZHWP_REPLAY to run against real game data",
 );
 
 // The four criteria describe one run: import the game files, play the replay
@@ -134,7 +135,7 @@ test.describe("a real replay in the browser", () => {
   let screenshot = Buffer.alloc(0);
 
   test.beforeAll(async ({ browser }) => {
-    const gamePath = gameDir as string;
+    const gamePath = gameZipPaths as string[];
     const replayPath = replayFile as string;
     replayName = basename(replayPath);
     replayBytes = readFileSync(replayPath);
@@ -147,7 +148,7 @@ test.describe("a real replay in the browser", () => {
     await page.locator("#clear").click();
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
-    await page.locator("#folder-input").setInputFiles(gamePath);
+    await page.locator("#zip-input").setInputFiles(gamePath);
     await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
     await expect(page.locator("#play")).toBeEnabled();
 

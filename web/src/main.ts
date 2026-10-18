@@ -3,7 +3,7 @@
 // engine runs from them. The DOM element ids are the page's contract.
 
 import { REQUIRED } from "./install";
-import { listStored, clearStored, type StoredFile } from "./opfs-store";
+import { listStored, listExtra, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, formatBytes } from "./storage";
@@ -197,7 +197,8 @@ async function requestPersist(): Promise<void> {
 }
 
 // The estimate is a hint, not a limit (#70): warn when the ZIPs do not fit and
-// let the import try anyway.
+// let the import try anyway. The replace rule (#157) removes everything the new
+// ZIPs do not keep, so that freed space counts as available here.
 async function warnIfZipsDoNotFit(zips: readonly Blob[]): Promise<void> {
   const manager = navigator.storage;
   if (typeof manager.estimate !== "function") return;
@@ -208,8 +209,17 @@ async function warnIfZipsDoNotFit(zips: readonly Blob[]): Promise<void> {
     return;
   }
   if (free === undefined) return;
+  let removable = 0;
+  try {
+    const [stored, extras] = await Promise.all([listStored(), listExtra()]);
+    removable =
+      stored.reduce((sum, file) => sum + file.size, 0) +
+      extras.reduce((sum, file) => sum + file.size, 0);
+  } catch {
+    // The import itself reports a storage failure; warn on free space only.
+  }
   const needed = zips.reduce((sum, zip) => sum + zip.size, 0);
-  if (free < needed) showStorageWarning(free, needed);
+  if (free + removable < needed) showStorageWarning(free, needed);
 }
 
 function beginZipImport(): AbortController {
@@ -251,6 +261,10 @@ async function importZipFiles(files: readonly File[]): Promise<void> {
     await importZips([...files], {
       signal: controller.signal,
       onProgress: showImportProgress,
+      onPhase: (phase) => {
+        status.textContent =
+          phase === "removing" ? "Removing the previous install" : "Importing";
+      },
     });
   } catch (error) {
     endZipImport();

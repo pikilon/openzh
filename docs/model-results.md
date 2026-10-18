@@ -79,5 +79,6 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #127 | code | deepseek-flash (dsh) | failed | ~5.5 min | BLOCKED: agent says test 7 cannot pass (filters progress by absolute performance.now()); 28 pass, 1 fail from a clean worktree; branch failed/127-code-deepseek-flash (call 57) |
 | 2026-10-18 | #131 | tests | deepseek-flash (dsh) | ok | ~2.7 min | 9 tests (call 56) |
 | 2026-10-18 | #131 | code | deepseek-flash (dsh) | ok | ~3.5 min | 21 pass (call 58) |
+| 2026-10-18 | #127 | analysis+fix | sonnet (claude_agent, owner-authorised) | ok | ~0.7 min | the test was wrong (progress filtered by absolute performance.now()); flash's code kept; 29 pass twice (call 59) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

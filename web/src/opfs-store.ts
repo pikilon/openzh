@@ -41,6 +41,83 @@ async function kindDirectory(kind: GameKind, create: boolean): Promise<FileSyste
   }
 }
 
+const EXTRA_DIR = "extra";
+
+// Root of everything the wrapper owns. Missing on a fresh profile.
+async function rootDirectory(create: boolean): Promise<FileSystemDirectoryHandle | null> {
+  const root = await navigator.storage.getDirectory();
+  try {
+    return await root.getDirectoryHandle(ROOT_DIR, { create });
+  } catch (error) {
+    if (!create && (error as DOMException).name === "NotFoundError") return null;
+    throw error;
+  }
+}
+
+// Directory that holds the last segment of `parts` (relative to zhwp).
+async function parentDirectory(
+  parts: string[],
+  create: boolean,
+): Promise<FileSystemDirectoryHandle | null> {
+  let dir = await rootDirectory(create);
+  if (dir === null) return null;
+  for (const segment of parts.slice(0, -1)) {
+    try {
+      dir = await dir.getDirectoryHandle(segment, { create });
+    } catch (error) {
+      if (!create && (error as DOMException).name === "NotFoundError") return null;
+      throw error;
+    }
+  }
+  return dir;
+}
+
+// Size of an already stored file, or null when it is not there yet.
+export async function storedFileSize(parts: string[]): Promise<number | null> {
+  const dir = await parentDirectory(parts, false);
+  if (dir === null) return null;
+  try {
+    const handle = await dir.getFileHandle(parts[parts.length - 1], { create: false });
+    return (await handle.getFile()).size;
+  } catch (error) {
+    if ((error as DOMException).name === "NotFoundError") return null;
+    throw error;
+  }
+}
+
+export interface OpenedStoredFile {
+  writable: FileSystemWritableFileStream;
+  existed: boolean;
+  size: number;
+}
+
+// Opens a file under zhwp/<parts> for writing, creating parent directories.
+// The caller commits with close() or discards with abort().
+export async function openStoredFile(parts: string[]): Promise<OpenedStoredFile> {
+  const dir = await parentDirectory(parts, true);
+  const name = parts[parts.length - 1];
+  let handle: FileSystemFileHandle;
+  let existed = true;
+  try {
+    handle = await (dir as FileSystemDirectoryHandle).getFileHandle(name, { create: false });
+  } catch (error) {
+    if ((error as DOMException).name !== "NotFoundError") throw error;
+    handle = await (dir as FileSystemDirectoryHandle).getFileHandle(name, { create: true });
+    existed = false;
+  }
+  const size = existed ? (await handle.getFile()).size : 0;
+  return { writable: await createWritable(handle), existed, size };
+}
+
+// Removes a stored file; a file that is not there is already the wanted state.
+export async function removeStoredFile(parts: string[]): Promise<void> {
+  const dir = await parentDirectory(parts, false);
+  if (dir === null) return;
+  await dir.removeEntry(parts[parts.length - 1]).catch((error) => {
+    if ((error as DOMException).name !== "NotFoundError") throw error;
+  });
+}
+
 async function findFile(
   kind: GameKind,
   name: string,
@@ -99,6 +176,44 @@ export async function listStored(): Promise<StoredFile[]> {
   return stored;
 }
 
+export interface ExtraFile {
+  path: string; // relative to zhwp/extra, "/" separated
+  size: number;
+}
+
+async function walkExtra(
+  dir: FileSystemDirectoryHandle,
+  prefix: string,
+  files: ExtraFile[],
+): Promise<void> {
+  for await (const [name, handle] of dir.entries()) {
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    if (handle.kind === "directory") {
+      await walkExtra(handle as FileSystemDirectoryHandle, path, files);
+    } else {
+      const size = await (handle as FileSystemFileHandle).getFile().then((f) => f.size);
+      files.push({ path, size });
+    }
+  }
+}
+
+export async function listExtra(): Promise<ExtraFile[]> {
+  const root = await rootDirectory(false);
+  if (root === null) return [];
+  let extra: FileSystemDirectoryHandle;
+  try {
+    extra = await root.getDirectoryHandle(EXTRA_DIR, { create: false });
+  } catch (error) {
+    if ((error as DOMException).name === "NotFoundError") return [];
+    throw error;
+  }
+  const files: ExtraFile[] = [];
+  await walkExtra(extra, "", files);
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return files;
+}
+
+// Removes both the archives and the extra files (the whole zhwp tree).
 export async function clearStored(): Promise<void> {
   const root = await navigator.storage.getDirectory();
   await root.removeEntry(ROOT_DIR, { recursive: true }).catch((error) => {

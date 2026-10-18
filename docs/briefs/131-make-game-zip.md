@@ -63,4 +63,4 @@ node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split]
 `web/scripts/make-game-zip.mjs`
 
 ## Check
-`cd web && npx playwright test tests/make-game-zip.spec.ts tests/zip.spec.ts`
+`cd web && npm ci && npx playwright test tests/make-game-zip.spec.ts tests/zip.spec.ts`

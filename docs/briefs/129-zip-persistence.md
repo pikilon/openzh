@@ -48,4 +48,4 @@ restarts, and that an interrupted import costs only the missing files.
 `web/src/main.ts`, `web/src/zip-import.ts`, `web/src/opfs-store.ts`, `web/app/index.html`
 
 ## Check
-`cd web && npx playwright test tests/zip-persistence.spec.ts tests/launcher-zip.spec.ts tests/launcher-storage.spec.ts`
+`cd web && npm ci && npx playwright test tests/zip-persistence.spec.ts tests/launcher-zip.spec.ts tests/launcher-storage.spec.ts`

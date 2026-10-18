@@ -92,4 +92,4 @@ export function importZips(zips: Blob[], options?: ImportOptions): Promise<Impor
 `web/src/zip-import.ts`, `web/src/opfs-store.ts`, `web/src/test-api.ts`
 
 ## Check
-`cd web && npx playwright test tests/zip-import.spec.ts tests/zip.spec.ts tests/store.spec.ts`
+`cd web && npm ci && npx playwright test tests/zip-import.spec.ts tests/zip.spec.ts tests/store.spec.ts`

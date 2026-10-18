@@ -83,4 +83,4 @@ export function entryStream(blob: Blob, entry: ZipEntry): ReadableStream<Uint8Ar
 `web/src/zip.ts`, `web/src/test-api.ts`
 
 ## Check
-`cd web && npx playwright test tests/zip.spec.ts tests/import-error.spec.ts`
+`cd web && npm ci && npx playwright test tests/zip.spec.ts tests/import-error.spec.ts`

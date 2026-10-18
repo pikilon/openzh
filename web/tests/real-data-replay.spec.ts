@@ -1,4 +1,5 @@
 import { gameZips } from "./helpers/real-game";
+import { openLauncher } from "./helpers/launcher";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,9 +20,9 @@ test.skip(
   "set ZHWP_GAME_ZIPS and ZHWP_REPLAY to run against real game data",
 );
 
-// The four criteria describe one run: import the game files, play the replay
-// from the smoke page for 45 s, then check the file system, the log and the
-// screenshot of that run.
+// The four criteria describe one run: import the game files, let #159 start
+// the engine by itself, play the replay from the smoke page for 45 s, then
+// check the file system, the log and the screenshot of that run.
 test.describe.configure({ timeout: 15 * 60_000 });
 
 // Minimal PNG reader for the screenshot: only what Chromium's screenshot
@@ -144,13 +145,18 @@ test.describe("a real replay in the browser", () => {
     page = await context.newPage();
     // Import the game files exactly as tests/real-data.spec.ts does: the
     // launcher stores the archives in OPFS, which the smoke page mounts.
-    await page.goto("/app/index.html");
-    await page.locator("#clear").click();
+    await openLauncher(page);
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
     await page.locator("#zip-input").setInputFiles(gamePath);
-    await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
-    await expect(page.locator("#play")).toBeEnabled();
+    // Issue #159: the completed import starts the launcher engine by itself.
+    // This run plays the replay from the smoke page, which mounts the same OPFS
+    // archives, so close the launcher as soon as the import is stored: while it
+    // runs its bridge holds exclusive sync access handles on those files.
+    await expect(page.locator("body")).toHaveAttribute("data-state", /^(starting|playing)$/, {
+      timeout: 10 * 60_000,
+    });
+    await page.close();
 
     // Same browser context as the launcher, so the smoke page sees the same
     // OPFS. Serve only the replay's path; matching on URL.pathname keeps the

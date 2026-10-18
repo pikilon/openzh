@@ -106,4 +106,8 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #159 | tests T3 | deepseek-flash (dsh) | ok | ~6 min | 12 fail on the old page at #topbar/body[data-state], 16 real-data skipped without ZIPs, 11 guards pass; migrates zip-replace/zip-persistence/folder-removed/real-data |
 | 2026-10-18 | #159 | code web | deepseek-flash (dsh) | ok | ~30 min | 281 pass, 16 skipped, package green; fixed the #screen overlay z-index and the FileBridge release before retry/clear; visual polish applied |
 
+| 2026-10-19 | #173 | spec | deepseek-flash (dsh) | ok | brief only | docs/briefs/173-web-1080p-max-graphics.md: web-only 1920x1080, VeryHigh, 4x MSAA, 16x anisotropy, terrain max, dynamic LOD off, log line and real-data canvas check |
+| 2026-10-19 | #173 | tests | deepseek-flash (dsh) | ok | ~8 min | 3 pass, 1 skipped; synthetic log test failed on the old build (no GENERALSX_GRAPHICS), passes with the new engine; real-data canvas spec skips without ZIPs |
+| 2026-10-19 | #173 | code | deepseek-flash (dsh) | ok | ~3 min | build exit 0; 304 pass, 17 skipped; log line `GENERALSX_GRAPHICS xres=1920 yres=1080 lod=VeryHigh aa=4 filter=4 anisotropy=16 dynamicLOD=0` observed |
+
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

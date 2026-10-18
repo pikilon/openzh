@@ -1384,7 +1384,7 @@
       "issue": 173,
       "title": "Web: default 1920x1080 and maximum graphics",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "needs-owner",
       "blocked": false,
       "blocked_by": null,
       "size": "s",

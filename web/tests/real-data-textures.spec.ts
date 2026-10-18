@@ -1,4 +1,5 @@
 import { gameZips } from "./helpers/real-game";
+import { openLauncher, START_TIMEOUT, waitForState } from "./helpers/launcher";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 
 // Issue #78: with the owner's real game data, every mip level of a
@@ -10,8 +11,8 @@ const gameZipPaths = gameZips();
 
 test.skip(gameZipPaths === null, "set ZHWP_GAME_ZIPS to run against real game data");
 
-// Criterion 1 describes one run from Play until 20 s after
-// GENERALSX_LOAD_DONE; the run happens once in beforeAll.
+// Criterion 1 describes one run from the automatic engine start until 20 s
+// after GENERALSX_LOAD_DONE; the run happens once in beforeAll.
 test.describe.configure({ timeout: 15 * 60_000 });
 
 test.describe("compressed texture mip uploads on the real engine", () => {
@@ -22,15 +23,15 @@ test.describe("compressed texture mip uploads on the real engine", () => {
   test.beforeAll(async ({ browser }) => {
     context = await browser.newContext({ baseURL: `http://127.0.0.1:${process.env.ZHWP_PORT ?? 4173}` });
     page = await context.newPage();
-    await page.goto("/app/index.html");
-    await page.locator("#clear").click();
+    await openLauncher(page);
     await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
 
     await page.locator("#zip-input").setInputFiles(gameZipPaths as string[]);
-    await expect(page.locator("#status")).toContainText("Ready", { timeout: 10 * 60_000 });
-    await expect(page.locator("#play")).toBeEnabled();
+    // Issue #159: the completed import starts the engine by itself; there is
+    // no Play click any more.
+    await waitForState(page, "playing", 10 * 60_000);
+    await expect(page.locator("#status")).toContainText("Ready", { timeout: START_TIMEOUT });
 
-    await page.locator("#play").click();
     // The shell map loads behind the main menu; its end is GENERALSX_LOAD_DONE.
     await page.waitForFunction(
       () => ((window as unknown as { __zhwpLog?: string[] }).__zhwpLog ?? []).some((line) => line.includes("GENERALSX_LOAD_DONE")),

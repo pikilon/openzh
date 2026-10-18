@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installZip } from "./helpers/install-zip";
+import { openLauncher, START_TIMEOUT, waitForState } from "./helpers/launcher";
 
 // Issue #133: ZIPs are the only way to load the game. The folder pick, the
 // development server's game-folder import and src/local-gamedata.ts are gone
@@ -126,17 +127,14 @@ test("4: the package.json serve script does not pass --gamedata", () => {
 });
 
 test("6: a four-archive synthetic ZIP ends Ready, stores 4 archives and starts the fake engine", async ({ page }, info) => {
-  await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
-  await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#clear").click();
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 0 archives");
+  // Issue #159: the complete import starts the fake engine by itself; there is
+  // no Play click any more and the removed #clear is the harness reset.
+  await openLauncher(page, FAKE);
 
   await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
-  await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
+  await expect(page.locator("#status")).toContainText("Ready", { timeout: START_TIMEOUT });
+  await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  await expect(page.locator("#play")).toBeEnabled();
-
-  await page.locator("#play").click();
   await expect(page.locator("#canvas")).toBeVisible();
   await page.waitForFunction(() => {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement | null;

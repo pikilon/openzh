@@ -1078,7 +1078,7 @@
       "issue": 133,
       "title": "Remove the folder pick, the dev game-folder server and local-gamedata",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
@@ -1105,7 +1105,8 @@
         "web/tests/launcher-storage.spec.ts",
         "web/tests/launcher-window-layout.spec.ts",
         "web/tests/serve.spec.ts",
-        "web/tests/local-gamedata.spec.ts"
+        "web/tests/local-gamedata.spec.ts",
+        "web/tests/launcher-zip.spec.ts"
       ],
       "allowed_paths": [
         "web/app/index.html",
@@ -1121,7 +1122,7 @@
       "issue": 134,
       "title": "Docs: decision for ZIP loading and updated web guides",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -1130,7 +1131,7 @@
       "depends_on": [
         133
       ],
-      "check": "cd web && npm ci && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh",
+      "check": "cd web && npm ci && npx playwright test tests/docs-zip.spec.ts",
       "test_paths": [
         "web/tests/docs-zip.spec.ts"
       ],

@@ -86,5 +86,9 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #130 | code | deepseek-flash (dsh) | ok | ~29 min | stored 1.03x, deflated 1.60x of the folder copy (call 63) |
 | 2026-10-18 | #129 | tests | deepseek-flash (dsh) | ok | ~6.8 min | found real bug: Stored counted empty files after a mid-import reload (call 64) |
 | 2026-10-18 | #129 | code | deepseek-flash (dsh) | ok | ~9 min | 52 pass (call 65) |
+| 2026-10-18 | #133 | tests | deepseek-flash (dsh) | ok | ~4.5 min | migrated 13 specs to ZIPs plus folder-removed spec; the brief's test paths missed launcher-zip.spec.ts (architect error, accepted) (call 66) |
+| 2026-10-18 | #133 | code | deepseek-flash (dsh) | ok | ~2.4 min | folder pick and dev game-folder server removed; suite passes (call 67) |
+| 2026-10-18 | #134 | tests | deepseek-flash (dsh) | ok | ~0.9 min | 3 tests (call 68) |
+| 2026-10-18 | #134 | code | deepseek-flash (dsh) | ok | ~1.7 min | docs pass; reported check-no-ea-assets.sh failing on main since #39 (synthetic .rep tracked), outside scope (call 69) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

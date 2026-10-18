@@ -211,17 +211,19 @@
       "issue": 35,
       "title": "Real data: audio in the browser",
       "phase": 1,
-      "status": "needs-spec",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
       "local_model_ok": false,
-      "brief": null,
+      "brief": "docs/briefs/35-real-audio.md",
       "depends_on": [
         33
       ],
-      "check": null,
-      "test_paths": [],
+      "check": "cd web && npx playwright test tests/real-data-audio.spec.ts",
+      "test_paths": [
+        "web/tests/real-data-audio.spec.ts"
+      ],
       "allowed_paths": [],
       "summary": "Sound and music play after the first user gesture (browser autoplay rules). Spec after the first real run shows what the audio backend does."
     },

@@ -55,21 +55,46 @@ async function rootDirectory(create: boolean): Promise<FileSystemDirectoryHandle
 }
 
 // Directory that holds the last segment of `parts` (relative to zhwp).
+async function createParentDirectory(parts: string[]): Promise<FileSystemDirectoryHandle> {
+  let dir = await rootDirectory(true);
+  for (const segment of parts.slice(0, -1)) {
+    dir = await dir.getDirectoryHandle(segment, { create: true });
+  }
+  return dir;
+}
+
+// Creating the same directory for every file is pure overhead during a large
+// import, so the create path keeps one promise per parent. clearStored drops
+// them: after the tree is removed the handles are stale.
+const createdParents = new Map<string, Promise<FileSystemDirectoryHandle>>();
+
 async function parentDirectory(
   parts: string[],
   create: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
-  let dir = await rootDirectory(create);
-  if (dir === null) return null;
-  for (const segment of parts.slice(0, -1)) {
-    try {
-      dir = await dir.getDirectoryHandle(segment, { create });
-    } catch (error) {
-      if (!create && (error as DOMException).name === "NotFoundError") return null;
-      throw error;
+  if (!create) {
+    let dir = await rootDirectory(false);
+    if (dir === null) return null;
+    for (const segment of parts.slice(0, -1)) {
+      try {
+        dir = await dir.getDirectoryHandle(segment, { create: false });
+      } catch (error) {
+        if ((error as DOMException).name === "NotFoundError") return null;
+        throw error;
+      }
     }
+    return dir;
   }
-  return dir;
+  const key = parts.slice(0, -1).join("\u0000");
+  let pending = createdParents.get(key);
+  if (pending === undefined) {
+    pending = createParentDirectory(parts);
+    createdParents.set(key, pending);
+    pending.catch(() => {
+      if (createdParents.get(key) === pending) createdParents.delete(key);
+    });
+  }
+  return pending;
 }
 
 // Size of an already stored file, or null when it is not there yet.
@@ -91,18 +116,51 @@ export interface OpenedStoredFile {
   size: number;
 }
 
+export interface StoredSize {
+  existed: boolean;
+  size: number;
+}
+
+// One walk of zhwp gives every stored path and its size, so a big import can
+// decide "already stored" without a failed getFileHandle per file.
+export async function storedSnapshot(): Promise<Map<string, StoredSize>> {
+  const sizes = new Map<string, StoredSize>();
+  const root = await rootDirectory(false);
+  if (root === null) return sizes;
+  const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+    for await (const [name, handle] of dir.entries()) {
+      const path = prefix === "" ? name : `${prefix}/${name}`;
+      if (handle.kind === "directory") {
+        await walk(handle as FileSystemDirectoryHandle, path);
+      } else {
+        const file = await (handle as FileSystemFileHandle).getFile();
+        sizes.set(path, { existed: true, size: file.size });
+      }
+    }
+  };
+  await walk(root, "");
+  return sizes;
+}
+
 // Opens a file under zhwp/<parts> for writing, creating parent directories.
 // The caller commits with close() or discards with abort().
-export async function openStoredFile(parts: string[]): Promise<OpenedStoredFile> {
-  const dir = await parentDirectory(parts, true);
+export async function openStoredFile(
+  parts: string[],
+  known?: StoredSize,
+): Promise<OpenedStoredFile> {
+  const dir = (await parentDirectory(parts, true)) as FileSystemDirectoryHandle;
   const name = parts[parts.length - 1];
+  if (known !== undefined) {
+    const handle = await dir.getFileHandle(name, { create: true });
+    return { writable: await createWritable(handle), existed: known.existed, size: known.size };
+  }
   let handle: FileSystemFileHandle;
   let existed = true;
   try {
-    handle = await (dir as FileSystemDirectoryHandle).getFileHandle(name, { create: false });
+    handle = await dir.getFileHandle(name, { create: false });
   } catch (error) {
     if ((error as DOMException).name !== "NotFoundError") throw error;
-    handle = await (dir as FileSystemDirectoryHandle).getFileHandle(name, { create: true });
+    handle = await dir.getFileHandle(name, { create: true });
     existed = false;
   }
   const size = existed ? (await handle.getFile()).size : 0;
@@ -215,6 +273,7 @@ export async function listExtra(): Promise<ExtraFile[]> {
 
 // Removes both the archives and the extra files (the whole zhwp tree).
 export async function clearStored(): Promise<void> {
+  createdParents.clear();
   const root = await navigator.storage.getDirectory();
   await root.removeEntry(ROOT_DIR, { recursive: true }).catch((error) => {
     if ((error as DOMException).name !== "NotFoundError") throw error;

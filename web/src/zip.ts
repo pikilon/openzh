@@ -29,21 +29,65 @@ const LOCAL_HEADER_SIZE = 30;
 const MAX_COMMENT = 0xffff;
 const CHUNK_SIZE = 1024 * 1024;
 
-const CRC_TABLE = new Uint32Array(256);
-for (let n = 0; n < 256; n++) {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  CRC_TABLE[n] = c >>> 0;
-}
+export const CRC32_INIT = 0xffffffff;
+
+// Slice-by-8 CRC-32 (the polynomial used by ZIP): table[0] is the classic byte
+// table and table[n] is table[n - 1] shifted one more byte, so eight input
+// bytes are consumed per iteration. Roughly four times the byte-at-a-time
+// loop, with the same result.
+const CRC_TABLES: Uint32Array[] = (() => {
+  const tables: Uint32Array[] = [new Uint32Array(256)];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    tables[0][n] = c >>> 0;
+  }
+  for (let n = 1; n < 8; n++) {
+    const previous = tables[n - 1];
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      table[i] = (previous[i] >>> 8) ^ tables[0][previous[i] & 0xff];
+    }
+    tables.push(table);
+  }
+  return tables;
+})();
 
 const decoder = new TextDecoder();
 
-function crcUpdate(crc: number, data: Uint8Array): number {
-  let value = crc;
-  for (let i = 0; i < data.length; i++) {
-    value = CRC_TABLE[(value ^ data[i]) & 0xff] ^ (value >>> 8);
+// Running CRC over the previous state (start at CRC32_INIT); finish with
+// crc32Value.
+export function crc32Update(crc: number, data: Uint8Array): number {
+  let value = crc >>> 0;
+  let i = 0;
+  const length = data.length;
+  if (length >= 8 && data.byteOffset % 4 === 0) {
+    const words = length >>> 2;
+    const view = new Uint32Array(data.buffer, data.byteOffset, words);
+    const pairs = words - (words % 2);
+    const [t0, t1, t2, t3, t4, t5, t6, t7] = CRC_TABLES;
+    for (let word = 0; word < pairs; word += 2) {
+      const a = (view[word] ^ value) >>> 0;
+      const b = view[word + 1];
+      value =
+        t7[a & 0xff] ^
+        t6[(a >>> 8) & 0xff] ^
+        t5[(a >>> 16) & 0xff] ^
+        t4[a >>> 24] ^
+        t3[b & 0xff] ^
+        t2[(b >>> 8) & 0xff] ^
+        t1[(b >>> 16) & 0xff] ^
+        t0[b >>> 24];
+    }
+    i = pairs << 2;
   }
+  const table = CRC_TABLES[0];
+  for (; i < length; i++) value = table[(value ^ data[i]) & 0xff] ^ (value >>> 8);
   return value >>> 0;
+}
+
+export function crc32Value(crc: number): number {
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function viewOf(bytes: Uint8Array): DataView {
@@ -266,24 +310,48 @@ function chunkStream(
 ): ReadableStream<Uint8Array> {
   let at = start;
   const end = start + length;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      if (at >= end) {
-        controller.close();
+      for (;;) {
+        if (reader === null) {
+          if (at >= end) {
+            controller.close();
+            return;
+          }
+          // The test contract keeps every blob.slice at 1 MiB or less.
+          const size = Math.min(CHUNK_SIZE, end - at);
+          const part = blob.slice(at, at + size);
+          if (part.size !== size) throw fail("truncated", file);
+          at += size;
+          reader = part.stream().getReader();
+        }
+        const result = await reader.read();
+        if (result.done) {
+          reader = null;
+          continue;
+        }
+        controller.enqueue(result.value);
         return;
       }
-      const size = Math.min(CHUNK_SIZE, end - at);
-      const bytes = await readRange(blob, at, size, file);
-      at += size;
-      controller.enqueue(bytes);
+    },
+    cancel(reason) {
+      if (reader === null) return;
+      const active = reader;
+      reader = null;
+      return active.cancel(reason);
     },
   });
 }
 
-async function openEntryReader(
-  blob: Blob,
-  entry: ZipEntry,
-): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+interface DataRange {
+  start: number;
+  length: number;
+}
+
+// Validates the local header and returns the entry's raw (compressed) data
+// range. Shared by the streaming reader and the import fast path.
+async function localDataRange(blob: Blob, entry: ZipEntry): Promise<DataRange> {
   if (entry.method !== 0 && entry.method !== 8) {
     throw fail("unsupported-method", entry.path);
   }
@@ -296,10 +364,85 @@ async function openEntryReader(
   if ((u16(view, 6) & 0x0001) !== 0) throw fail("encrypted", entry.path);
   const nameLength = u16(view, 26);
   const extraLength = u16(view, 28);
-  const dataStart = entry.offset + LOCAL_HEADER_SIZE + nameLength + extraLength;
-  if (dataStart + entry.compressedSize > blob.size) throw fail("truncated", entry.path);
+  const start = entry.offset + LOCAL_HEADER_SIZE + nameLength + extraLength;
+  if (start + entry.compressedSize > blob.size) throw fail("truncated", entry.path);
+  return { start, length: entry.compressedSize };
+}
 
-  let source = chunkStream(blob, dataStart, entry.compressedSize, entry.path);
+// The entry's raw bytes as one blob, for callers that can stream or copy them
+// without inflating: writing a sub-blob to OPFS lets the browser copy it
+// natively instead of through a JS chunk loop.
+export async function entryDataBlob(blob: Blob, entry: ZipEntry): Promise<Blob> {
+  const range = await localDataRange(blob, entry);
+  return blob.slice(range.start, range.start + range.length);
+}
+
+// Reads the local header and the data together in one slice, for small
+// entries: one blob read instead of two. The slice over-reads by the largest
+// possible name and extra fields, so callers must keep it to small entries.
+const MAX_HEADER_FIELDS = LOCAL_HEADER_SIZE + 0xffff + 0xffff;
+
+// The same local-header parse against a span that was read once for a group
+// of consecutive small entries; `spanStart` is the blob offset of span[0].
+export function smallEntryWithin(
+  span: Uint8Array,
+  spanStart: number,
+  entry: ZipEntry,
+): Uint8Array {
+  const at = entry.offset - spanStart;
+  if (at < 0 || at + LOCAL_HEADER_SIZE > span.length) throw fail("truncated", entry.path);
+  const view = viewOf(span);
+  if (u32(view, at) !== LOCAL_HEADER_SIGNATURE) throw fail("truncated", entry.path);
+  if ((u16(view, at + 6) & 0x0001) !== 0) throw fail("encrypted", entry.path);
+  const start = at + LOCAL_HEADER_SIZE + u16(view, at + 26) + u16(view, at + 28);
+  if (start + entry.compressedSize > span.length) throw fail("truncated", entry.path);
+  return span.subarray(start, start + entry.compressedSize);
+}
+
+export async function readSmallEntry(blob: Blob, entry: ZipEntry): Promise<Uint8Array> {
+  if (entry.offset + LOCAL_HEADER_SIZE > blob.size) throw fail("truncated", entry.path);
+  const length = Math.min(blob.size - entry.offset, MAX_HEADER_FIELDS + entry.compressedSize);
+  const bytes = await readRange(blob, entry.offset, length, entry.path);
+  const view = viewOf(bytes);
+  if (u32(view, 0) !== LOCAL_HEADER_SIGNATURE) throw fail("truncated", entry.path);
+  if ((u16(view, 6) & 0x0001) !== 0) throw fail("encrypted", entry.path);
+  const nameLength = u16(view, 26);
+  const extraLength = u16(view, 28);
+  const start = LOCAL_HEADER_SIZE + nameLength + extraLength;
+  if (start + entry.compressedSize > bytes.length) throw fail("truncated", entry.path);
+  return bytes.subarray(start, start + entry.compressedSize);
+}
+
+// Small deflated entries go through one DecompressionStream and one collected
+// buffer instead of the generic three-stream pipeline, with the same size and
+// CRC check and the same truncated/bad-crc errors.
+export async function readSmallInflated(blob: Blob, entry: ZipEntry): Promise<Uint8Array> {
+  const range = await localDataRange(blob, entry);
+  let bytes: Uint8Array;
+  try {
+    const inflated = blob
+      .slice(range.start, range.start + range.length)
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"));
+    bytes = new Uint8Array(await new Response(inflated).arrayBuffer());
+  } catch (error) {
+    throw normalizeError(error, entry.path);
+  }
+  if (
+    bytes.length !== entry.size ||
+    crc32Value(crc32Update(CRC32_INIT, bytes)) !== entry.crc32
+  ) {
+    throw fail("bad-crc", entry.path);
+  }
+  return bytes;
+}
+
+async function openEntryReader(
+  blob: Blob,
+  entry: ZipEntry,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  const range = await localDataRange(blob, entry);
+  let source = chunkStream(blob, range.start, range.length, entry.path);
   if (entry.method === 8) {
     source = source.pipeThrough(new DecompressionStream("deflate-raw"));
   }
@@ -313,7 +456,7 @@ function normalizeError(error: unknown, path: string): ImportError {
 
 export function entryStream(blob: Blob, entry: ZipEntry): ReadableStream<Uint8Array> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  let crc = 0xffffffff;
+  let crc = CRC32_INIT;
   let total = 0;
   let finished = false;
 
@@ -325,7 +468,7 @@ export function entryStream(blob: Blob, entry: ZipEntry): ReadableStream<Uint8Ar
         const result = await reader.read();
         if (result.done) {
           finished = true;
-          const actual = (crc ^ 0xffffffff) >>> 0;
+          const actual = crc32Value(crc);
           if (total !== entry.size || actual !== entry.crc32) {
             throw fail("bad-crc", entry.path);
           }
@@ -335,7 +478,7 @@ export function entryStream(blob: Blob, entry: ZipEntry): ReadableStream<Uint8Ar
           return;
         }
         const value = result.value;
-        crc = crcUpdate(crc, value);
+        crc = crc32Update(crc, value);
         total += value.length;
         controller.enqueue(value);
       } catch (error) {

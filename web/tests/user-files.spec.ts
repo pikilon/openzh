@@ -84,7 +84,12 @@ async function startHarnessEngine(page: Page, files: UserFile[], prepare: boolea
   await page.waitForFunction(
     () => {
       const w = window as any;
-      return w.__zhwpModule !== undefined || w.__zhwpDone?.status === "error";
+      // The module is exposed in a preRun, while the IndexedDB load is still in
+      // flight: the file system is settled once no syncfs request is pending.
+      return (
+        (w.__zhwpModule !== undefined && w.__zhwpModule.FS.syncFSRequests === 0) ||
+        w.__zhwpDone?.status === "error"
+      );
     },
     null,
     { timeout: 60_000 },

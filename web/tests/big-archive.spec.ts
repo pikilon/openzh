@@ -576,3 +576,210 @@ test("11: the source keeps the same bytes and modification time after a successf
   expect(afterFailure.size, "source size after failure").toBe(truncatedStat.size);
   expect(same(bytes(truncated), truncatedBefore), "source bytes after failure").toBe(true);
 });
+
+// Issue #175: real archives (PatchZH.big) carry zero-size entries. The real
+// case is a three-entry archive whose first entry, `Data\*`, has offset 0 and
+// size 0, while the entry table keeps an extra tail like real archives.
+const ZERO_SIZE_TAIL = new Uint8Array([0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
+const ZERO_SIZE_NAME = "Data\\*";
+
+interface Placed {
+  path: string;
+  // When absent the entry's data is laid out contiguously after the header.
+  offset?: number;
+  data: Uint8Array;
+}
+
+// Hand-builds a BIGF archive with explicit offsets for selected entries, so a
+// zero-size entry can point at 0 or past the end. The file length follows the
+// non-empty data only.
+function archive(entries: Placed[], tail: Uint8Array = new Uint8Array(0)): Uint8Array {
+  const names = entries.map((entry) => Buffer.from(entry.path, "latin1"));
+  const tableSize = 16 + names.reduce((sum, name) => sum + 8 + name.length + 1, 0);
+  const headerSize = tableSize + tail.length;
+
+  let dataAt = headerSize;
+  const placed = entries.map((entry) => {
+    if (entry.offset !== undefined) {
+      return { offset: entry.offset, data: Buffer.from(entry.data) };
+    }
+    const offset = dataAt;
+    dataAt += entry.data.length;
+    return { offset, data: Buffer.from(entry.data) };
+  });
+
+  let total = headerSize;
+  for (const entry of placed) {
+    if (entry.data.length > 0) total = Math.max(total, entry.offset + entry.data.length);
+  }
+
+  const out = Buffer.alloc(total);
+  out.write("BIGF", 0, "latin1");
+  out.writeUInt32LE(total, 4);
+  out.writeUInt32BE(entries.length, 8);
+  out.writeUInt32BE(headerSize, 12);
+  let at = 16;
+  for (let i = 0; i < placed.length; i++) {
+    out.writeUInt32BE(placed[i].offset, at);
+    out.writeUInt32BE(placed[i].data.length, at + 4);
+    names[i].copy(out, at + 8);
+    at += 8 + names[i].length + 1;
+    if (placed[i].data.length > 0) placed[i].data.copy(out, placed[i].offset);
+  }
+  out.set(tail, tableSize);
+  return new Uint8Array(out.buffer, out.byteOffset, out.length);
+}
+
+function realWorldEntries(): Placed[] {
+  return [
+    { path: ZERO_SIZE_NAME, offset: 0, data: new Uint8Array(0) },
+    { path: "Data/INI/Alpha.ini", data: sample(12, 24) },
+    { path: "Data/Audio/Beta.wav", data: sample(18, 25) },
+  ];
+}
+
+function realWorldArchive(): Uint8Array {
+  return archive(realWorldEntries(), ZERO_SIZE_TAIL);
+}
+
+function realWorldNames(): string[] {
+  return realWorldEntries().map((entry) => entry.path);
+}
+
+function realWorldHeaderSize(): number {
+  return headerSizeOf(realWorldEntries()) + ZERO_SIZE_TAIL.length;
+}
+
+test("1: a zero-size Data entry at offset 0 is read without error and listed with offset 0 and size 0", async () => {
+  const root = scratch();
+  const source = realWorldArchive();
+  const headerSize = realWorldHeaderSize();
+  expect(u32(source, 12, false), "table tail is inside the header").toBe(headerSize);
+  const src = put(root, "patchzh.big", source);
+
+  const { readBigDirectory } = await bigArchive();
+  const directory = await readBigDirectory(src);
+
+  expect(directory.entries.map((entry) => entry.name)).toEqual(realWorldNames());
+  expect(directory.entries[0].name).toBe(ZERO_SIZE_NAME);
+  expect(directory.entries[0].offset).toBe(0);
+  expect(directory.entries[0].size).toBe(0);
+  expect(directory.headerSize).toBe(headerSize);
+  expect(Array.from(directory.tail)).toEqual(Array.from(ZERO_SIZE_TAIL));
+  expect(directory.entries.slice(1).map((entry) => entry.size)).toEqual([12, 18]);
+  expect(directory.entries.slice(1).map((entry) => entry.offset)).toEqual([
+    headerSize,
+    headerSize + 12,
+  ]);
+});
+
+test("2: an identity rewrite of an archive with a zero-size entry is byte-identical to the source", async () => {
+  const root = scratch();
+  const source = realWorldArchive();
+  const src = put(root, "patchzh.big", source);
+  const dst = join(root, "patchzh-out.big");
+
+  const { rewriteBig } = await bigArchive();
+  const result = await rewriteBig(src, dst, {
+    select: () => true,
+    transform: () => null,
+  });
+
+  expect(result.replaced).toBe(0);
+  expect(result.savedBytes).toBe(0);
+  expect(same(bytes(dst), source), "output bytes equal source bytes").toBe(true);
+});
+
+test("3: replacing a normal entry keeps the zero-size entry at offset 0 and packs the normal entries contiguously", async () => {
+  const root = scratch();
+  const source = realWorldArchive();
+  const headerSize = realWorldHeaderSize();
+  const src = put(root, "patchzh.big", source);
+  const dst = join(root, "patchzh-out.big");
+  const replacement = Buffer.from(sample(40, 26));
+
+  const { readBigDirectory, rewriteBig } = await bigArchive();
+  const result = await rewriteBig(src, dst, {
+    select: (entry) => entry.name === "Data/INI/Alpha.ini",
+    transform: () => replacement,
+  });
+  expect(result.replaced).toBe(1);
+
+  const output = await readBigDirectory(dst);
+  expect(output.entries.map((entry) => entry.name)).toEqual(realWorldNames());
+  expect(output.entries[0].offset).toBe(0);
+  expect(output.entries[0].size).toBe(0);
+  expect(output.entries.map((entry) => entry.size)).toEqual([0, 40, 18]);
+  expect(output.entries.map((entry) => entry.offset)).toEqual([
+    0,
+    headerSize,
+    headerSize + 40,
+  ]);
+  const raw = bytes(dst);
+  expect(Array.from(raw.subarray(headerSize, headerSize + 40))).toEqual(Array.from(replacement));
+  expect(raw.length, "file length is the header plus the two data blocks").toBe(
+    headerSize + 40 + 18,
+  );
+});
+
+test("4: a zero-size entry past the end is accepted; a non-empty entry inside the header still fails with bad-header", async () => {
+  const root = scratch();
+  const entries: Placed[] = [
+    { path: ZERO_SIZE_NAME, offset: 4096, data: new Uint8Array(0) },
+    { path: "Data/INI/Alpha.ini", data: sample(12, 27) },
+  ];
+  const source = archive(entries, ZERO_SIZE_TAIL);
+  const headerSize = headerSizeOf(entries) + ZERO_SIZE_TAIL.length;
+  expect(source.length, "the zero-size offset lies past the end").toBeLessThan(4096);
+  expect(u32(source, 16, false)).toBe(4096);
+
+  const src = put(root, "past-end.big", source);
+  const { readBigDirectory } = await bigArchive();
+  const directory = await readBigDirectory(src);
+  expect(directory.entries[0].name).toBe(ZERO_SIZE_NAME);
+  expect(directory.entries[0].offset).toBe(4096);
+  expect(directory.entries[0].size).toBe(0);
+  expect(directory.entries[1].offset).toBe(headerSize);
+
+  const normal = buildBig([
+    { path: "Data/First.bin", data: sample(12, 28) },
+    { path: "Data/Second.bin", data: sample(18, 29) },
+  ]);
+  setU32(normal, 16, 12, false);
+  const badSrc = put(root, "inside-header.big", normal);
+  await expectCode(() => readBigDirectory(badSrc), "bad-header");
+});
+
+test("5: transforming a selected zero-size entry makes it non-empty with a contiguous offset", async () => {
+  const root = scratch();
+  const source = realWorldArchive();
+  const headerSize = realWorldHeaderSize();
+  const src = put(root, "patchzh.big", source);
+  const dst = join(root, "patchzh-out.big");
+  const replacement = Buffer.from(sample(24, 30));
+  const selected: string[] = [];
+
+  const { readBigDirectory, rewriteBig } = await bigArchive();
+  const result = await rewriteBig(src, dst, {
+    select: (entry) => {
+      selected.push(entry.name);
+      return entry.name === ZERO_SIZE_NAME;
+    },
+    transform: (entry) => (entry.name === ZERO_SIZE_NAME ? replacement : null),
+  });
+
+  expect(selected).toEqual(realWorldNames());
+  expect(result.replaced).toBe(1);
+  expect(result.savedBytes).toBe(-24);
+
+  const output = await readBigDirectory(dst);
+  expect(output.entries.map((entry) => entry.name)).toEqual(realWorldNames());
+  expect(output.entries.map((entry) => entry.size)).toEqual([24, 12, 18]);
+  expect(output.entries.map((entry) => entry.offset)).toEqual([
+    headerSize,
+    headerSize + 24,
+    headerSize + 36,
+  ]);
+  const raw = bytes(dst);
+  expect(Array.from(raw.subarray(headerSize, headerSize + 24))).toEqual(Array.from(replacement));
+});

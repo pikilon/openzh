@@ -1211,7 +1211,7 @@
       "issue": 157,
       "title": "ZIP import replaces the previous install",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
@@ -1223,7 +1223,8 @@
         "web/tests/zip-replace.spec.ts",
         "web/tests/zip-import.spec.ts",
         "web/tests/zip-persistence.spec.ts",
-        "web/tests/launcher-zip.spec.ts"
+        "web/tests/launcher-zip.spec.ts",
+        "web/tests/launcher-storage.spec.ts"
       ],
       "allowed_paths": [
         "web/src/zip-import.ts",

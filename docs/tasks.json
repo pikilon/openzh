@@ -1288,7 +1288,7 @@
         "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp",
         "web/scripts/package.mjs"
       ],
-      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and \u20ac1/\u20ac2/\u20ac5 PayPal support tips."
+      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and €1/€2/€5 PayPal support tips."
     },
     {
       "issue": 162,
@@ -1425,6 +1425,28 @@
         "web/scripts/lib/big-archive.mjs"
       ],
       "summary": "Zero-size BIG entries are exempt from the header-offset check and keep their offset on rewrite."
+    },
+    {
+      "issue": 180,
+      "title": "make-game-zip: --voices-mp3 option (speech and audio WAV to MP3)",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/180-voices-mp3.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/wav-mp3.spec.ts tests/make-game-zip-voices.spec.ts tests/make-game-zip-gfx-music.spec.ts tests/make-game-zip-options.spec.ts tests/make-game-zip.spec.ts",
+      "test_paths": [
+        "web/tests/wav-mp3.spec.ts",
+        "web/tests/make-game-zip-voices.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/wav-mp3.mjs",
+        "web/scripts/make-game-zip.mjs"
+      ],
+      "summary": "make-game-zip can store speech and audio WAV entries as raw MP3 (engine decodes by content), encoded with ffmpeg."
     }
   ]
 }

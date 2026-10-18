@@ -42,6 +42,12 @@ const importError = byId<HTMLElement>("import-error");
 const zipInput = byId<HTMLInputElement>("zip-input");
 const dropZone = byId<HTMLElement>("drop-zone");
 
+// Set once an import asks for persisting storage and the browser denies it
+// (issue #129): the storage line then says the browser may clear it.
+let storageMayBeCleared = false;
+const STORAGE_MAY_BE_CLEARED =
+  " Storage may be cleared by the browser when space is low.";
+
 // The path the folder picker gives the file under: `webkitRelativePath`
 // (empty when the browser gave none, then the name alone).
 function pathOf(file: File): string {
@@ -147,17 +153,21 @@ function fail(message: unknown): void {
   hideProgress();
 }
 
+function showStorageText(text: string): void {
+  storage.textContent = storageMayBeCleared ? `${text}${STORAGE_MAY_BE_CLEARED}` : text;
+}
+
 async function refreshStorage(): Promise<void> {
   const manager = navigator.storage;
   if (typeof manager.estimate !== "function") {
-    storage.textContent = "Storage: unknown";
+    showStorageText("Storage: unknown");
     return;
   }
   let estimate: { usage?: number; quota?: number };
   try {
     estimate = await manager.estimate();
   } catch {
-    storage.textContent = "Storage: unknown";
+    showStorageText("Storage: unknown");
     return;
   }
   let text = `Storage: ${formatBytes(estimate.usage ?? 0)} of ${formatBytes(estimate.quota ?? 0)}`;
@@ -168,7 +178,7 @@ async function refreshStorage(): Promise<void> {
       // Persistence is only an annotation: show the sizes regardless.
     }
   }
-  storage.textContent = text;
+  showStorageText(text);
 }
 
 async function refresh(): Promise<void> {
@@ -209,11 +219,8 @@ interface ImportEntry {
 // warning (#70), the copies and the same failure handling for both. `entries`
 // holds only the archives that have to be written.
 async function storeEntries(entries: readonly ImportEntry[], stored: readonly StoredFile[]): Promise<void> {
+  await requestPersist();
   const manager = navigator.storage;
-  if (typeof manager.persist === "function") {
-    // Asking does not block the import: the result only labels the storage.
-    void manager.persist().catch(() => undefined);
-  }
   let free: number | undefined;
   if (typeof manager.estimate === "function") {
     try {
@@ -286,11 +293,15 @@ async function importFolder(files: FileList): Promise<void> {
 let importAbort: AbortController | null = null;
 let importing = false;
 
-function requestPersist(): void {
+async function requestPersist(): Promise<void> {
   const manager = navigator.storage;
-  if (typeof manager.persist === "function") {
-    // Asking does not block the import: the result only labels the storage.
-    void manager.persist().catch(() => undefined);
+  if (typeof manager.persist !== "function") return;
+  // Asked once per import, before the first write. The answer only labels the
+  // storage: a denial never blocks the copy.
+  try {
+    if (!(await manager.persist())) storageMayBeCleared = true;
+  } catch {
+    // Persistence is only an annotation: the import works without it.
   }
 }
 
@@ -345,7 +356,7 @@ function endZipImport(): void {
 async function importZipFiles(files: readonly File[]): Promise<void> {
   const controller = beginZipImport();
   // Both are asked before the first write, as with the folder path.
-  requestPersist();
+  await requestPersist();
   await warnIfZipsDoNotFit(files);
   try {
     await importZips([...files], {

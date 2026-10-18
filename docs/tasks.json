@@ -1430,7 +1430,7 @@
       "issue": 180,
       "title": "make-game-zip: --voices-mp3 option (speech and audio WAV to MP3)",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "m",

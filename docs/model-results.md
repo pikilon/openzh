@@ -96,5 +96,7 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #150 | code | deepseek-flash (dsh) | ok | ~1.3 min | 11 pass (call 73) |
 | 2026-10-18 | #151 | tests | deepseek-flash (dsh) | ok | ~3.2 min | 11 tests (call 74) |
 | 2026-10-18 | #151 | code | deepseek-flash (dsh) | ok | ~1.5 min | 19 pass; real game: 2.95 GB -> 1.86 GB, speech SNR avg 27 dB (call 75) |
+| 2026-10-18 | #157 | tests | deepseek-flash (dsh) | ok | ~6 min | new spec plus updated accumulate-assuming asserts; launcher-storage 70.5 needed a follow-up run because the brief's test paths missed it (calls 76, 77) |
+| 2026-10-18 | #157 | code | deepseek-flash (dsh) | ok | ~5.8 min | 62 pass, suite 245 pass; real game: full 2.79 GB -> lite 1.70 GB after replace (call 78) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

@@ -188,6 +188,8 @@ and the game files never leave the player's machine.
   it is no longer a way to import the game.
 * Consequence: because Brave reports a quota of about 2 GB (#70), the game is
   split into two ZIPs, one per install (`zero-hour.zip` and `generals.zip`).
+* Consequence: since 2026-10-18 the import keeps only the `.big` archives
+  because the engine reads nothing else; this supersedes "nothing filtered".
 * Consequence: the real-data tests read the ZIPs named by `ZHWP_GAME_ZIPS`,
   never a folder.
 * Consequence: the ZIPs never live in the repository, its build output, CI or

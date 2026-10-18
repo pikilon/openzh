@@ -4,13 +4,13 @@
 //   node scripts/publish-pages.mjs [--engine <dir>] [--domain <host>] [--no-push]
 //
 // Builds the package (scripts/package.mjs), then adds what GitHub Pages needs:
-// a service worker that sets the cross-origin isolation headers Pages cannot
+// the launcher at the site root, a service worker that sets the cross-origin isolation headers Pages cannot
 // set itself (threads and SharedArrayBuffer need them), its registration in
 // the launcher, CNAME and .nojekyll. It force-pushes the result as a single
 // commit to gh-pages of the `origin` remote. --no-push stops before the push
 // and prints the folder. It copies no game data: package.mjs runs the guard.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,7 +87,11 @@ if (values.engine) packageArgs.push("--engine", values.engine);
 run("npm", ["run", "build"], { cwd: WEB_ROOT });
 run("node", packageArgs, { cwd: WEB_ROOT });
 
-const launcher = join(out, "app", "index.html");
+// The launcher is the site root: replace package.mjs's redirect page with it.
+const launcher = join(out, "index.html");
+renameSync(join(out, "app", "index.html"), launcher);
+renameSync(join(out, "app", "favicon.png"), join(out, "favicon.png"));
+rmSync(join(out, "app"), { recursive: true });
 const html = readFileSync(launcher, "utf8");
 if (!html.includes(MODULE_TAG)) fail(`launcher has no "${MODULE_TAG.trim()}" to register before`);
 writeFileSync(launcher, html.replace(MODULE_TAG, REGISTRATION + MODULE_TAG));

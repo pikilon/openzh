@@ -66,5 +66,7 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-17 | #99 | tests | deepseek-flash (dsh) | ok | ~15 min | 5 tests fail; criterion 5 is the brief's guard |
 | 2026-10-17 | #99 | code | deepseek-flash (dsh) | blocked | ~9 min | web suite + TU syntax compile green; the engine build is denied by the sandbox (vcpkg lock); branch issue-99-code, not merged |
 | 2026-10-18 | #99 | code | deepseek-flash (dsh) | ok | – | architect verified the same branch with the clean engine build: 147 tests pass, merged (#115) |
+| 2026-10-18 | #34 | tests | deepseek-flash (dsh) | ok | ~2.5 min | 2 replay-URL tests fail as expected; real-data spec skips without env |
+| 2026-10-18 | #34 | code | deepseek-flash (dsh) | ok | ~0.5 min | architect ran user-files (9) + real replay spec (4) in Brave with the owner's data: 13 pass |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

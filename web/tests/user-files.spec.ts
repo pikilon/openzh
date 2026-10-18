@@ -227,24 +227,26 @@ test("5: a file loaded from IndexedDB under the same path is replaced by the giv
   expect(await readModuleFile(page, `${DATA}/Replays/zhwp-same.rep`)).toEqual(replacement);
 });
 
-test("6: a replay URL places Replays/<name> with the served bytes without archives=opfs", async ({ page, request }) => {
+test("6: a replay URL places GeneralsZH/Replays/<name> with the served bytes without archives=opfs", async ({ page, request }) => {
   const served = await servedReplayBytes(request);
   await page.goto(`/smoke/index.html?replay=${REPLAY_URL}`);
   await waitForSmokeModule(page);
 
-  const path = `${DATA}/Replays/${REPLAY_NAME}`;
+  const path = `${DATA}/GeneralsZH/Replays/${REPLAY_NAME}`;
   expect(await modulePathExists(page, path)).toBe(true);
   expect(await readModuleFile(page, path)).toEqual(served);
+  expect(await modulePathExists(page, `${DATA}/Replays/${REPLAY_NAME}`)).toBe(false);
 });
 
-test("6: a replay URL places Replays/<name> with the served bytes with archives=opfs", async ({ page, request }) => {
+test("6: a replay URL places GeneralsZH/Replays/<name> with the served bytes with archives=opfs", async ({ page, request }) => {
   const served = await servedReplayBytes(request);
   await page.goto(`/smoke/index.html?archives=opfs&replay=${REPLAY_URL}`);
   await waitForSmokeModule(page);
 
-  const path = `${DATA}/Replays/${REPLAY_NAME}`;
+  const path = `${DATA}/GeneralsZH/Replays/${REPLAY_NAME}`;
   expect(await modulePathExists(page, path)).toBe(true);
   expect(await readModuleFile(page, path)).toEqual(served);
+  expect(await modulePathExists(page, `${DATA}/Replays/${REPLAY_NAME}`)).toBe(false);
 });
 
 test("7: a 404 replay URL is an error with the URL and the engine is not started", async ({ page }) => {

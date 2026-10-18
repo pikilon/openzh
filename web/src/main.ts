@@ -1,13 +1,12 @@
 // Launcher page logic (docs/briefs/5c-launcher.md): the player picks their
-// game install folder, the archives are classified and copied into OPFS, and
-// the engine runs from them. The DOM element ids are the page's contract.
+// game ZIP files, the archives are classified and copied into OPFS, and the
+// engine runs from them. The DOM element ids are the page's contract.
 
-import { classifyArchives, REQUIRED, type GameKind, type InstallReport } from "./install";
-import { storeFiles, listStored, clearStored, type StoredFile } from "./opfs-store";
-import { fetchLocalArchive, fetchLocalIndex } from "./local-gamedata";
+import { REQUIRED } from "./install";
+import { listStored, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
-import { available, bytesNeeded, formatBytes } from "./storage";
+import { available, formatBytes } from "./storage";
 import { ImportError, describeImportError } from "./import-error";
 import { importZips, type ImportProgress } from "./zip-import";
 
@@ -20,7 +19,6 @@ function byId<T extends HTMLElement>(id: string): T {
   return element as T;
 }
 
-const input = byId<HTMLInputElement>("folder-input");
 const status = byId<HTMLElement>("status");
 const progress = byId<HTMLProgressElement>("import-progress");
 const summary = byId<HTMLElement>("stored-summary");
@@ -47,13 +45,6 @@ const dropZone = byId<HTMLElement>("drop-zone");
 let storageMayBeCleared = false;
 const STORAGE_MAY_BE_CLEARED =
   " Storage may be cleared by the browser when space is low.";
-
-// The path the folder picker gives the file under: `webkitRelativePath`
-// (empty when the browser gave none, then the name alone).
-function pathOf(file: File): string {
-  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-  return path !== undefined && path !== "" ? path : file.name;
-}
 
 function hasRequired(stored: readonly { name: string }[]): boolean {
   const names = new Set(stored.map((file) => file.name.toLowerCase()));
@@ -186,110 +177,10 @@ async function refresh(): Promise<void> {
   await refreshStorage();
 }
 
-// Classifies the picked folder and writes `#status` before the first await:
-// the whole rejection is decided from the names alone, and a later task must
-// never find the state text empty.
-function classifyPicked(files: FileList): { picked: File[]; report: InstallReport } | null {
-  if (files.length === 0) return null;
-  const picked = Array.from(files);
-  const report = classifyArchives(picked.map(pathOf));
-  if (report.missing.length > 0) {
-    // A folder without every required archive stores nothing at all.
-    status.textContent = `Missing: ${report.missing.join(", ")}`;
-    hideProgress();
-  } else {
-    status.textContent = "Importing";
-    showProgress(0, 100);
-  }
-  play.disabled = true;
-  return { picked, report };
-}
-
-// One archive to store, from whichever source. `load` is only called when the
-// archive is actually written, so the local game folder is not fetched again
-// on a reload that already has the files.
-interface ImportEntry {
-  kind: GameKind;
-  name: string;
-  size: number;
-  load(): Promise<Blob>;
-}
-
-// The tail shared by a picked folder and the local game folder: the storage
-// warning (#70), the copies and the same failure handling for both. `entries`
-// holds only the archives that have to be written.
-async function storeEntries(entries: readonly ImportEntry[], stored: readonly StoredFile[]): Promise<void> {
-  await requestPersist();
-  const manager = navigator.storage;
-  let free: number | undefined;
-  if (typeof manager.estimate === "function") {
-    try {
-      free = available(await manager.estimate());
-    } catch {
-      free = undefined;
-    }
-  }
-  if (free !== undefined) {
-    const needed = bytesNeeded(
-      entries.map((entry) => ({ kind: entry.kind, name: entry.name, size: entry.size })),
-      stored,
-    );
-    if (free < needed) showStorageWarning(free, needed);
-  }
-  const total = entries.reduce((sum, entry) => sum + entry.size, 0);
-  let done = 0;
-  try {
-    for (const entry of entries) {
-      const file = await entry.load();
-      await storeFiles(
-        [{ kind: entry.kind, name: entry.name, file }],
-        (doneBytes) => showProgress(done + doneBytes, total),
-      );
-      done += file.size;
-    }
-  } catch (error) {
-    // Whatever was copied before the failure stays; report it and keep Play
-    // pointing at the archives that are actually stored.
-    hideProgress();
-    const named = error as { name?: string; message?: string };
-    status.textContent = `Import failed: ${named.name ?? "Error"}: ${named.message ?? ""}`;
-    await refresh();
-    return;
-  }
-  hideProgress();
-  status.textContent = "Ready";
-  await refresh();
-}
-
-async function importFolder(files: FileList): Promise<void> {
-  hideImportError();
-  hideImportDetail();
-  hideStorageWarning();
-  const choice = classifyPicked(files);
-  if (choice === null) return;
-  const { picked, report } = choice;
-  const stored = await listStored();
-  if (report.missing.length > 0) {
-    showStored(stored);
-    return;
-  }
-  const chosen = new Map(picked.map((file) => [pathOf(file), file]));
-  const entries: ImportEntry[] = report.archives.map((entry) => {
-    const file = chosen.get(entry.path) as Blob;
-    return {
-      kind: entry.kind as GameKind,
-      name: entry.name,
-      size: file.size,
-      load: async () => file,
-    };
-  });
-  await storeEntries(entries, stored);
-}
-
-// Issue #128: imports picked or dropped ZIPs through importZips, next to the
-// folder path, and owns the progress line, the cancel button and the typed
-// failure display. Nothing is stored by the page itself here: importZips writes
-// the archives and extra files and reads every ZIP before the first write.
+// Issue #128: imports picked or dropped ZIPs through importZips and owns the
+// progress line, the cancel button and the typed failure display. Nothing is
+// stored by the page itself here: importZips writes the archives and extra
+// files and reads every ZIP before the first write.
 let importAbort: AbortController | null = null;
 let importing = false;
 
@@ -328,7 +219,6 @@ function beginZipImport(): AbortController {
   status.textContent = "Importing";
   play.disabled = true;
   clear.disabled = true;
-  input.disabled = true;
   zipInput.disabled = true;
   importCancel.hidden = false;
   importCurrent.hidden = true;
@@ -348,14 +238,13 @@ function endZipImport(): void {
   importAbort = null;
   hideImportDetail();
   clear.disabled = false;
-  input.disabled = false;
   zipInput.disabled = false;
   zipInput.value = "";
 }
 
 async function importZipFiles(files: readonly File[]): Promise<void> {
   const controller = beginZipImport();
-  // Both are asked before the first write, as with the folder path.
+  // Both are asked before the first write.
   await requestPersist();
   await warnIfZipsDoNotFit(files);
   try {
@@ -399,46 +288,6 @@ function dropZipFiles(event: DragEvent): void {
     return;
   }
   void importZipFiles(zips).catch(fail);
-}
-
-// Imports the folder the development server exposes (issue #72) exactly as a
-// folder pick of the same files would. Without an index (or with
-// `?gamedata=off`) it touches nothing and the page behaves as before.
-async function importLocalGameData(): Promise<void> {
-  if (new URLSearchParams(window.location.search).get("gamedata") === "off") return;
-  const index = await fetchLocalIndex();
-  if (index === null) return;
-  hideStorageWarning();
-  const report = classifyArchives(index.map((file) => file.path));
-  play.disabled = true;
-  if (report.missing.length > 0) {
-    // A folder without every required archive stores nothing at all.
-    status.textContent = `Missing: ${report.missing.join(", ")}`;
-    hideProgress();
-    showStored(await listStored());
-    return;
-  }
-  status.textContent = "Importing from the local game folder";
-  showProgress(0, 100);
-  const stored = await listStored();
-  const alreadyStored = new Set(
-    stored.map((file) => `${file.kind}\u0000${file.name}\u0000${file.size}`),
-  );
-  const sizes = new Map(index.map((file) => [file.path, file.size]));
-  const entries: ImportEntry[] = [];
-  for (const archive of report.archives) {
-    const size = sizes.get(archive.path);
-    if (size === undefined) continue;
-    // Same kind, name and size already stored: fetch nothing on a reload.
-    if (alreadyStored.has(`${archive.kind}\u0000${archive.name}\u0000${size}`)) continue;
-    entries.push({
-      kind: archive.kind as GameKind,
-      name: archive.name,
-      size,
-      load: () => fetchLocalArchive(archive.path),
-    });
-  }
-  await storeEntries(entries, stored);
 }
 
 // Issue #91: the game plays in the page, and the Fullscreen button above it
@@ -575,7 +424,6 @@ function applyMute(): void {
 
 async function playNow(): Promise<void> {
   play.disabled = true;
-  input.disabled = true;
   canvas.hidden = false;
   canvas.focus();
   picker.hidden = true;
@@ -643,11 +491,11 @@ async function playNow(): Promise<void> {
 }
 
 async function clearAll(): Promise<void> {
-  // The picker controls stay enabled while the store is cleared: a folder
-  // picked during those milliseconds would otherwise be classified into a
+  // The import controls stay enabled while the store is cleared: an import
+  // started during those milliseconds would otherwise be classified into a
   // stale, empty summary.
   play.disabled = true;
-  // Reset before the await: a status written by a folder picked meanwhile is
+  // Reset before the await: a status written by an import started meanwhile is
   // newer than the clear and must survive it.
   hideStorageWarning();
   status.textContent = "";
@@ -663,14 +511,9 @@ const missing = missingFeatures(currentEnv());
 if (missing.length > 0) {
   unsupported.textContent = `Missing browser features: ${missing.join(", ")}`;
   unsupported.hidden = false;
-  input.disabled = true;
   zipInput.disabled = true;
   play.disabled = true;
 } else {
-  input.addEventListener("change", () => {
-    void importFolder(input.files ?? ([] as unknown as FileList)).catch(fail);
-  });
-
   zipInput.addEventListener("change", () => {
     const files = Array.from(zipInput.files ?? []);
     if (files.length === 0) return;
@@ -732,10 +575,5 @@ if (missing.length > 0) {
   });
   document.addEventListener("visibilitychange", applyMute);
 
-  // The development server may expose the owner's game folder (issue #72):
-  // import it on load, exactly as a folder pick, when it is there. Doing it
-  // after the first refresh keeps the summary from racing the import.
-  void refresh()
-    .then(() => importLocalGameData())
-    .catch(fail);
+  void refresh().catch(fail);
 }

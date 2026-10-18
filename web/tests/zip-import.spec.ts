@@ -120,18 +120,8 @@ async function readStored(
   }, files.map((file) => ["zhwp", file.kind, file.name]));
 }
 
-function extraParts(...segments: string[]): string[] {
-  return ["zhwp", "extra", ...segments];
-}
-
 function splitPath(path: string): string[] {
   return path.split("/");
-}
-
-// listExtra's path is the entry path under extra/; accept the stored prefix
-// "extra/" too because the brief leaves that representation open.
-function extraRelative(path: string): string {
-  return path.startsWith("extra/") ? path.slice("extra/".length) : path;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -214,7 +204,7 @@ test("1: one ZIP stores the four REQUIRED archives at zhwp/<kind>/<name> and lis
   expect(await readStored(page, files)).toEqual(expectedBytes(files));
 });
 
-test("2: non-.big files, nested folders included, go under extra/ and listExtra is sorted", async ({
+test("2: non-.big files, nested folders included, are ignored and nothing goes under extra/", async ({
   page,
 }) => {
   const files = requiredFiles();
@@ -236,9 +226,9 @@ test("2: non-.big files, nested folders included, go under extra/ and listExtra 
     return z.importZips(Array.from(input.files ?? []));
   });
   expect(result).toEqual({
-    written: 6,
+    written: 4,
     skipped: 0,
-    extra: 2,
+    extra: 0,
     removed: 0,
     freedBytes: 0,
     archives: sortedArchives(files),
@@ -246,38 +236,18 @@ test("2: non-.big files, nested folders included, go under extra/ and listExtra 
   expect(await page.evaluate(() => (window as any).zhwp.listStored())).toEqual(
     sortedStored(files),
   );
+  expect(await page.evaluate(() => (window as any).zhwp.listExtra())).toEqual([]);
 
-  const listed = await page.evaluate(() => (window as any).zhwp.listExtra());
-  const paths = listed.map((entry: { path: string }) => entry.path);
-  expect(paths).toEqual([...paths].sort());
-  expect(
-    listed.map((entry: { path: string; size: number }) => ({
-      path: extraRelative(entry.path),
-      size: entry.size,
-    })),
-  ).toEqual(
-    extras
-      .map((extra) => ({ path: extra.path, size: extra.data.length }))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-  );
-
-  const stored = await page.evaluate(async (items) => {
-    const t = (window as any).__zipTest;
-    const out: { size: number; sha256: string }[] = [];
-    for (const item of items) out.push(await t.fileAt(item));
-    return out;
-  }, extras.map((extra) => extraParts(...splitPath(extra.path))));
-  expect(stored).toEqual(
-    extras.map((extra) => ({ size: extra.data.length, sha256: sha256(extra.data) })),
-  );
-  const shape = await page.evaluate(async () => {
+  const shape = await page.evaluate(async (items) => {
     const t = (window as any).__zipTest;
     return {
-      dataIsDirectory: await t.hasDirectory(["zhwp", "extra", "Data"]),
-      dataIsFile: await t.hasFile(["zhwp", "extra", "Data"]),
+      extraDirectory: await t.hasDirectory(["zhwp", "extra"]),
+      stored: await Promise.all(
+        items.map((item: string[]) => t.hasFile(["zhwp", "extra", ...item])),
+      ),
     };
-  });
-  expect(shape).toEqual({ dataIsDirectory: true, dataIsFile: false });
+  }, extras.map((extra) => splitPath(extra.path)));
+  expect(shape).toEqual({ extraDirectory: false, stored: [false, false] });
 });
 
 test("3: two ZIPs, one per game, import as one install and the first duplicate path wins", async ({
@@ -310,7 +280,9 @@ test("3: two ZIPs, one per game, import as one install and the first duplicate p
     const input = document.getElementById("zip-fixtures") as HTMLInputElement;
     return z.importZips(Array.from(input.files ?? []));
   });
-  expect(result.written).toBe(5);
+  expect(result.written).toBe(4);
+  expect(result.skipped).toBe(1);
+  expect(result.extra).toBe(0);
   expect(result.archives).toEqual([
     { kind: "zh", name: "INIZH.big", size: firstInizh.length },
     { kind: "zh", name: "W3DZH.big", size: zh[1].data.length },
@@ -328,7 +300,7 @@ test("3: two ZIPs, one per game, import as one install and the first duplicate p
     const t = (window as any).__zipTest;
     return {
       inizh: await t.fileAt(["zhwp", "zh", "INIZH.big"]),
-      extra: await t.fileAt(["zhwp", "extra", "shared", "config.ini"]),
+      extra: await t.hasFile(["zhwp", "extra", "shared", "config.ini"]),
       listedExtra: await (window as any).zhwp.listExtra(),
     };
   });
@@ -336,16 +308,8 @@ test("3: two ZIPs, one per game, import as one install and the first duplicate p
     size: firstInizh.length,
     sha256: sha256(firstInizh),
   });
-  expect(stored.extra).toEqual({
-    size: firstExtra.length,
-    sha256: sha256(firstExtra),
-  });
-  expect(
-    stored.listedExtra.map((entry: { path: string; size: number }) => ({
-      path: extraRelative(entry.path),
-      size: entry.size,
-    })),
-  ).toEqual([{ path: "shared/config.ini", size: firstExtra.length }]);
+  expect(stored.extra).toBe(false);
+  expect(stored.listedExtra).toEqual([]);
 });
 
 test("4: a set missing a REQUIRED archive throws missing-archives and stores nothing", async ({
@@ -395,23 +359,23 @@ test("5: importing the same ZIP again writes nothing and skips every file", asyn
     return { first, second, stored: await z.listStored(), extra: await z.listExtra() };
   });
   expect(outcome.first).toEqual({
-    written: 6,
+    written: 4,
     skipped: 0,
-    extra: 2,
+    extra: 0,
     removed: 0,
     freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(outcome.second).toEqual({
     written: 0,
-    skipped: 6,
-    extra: 2,
+    skipped: 4,
+    extra: 0,
     removed: 0,
     freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(outcome.stored).toEqual(sortedStored(files));
-  expect(outcome.extra).toHaveLength(2);
+  expect(outcome.extra).toEqual([]);
 });
 
 test("6: onProgress is monotonic and ends at totalBytes and filesTotal with currentFile and speed", async ({
@@ -435,11 +399,9 @@ test("6: onProgress is monotonic and ends at totalBytes and filesTotal with curr
     return { result, progress };
   });
 
-  const totalBytes =
-    files.reduce((sum, file) => sum + file.data.length, 0) +
-    extras.reduce((sum, extra) => sum + extra.data.length, 0);
-  const filesTotal = files.length + extras.length;
-  const entryPaths = [...files.map((file) => file.name), ...extras.map((extra) => extra.path)];
+  const totalBytes = files.reduce((sum, file) => sum + file.data.length, 0);
+  const filesTotal = files.length;
+  const entryPaths = files.map((file) => file.name);
 
   expect(outcome.result.written).toBe(filesTotal);
   expect(outcome.progress.length).toBeGreaterThan(1);
@@ -787,7 +749,7 @@ test("11: a forced QuotaExceededError becomes quota-exceeded and keeps the earli
   expect(outcome.files.w3d).toBe(false);
 });
 
-test("12: a 64 MiB stored entry keeps JS heap growth under 48 MiB", async ({
+test("12: a 64 MiB non-.big entry is ignored and keeps JS heap growth under 48 MiB", async ({
   page,
 }, testInfo) => {
   const megabyte = 1024 * 1024;
@@ -822,24 +784,19 @@ test("12: a 64 MiB stored entry keeps JS heap growth under 48 MiB", async ({
 
   expect(outcome.usable, "performance.memory is available in Brave").toBe(true);
   expect(outcome.peak - outcome.before).toBeLessThan(48 * 1024 * 1024);
-  expect(outcome.result.written).toBe(5);
-  expect(outcome.result.extra).toBe(1);
+  expect(outcome.result.written).toBe(4);
+  expect(outcome.result.extra).toBe(0);
   expect(outcome.result.archives).toEqual(sortedArchives(files));
 
   const storedHuge = await page.evaluate(async () => {
     const t = (window as any).__zipTest;
     return {
-      file: await t.fileAt(["zhwp", "extra", "Data", "huge.bin"]),
+      file: await t.hasFile(["zhwp", "extra", "Data", "huge.bin"]),
       extra: await (window as any).zhwp.listExtra(),
     };
   });
-  expect(storedHuge.file).toEqual({ size: huge.length, sha256: sha256(huge) });
-  expect(
-    storedHuge.extra.map((entry: { path: string; size: number }) => ({
-      path: extraRelative(entry.path),
-      size: entry.size,
-    })),
-  ).toEqual([{ path: "Data/huge.bin", size: huge.length }]);
+  expect(storedHuge.file).toBe(false);
+  expect(storedHuge.extra).toEqual([]);
 });
 
 test("13: clearStored removes the extra files too", async ({ page }) => {

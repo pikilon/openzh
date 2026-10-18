@@ -443,7 +443,7 @@ test("5: when persist() resolves false the import ends Ready and the storage lin
   );
 });
 
-test("6: the menu's Reload game data removes archives and extras, and a reload shows nothing stored", async ({
+test("6: the menu's Reload game data removes the game data, and a reload shows nothing stored", async ({
   page,
 }) => {
   const extras = [
@@ -463,7 +463,7 @@ test("6: the menu's Reload game data removes archives and extras, and a reload s
   await expect(page.locator("#status")).toHaveText("Ready", { timeout: 30_000 });
   await waitForState(page, "playing");
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
-  expect((await listExtra(page)).map((entry) => entry.path)).toHaveLength(2);
+  expect(await listExtra(page)).toEqual([]);
 
   // #159 removed "Clear stored archives": the menu's "Reload game data" is the
   // player's replacement, and it only deletes after #reload-confirm.
@@ -487,7 +487,9 @@ test("6: the menu's Reload game data removes archives and extras, and a reload s
   expect(await storedEntries(page)).toEqual([]);
 });
 
-test("7: extra files survive a reload and listExtra still returns them", async ({ page }) => {
+test("7: non-.big files are ignored across a reload and listExtra stays empty", async ({
+  page,
+}) => {
   const encoder = new TextEncoder();
   const extras = [
     { path: "readme.txt", data: encoder.encode("synthetic install notes\n") },
@@ -514,19 +516,13 @@ test("7: extra files survive a reload and listExtra still returns them", async (
   await waitForState(page, "playing");
   await expect(page.locator("#canvas")).toBeVisible();
 
-  const listed = await listExtra(page);
-  expect(
-    listed.map((entry) => ({ path: entry.path, size: entry.size })),
-  ).toEqual(
-    extras
-      .map((extra) => ({ path: extra.path, size: extra.data.length }))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-  );
+  expect(await listExtra(page)).toEqual([]);
   const bytes = await storedEntries(page);
+  expect(bytes.map((entry) => entry.path)).toEqual(
+    REQUIRED.map((name) => `${archiveFile(name).path}`).sort(),
+  );
   for (const extra of extras) {
     const stored = bytes.find((entry) => entry.path === `extra/${extra.path}`);
-    expect(stored, extra.path).toBeDefined();
-    expect(stored?.size, extra.path).toBe(extra.data.length);
-    expect(stored?.sha256, extra.path).toBe(sha256(extra.data));
+    expect(stored, extra.path).toBeUndefined();
   }
 });

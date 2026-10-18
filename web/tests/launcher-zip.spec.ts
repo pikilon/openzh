@@ -193,19 +193,12 @@ async function archiveStored(page: Page, kind: string, name: string): Promise<bo
   }, { kind, name });
 }
 
-// One ~40 MB ZIP with the four REQUIRED archives around 2000 extra files: the
-// many writes keep the import running long enough to see the detail line, the
-// ETA and the disabled input (tests 4-6).
-//
-// The cancel test gets its own, deliberately slow ZIP: the two ZH archives
-// first, then 20000 one-kilobyte extra files, then the generals archives. The
-// per-file OPFS overhead keeps the copy running for seconds after the archives
-// commit, so a cancel right after they appear cannot race the end of the
-// import; that is what makes the old one-shot import deterministic under the
-// automatic engine start (#159).
+// One ~40 MB ZIP with the four REQUIRED archives around 2000 extra files. Since
+// issue #162 the extras are ignored by the import; they only make the archive
+// large enough for the progress tests. The cancel test slows the second
+// archive's close so the cancel lands after the first one is complete.
 let bigDir: string | undefined;
 let bigZip: string | undefined;
-let cancelZip: string | undefined;
 
 test.beforeAll(async () => {
   bigDir = mkdtempSync(join(tmpdir(), "zhwp-launcher-zip-"));
@@ -233,31 +226,6 @@ test.beforeAll(async () => {
     });
   }
   writeFileSync(bigZip, await buildZip(entries));
-
-  cancelZip = join(bigDir, "cancel-game.zip");
-  const cancelEntries: BuildZipEntry[] = [];
-  for (const name of ZH) {
-    cancelEntries.push({
-      path: name,
-      data: archiveData(name.replace(/\.big$/i, "")),
-      method: "store",
-    });
-  }
-  for (let i = 0; i < 20_000; i++) {
-    cancelEntries.push({
-      path: `Data/English/file-${String(i).padStart(5, "0")}.dat`,
-      data: new Uint8Array(1024),
-      method: "store",
-    });
-  }
-  for (const name of GENERALS) {
-    cancelEntries.push({
-      path: name,
-      data: archiveData(name.replace(/\.big$/i, "")),
-      method: "store",
-    });
-  }
-  writeFileSync(cancelZip, await buildZip(cancelEntries));
 });
 
 test.afterAll(() => {
@@ -418,6 +386,20 @@ test("4: a ~40 MB ZIP shows the detail line and current file while importing and
 });
 
 test("5: the ETA reads calculating… early and m:ss later", async ({ page }) => {
+  // Only the four archives are imported now (issue #162), so slow their close
+  // enough for the ETA to appear. The fake engine auto-starts at the end.
+  await page.addInitScript(() => {
+    const original = FileSystemFileHandle.prototype.createWritable;
+    FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
+      const stream = await original.call(this, options);
+      const close = stream.close.bind(stream);
+      stream.close = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return close();
+      };
+      return stream;
+    };
+  });
   await openLauncher(page, RESOLVES);
   await watch(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
@@ -458,12 +440,26 @@ test("6: while importing #zip-input is disabled", async ({ page }) => {
 test("7: cancelling midway leaves Cancelled, keeps the completed archives and hides the error", async ({
   page,
 }) => {
+  // Hold the first generals archive's close: both ZH archives are already
+  // complete when it starts, so the cancel lands with exactly those two stored
+  // and before the last archive is written. Non-.big files are ignored now
+  // (issue #162), so only the four archives count.
+  await page.addInitScript(() => {
+    const original = FileSystemFileHandle.prototype.createWritable;
+    FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
+      const stream = await original.call(this, options);
+      if (this.name === "INI.big") {
+        const close = stream.close.bind(stream);
+        stream.close = async () => {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          return close();
+        };
+      }
+      return stream;
+    };
+  });
   await openLauncher(page, RESOLVES);
-  // The slow fixture commits the two ZH archives first and then spends seconds
-  // copying tiny extras, so waiting for the archives and cancelling at once is
-  // deterministic: #import-cancel is still there, and what was completed before
-  // the cancel is the two ZH archives plus the extras copied so far.
-  await page.locator("#zip-input").setInputFiles(cancelZip as string);
+  await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#import-cancel")).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
@@ -474,7 +470,10 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
     )
     .toBe(true);
 
-  await page.locator("#import-cancel").click();
+  // The loader layout moves as the progress lines appear, so Playwright's
+  // stability wait can outlast the import; the button is visible and the click
+  // handler is the real one. Force skips only the stability wait.
+  await page.locator("#import-cancel").click({ force: true });
 
   await expect(page.locator("#status")).toHaveText("Cancelled", { timeout: 30_000 });
   await expect(page.locator("#import-error")).toBeHidden();
@@ -482,18 +481,30 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
   await expect(page.locator("#import-detail")).toBeHidden();
   await waitForState(page, "no-assets");
 
-  // The first two archives and the extra files written before the cancel stay;
-  // the second game's archives, placed after the extras, were never written.
+  // The archives completed before the cancel stay; the import writes a small
+  // group ahead, so the third archive may already have committed. What must
+  // never happen is an extra file or an incomplete archive, and the cancelled
+  // import cannot have all four.
   const paths = await storedPaths(page);
-  expect(paths.filter((path) => path.endsWith(".big"))).toEqual([
+  const allowed = new Set([
+    "generals/INI.big",
+    "generals/W3D.big",
     "zh/INIZH.big",
     "zh/W3DZH.big",
   ]);
-  expect(paths.some((path) => path.startsWith("extra/Data/English/file-"))).toBe(true);
+  expect(paths.every((path) => allowed.has(path))).toBe(true);
+  expect(paths).toEqual(
+    expect.arrayContaining(["zh/INIZH.big", "zh/W3DZH.big"]),
+  );
+  expect(paths.length).toBeGreaterThanOrEqual(2);
+  expect(paths.length).toBeLessThan(4);
+  expect(paths.some((path) => path.startsWith("extra/"))).toBe(false);
 
   await page.reload();
   await waitForState(page, "no-assets");
-  await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");
+  await expect(page.locator("#stored-summary")).toHaveText(
+    `Stored: ${paths.length} archives`,
+  );
 });
 
 test("8: a ZIP missing a REQUIRED archive shows missing-archives, names them and stores nothing", async ({

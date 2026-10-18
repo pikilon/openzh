@@ -5,7 +5,7 @@
 // page's contract.
 
 import { REQUIRED } from "./install";
-import { listStored, listExtra, clearStored, type StoredFile } from "./opfs-store";
+import { listStored, removeExtra, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, formatBytes } from "./storage";
@@ -547,10 +547,10 @@ async function warnIfZipsDoNotFit(zips: readonly Blob[]): Promise<void> {
   if (free === undefined) return;
   let removable = 0;
   try {
-    const [stored, extras] = await Promise.all([listStored(), listExtra()]);
-    removable =
-      stored.reduce((sum, file) => sum + file.size, 0) +
-      extras.reduce((sum, file) => sum + file.size, 0);
+    // Only the archives are stored now (issue #162), and the replace rule
+    // removes those the new ZIPs do not keep.
+    const stored = await listStored();
+    removable = stored.reduce((sum, file) => sum + file.size, 0);
   } catch {
     // The import itself reports a storage failure; warn on free space only.
   }
@@ -801,6 +801,13 @@ function wireAudio(): void {
 
 async function loadStoredAndStart(): Promise<void> {
   setState("boot");
+  // Issue #162: an extra/ tree left by an older import is dead weight; remove
+  // it once, before the stored summary, and never let cleanup block the page.
+  try {
+    await removeExtra();
+  } catch {
+    // Cleanup is best effort: the loader still lists and imports archives.
+  }
   try {
     storedFiles = await listStored();
   } catch {

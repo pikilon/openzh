@@ -341,6 +341,16 @@ void GameLODManager::init()
 
 	m_idealDetailLevel=(StaticGameLODLevel)optionPref.getIdealStaticGameDetail();
 
+	// GeneralsX @feature DeepSeek 19/10/2026 On a fresh web profile default to VeryHigh detail and turn dynamic LOD off.
+#if defined(__EMSCRIPTEN__)
+	const Bool hasSavedStaticLOD = optionPref.find("StaticGameLOD") != optionPref.end();
+	if (!hasSavedStaticLOD)
+	{
+		userSetDetail = STATIC_GAME_LOD_VERY_HIGH;
+		m_idealDetailLevel = STATIC_GAME_LOD_VERY_HIGH;
+	}
+#endif
+
 	//always get this data in case we need it later.
 	testMinimumRequirements(nullptr,&m_cpuType,&m_cpuFreq,&m_numRAM,nullptr,nullptr,nullptr);
 	// GeneralsX @bugfix Copilot 11/05/2026 Apply non-Windows hardware fallbacks only when detection returns unknown/zero values.
@@ -432,6 +442,30 @@ void GameLODManager::init()
 	}
 
 	setStaticLODLevel(userSetDetail);
+
+	// GeneralsX @feature DeepSeek 19/10/2026 Report the applied web graphics defaults to the launcher page.
+#if defined(__EMSCRIPTEN__)
+	if (!hasSavedStaticLOD)
+	{
+		TheWritableGlobalData->m_enableDynamicLOD = FALSE;
+	}
+
+	const StaticGameLODLevel appliedLevel = getStaticLODLevel();
+	const char *appliedLevelName =
+		(appliedLevel >= STATIC_GAME_LOD_FIRST && appliedLevel < STATIC_GAME_LOD_COUNT)
+			? getStaticGameLODLevelName(appliedLevel)
+			: "Unknown";
+
+	fprintf(stderr,
+		"GENERALSX_GRAPHICS xres=%d yres=%d lod=%s aa=%d filter=%d anisotropy=%d dynamicLOD=%d\n",
+		TheGlobalData->m_xResolution,
+		TheGlobalData->m_yResolution,
+		appliedLevelName,
+		(Int)TheGlobalData->m_antiAliasLevel,
+		(Int)TheGlobalData->m_textureFilteringMode,
+		(Int)TheGlobalData->m_textureAnisotropyLevel,
+		TheGlobalData->m_enableDynamicLOD ? 1 : 0);
+#endif
 }
 
 void GameLODManager::refreshCustomStaticLODLevel()

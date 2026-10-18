@@ -318,10 +318,15 @@ int main(int argc, char* argv[])
 		// (window->w / cssWidth) collapsed to 1.0 and clicks landed off by the letterbox scale after any
 		// resize, zoom or fullscreen. The render size belongs to the engine (Options.ini), not to the DOM.
 		Uint32 windowFlags = SDL_WINDOW_HIDDEN;
+		// GeneralsX @feature DeepSeek 19/10/2026 Bootstrap the browser window at the 1920x1080 web default.
+		const int bootstrapWidth = 1920;
+		const int bootstrapHeight = 1080;
 		#else
 		// Create SDL3 window with Vulkan support
 		fprintf(stderr, "INFO: Creating SDL3 Vulkan window...\n");
 		Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;  // Start hidden, show after D3D init
+		const int bootstrapWidth = 1024;
+		const int bootstrapHeight = 768;
 		#endif
 #ifdef __APPLE__
 		// GeneralsX @bugfix macOS HiDPI: request a native-resolution (Retina) Metal drawable so the
@@ -332,7 +337,7 @@ int main(int argc, char* argv[])
 #endif
 		TheSDL3Window = SDL_CreateWindow(
 			"Command & Conquer Generals: Zero Hour",
-			1024, 768,  // Default resolution
+			bootstrapWidth, bootstrapHeight,  // Bootstrap resolution; the engine applies the options later
 			windowFlags
 		);
 

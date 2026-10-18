@@ -1288,13 +1288,13 @@
         "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp",
         "web/scripts/package.mjs"
       ],
-      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and €1/€2/€5 PayPal support tips."
+      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and \u20ac1/\u20ac2/\u20ac5 PayPal support tips."
     },
     {
       "issue": 162,
       "title": "ZIP import keeps only the game archives (.big); the engine never reads the rest",
       "phase": 1,
-      "status": "done",
+      "status": "ready",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -1321,7 +1321,7 @@
       "issue": 164,
       "title": "Tool lib: lossless TGA RLE encoder",
       "phase": 1,
-      "status": "done",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -1341,7 +1341,7 @@
       "issue": 166,
       "title": "Tool lib: MP3 re-encoder for music (ffmpeg)",
       "phase": 1,
-      "status": "done",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -1361,7 +1361,7 @@
       "issue": 167,
       "title": "make-game-zip: --tga-rle and --music-kbps options",
       "phase": 1,
-      "status": "done",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
@@ -1379,6 +1379,32 @@
         "web/scripts/make-game-zip.mjs"
       ],
       "summary": "make-game-zip can store TGAs RLE-encoded (lossless) and re-encode music at a lower bitrate while packing."
+    },
+    {
+      "issue": 173,
+      "title": "Web: default 1920x1080 and maximum graphics",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/173-web-1080p-max-graphics.md",
+      "depends_on": [],
+      "check": "scripts/build-webgpu.sh && cd web && npm ci && ZHWP_PORT=4193 npx playwright test tests/launcher-graphics-defaults.spec.ts tests/launcher-1080p.spec.ts tests/real-data-resolution.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-graphics-defaults.spec.ts",
+        "web/tests/real-data-resolution.spec.ts",
+        "web/tests/launcher-1080p.spec.ts",
+        "web/tests/harness/canvas/hd.js"
+      ],
+      "allowed_paths": [
+        "GeneralsMD/Code/GameEngine/Source/Common/GlobalData.cpp",
+        "Core/GameEngine/Source/Common/OptionPreferences.cpp",
+        "GeneralsMD/Code/GameEngine/Source/Common/GameLOD.cpp",
+        "GeneralsMD/Code/Main/SDL3Main.cpp"
+      ],
+      "summary": "Fresh web profiles start at 1920x1080 with StaticGameLOD VeryHigh, 4x MSAA, 16x anisotropic filtering, terrain LOD max and dynamic LOD off; saved Options.ini values win and native defaults are unchanged."
     },
     {
       "issue": 175,

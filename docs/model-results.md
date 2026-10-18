@@ -90,5 +90,11 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #133 | code | deepseek-flash (dsh) | ok | ~2.4 min | folder pick and dev game-folder server removed; suite passes (call 67) |
 | 2026-10-18 | #134 | tests | deepseek-flash (dsh) | ok | ~0.9 min | 3 tests (call 68) |
 | 2026-10-18 | #134 | code | deepseek-flash (dsh) | ok | ~1.7 min | docs pass; reported check-no-ea-assets.sh failing on main since #39 (synthetic .rep tracked), outside scope (call 69) |
+| 2026-10-18 | #149 | tests | deepseek-flash (dsh) | ok | ~4.9 min | 10 tests incl. an independent reference decoder and an ffmpeg cross-check (call 70) |
+| 2026-10-18 | #149 | code | deepseek-flash (dsh) | ok | ~1 min | 10 pass (call 72) |
+| 2026-10-18 | #150 | tests | deepseek-flash (dsh) | ok | ~2.5 min | 11 tests (call 71) |
+| 2026-10-18 | #150 | code | deepseek-flash (dsh) | ok | ~1.3 min | 11 pass (call 73) |
+| 2026-10-18 | #151 | tests | deepseek-flash (dsh) | ok | ~3.2 min | 11 tests (call 74) |
+| 2026-10-18 | #151 | code | deepseek-flash (dsh) | ok | ~1.5 min | 19 pass; real game: 2.95 GB -> 1.86 GB, speech SNR avg 27 dB (call 75) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

@@ -65,3 +65,8 @@ when it shows up again. Add an entry before closing the issue that found it.
 * The bridge is not the bottleneck at these numbers, so D-03 stands. Re-run
   with real archives and a cold cache before drawing conclusions about load
   times.
+
+## Frame-time baseline (issue #36)
+* `cd web && ZHWP_REPLAY=<file.rep> npm run bench -- real-replay` (needs `ZHWP_GAME_DIR`), 2026-10-18, M2 Max, Brave headless, the owner's Zero Hour 1.04 files, `linux_2p_vanilla_map.rep` from GeneralsXReplays (game resumed with `P` after its expected CRC pause at frame 100), 60 s of play after warm-up.
+* `FRAME_BASELINE {"frames":3601,"p50":16.67,"p95":16.67,"p99":16.67,"max":16.67,"over33ms":0}`: no dropped frame. The engine's own counter reads `60[30]` (render 60 fps, logic 30) at 1024x768.
+* Limits: headless `requestAnimationFrame` is a fixed 60 Hz clock, so this shows no stalls on the main thread, not how heavy a late-game battle is. A 2-player replay of 3 minutes is a light load; a 6-player replay (needs its custom map in the user data folder) and a windowed run on the owner's screen would be the next measurement. Phase 1 needs no performance work on this evidence.

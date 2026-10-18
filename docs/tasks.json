@@ -231,7 +231,7 @@
       "issue": 36,
       "title": "Real data: frame-time baseline",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "s",

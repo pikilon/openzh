@@ -387,20 +387,16 @@ test("1: importing B after A leaves only B's archives and extra files", async ({
   ]);
 
   expect(await listStored(page)).toEqual(sortedStored([...required, bOnly]));
-  expect(await listExtra(page)).toEqual([
-    { path: bExtra.path, size: bExtra.data.length },
-  ]);
+  expect(await listExtra(page)).toEqual([]);
   expect(await hasFile(page, ["zhwp", "generals", "AONLY.big"])).toBe(false);
   expect(await hasFile(page, ["zhwp", "extra", "old", "notes.txt"])).toBe(false);
-  expect(await storedEntries(page)).toEqual(
-    expectedEntries([...required, bOnly], [bExtra]),
-  );
+  expect(await storedEntries(page)).toEqual(expectedEntries([...required, bOnly]));
 
-  expect(result.written).toBe(2);
+  expect(result.written).toBe(1);
   expect(result.skipped).toBe(4);
-  expect(result.extra).toBe(1);
-  expect(result.removed).toBe(2);
-  expect(result.freedBytes).toBe(aOnly.data.length + aExtra.data.length);
+  expect(result.extra).toBe(0);
+  expect(result.removed).toBe(1);
+  expect(result.freedBytes).toBe(aOnly.data.length);
 });
 
 test("2: a file with the same size is kept and skipped, a different size is replaced", async ({
@@ -459,13 +455,13 @@ test("2: a file with the same size is kept and skipped, a different size is repl
         files: {
           inizh: await (window as any).__zipTest.fileAt(["zhwp", "zh", "INIZH.big"]),
           w3dzh: await (window as any).__zipTest.fileAt(["zhwp", "zh", "W3DZH.big"]),
-          keep: await (window as any).__zipTest.fileAt([
+          keep: await (window as any).__zipTest.hasFile([
             "zhwp",
             "extra",
             "common",
             "keep.bin",
           ]),
-          change: await (window as any).__zipTest.fileAt([
+          change: await (window as any).__zipTest.hasFile([
             "zhwp",
             "extra",
             "common",
@@ -478,19 +474,20 @@ test("2: a file with the same size is kept and skipped, a different size is repl
     }
   });
 
-  // INIZH.big, INI.big, W3D.big and common/keep.bin kept by key and size.
-  expect(outcome.result.skipped).toBe(4);
-  expect(outcome.result.written).toBe(2);
-  expect(outcome.result.extra).toBe(2);
-  expect(outcome.result.removed).toBe(2);
-  expect(outcome.result.freedBytes).toBe(200 + 600);
+  // INIZH.big, INI.big and W3D.big kept by key and size; the extra files are
+  // ignored (issue #162).
+  expect(outcome.result.skipped).toBe(3);
+  expect(outcome.result.written).toBe(1);
+  expect(outcome.result.extra).toBe(0);
+  expect(outcome.result.removed).toBe(1);
+  expect(outcome.result.freedBytes).toBe(200);
 
   expect(outcome.writes["INIZH.big"] ?? 0).toBe(0);
   expect(outcome.writes["INI.big"] ?? 0).toBe(0);
   expect(outcome.writes["W3D.big"] ?? 0).toBe(0);
   expect(outcome.writes["keep.bin"] ?? 0).toBe(0);
   expect(outcome.writes["W3DZH.big"]).toBeGreaterThan(0);
-  expect(outcome.writes["change.bin"]).toBeGreaterThan(0);
+  expect(outcome.writes["change.bin"] ?? 0).toBe(0);
 
   expect(outcome.stored).toEqual(sortedStored(bRequired));
   expect(outcome.files.inizh).toEqual({
@@ -501,14 +498,8 @@ test("2: a file with the same size is kept and skipped, a different size is repl
     size: bRequired[1].data.length,
     sha256: sha256(bRequired[1].data),
   });
-  expect(outcome.files.keep).toEqual({
-    size: keepA.data.length,
-    sha256: sha256(keepA.data),
-  });
-  expect(outcome.files.change).toEqual({
-    size: changeB.data.length,
-    sha256: sha256(changeB.data),
-  });
+  expect(outcome.files.keep).toBe(false);
+  expect(outcome.files.change).toBe(false);
 });
 
 test("3: the result reports removed and freedBytes for A's files that were not kept", async ({
@@ -549,16 +540,12 @@ test("3: the result reports removed and freedBytes for A's files that were not k
     { path: bExtra.path, data: bExtra.data, method: "store" },
   ]);
 
-  expect(result.removed).toBe(3);
-  expect(result.freedBytes).toBe(
-    aOnly.data.length + aExtras[0].data.length + aExtras[1].data.length,
-  );
-  expect(result.written).toBe(2);
+  expect(result.removed).toBe(1);
+  expect(result.freedBytes).toBe(aOnly.data.length);
+  expect(result.written).toBe(1);
   expect(result.skipped).toBe(4);
-  expect(result.extra).toBe(1);
-  expect(await storedEntries(page)).toEqual(
-    expectedEntries([...required, bOnly], [bExtra]),
-  );
+  expect(result.extra).toBe(0);
+  expect(await storedEntries(page)).toEqual(expectedEntries([...required, bOnly]));
 });
 
 test("4: a missing archive, a non-ZIP and a truncated ZIP leave install A unchanged", async ({
@@ -601,9 +588,7 @@ test("4: a missing archive, a non-ZIP and a truncated ZIP leave install A unchan
     await page.evaluate(() => (window as any).zhwp.clearStored());
     await importZips(page, aEntries);
     const before = await storedEntries(page);
-    expect(before, testCase.label).toEqual(
-      expectedEntries([...required, aOnly], [aExtra]),
-    );
+    expect(before, testCase.label).toEqual(expectedEntries([...required, aOnly]));
 
     await attachZips(page, [{ name: testCase.label, bytes: testCase.bytes }]);
     const outcome = await attemptAttached(page);
@@ -841,37 +826,53 @@ test("6: a re-import after an interrupted import keeps the completed files and r
   expect(await storedEntries(page)).toEqual(expectedEntries(target));
 });
 
-test("7: empty directories under extra/ are removed after their files go", async ({
+test("7: a legacy extra/ tree is removed by the next import, empty directories included", async ({
   page,
 }) => {
   await openHarness(page);
 
   const required = requiredFiles([100, 200, 300, 400], 1);
-  const keep = { path: "Old/keep.txt", data: bytes(20, 80) };
-  const gone = { path: "Old/Deep/file.txt", data: bytes(30, 81) };
-  const goneRoot = { path: "Gone/only.txt", data: bytes(40, 82) };
+  await importZips(page, zipEntries(required));
 
-  await importZips(page, [
-    ...zipEntries(required),
-    { path: keep.path, data: keep.data, method: "store" },
-    { path: gone.path, data: gone.data, method: "store" },
-    { path: goneRoot.path, data: goneRoot.data, method: "store" },
-  ]);
+  const legacy = [
+    { path: "Old/keep.txt", data: bytes(20, 80) },
+    { path: "Old/Deep/file.txt", data: bytes(30, 81) },
+    { path: "Gone/only.txt", data: bytes(40, 82) },
+  ];
+  // An extra/ tree left by an import from before issue #162.
+  await page.evaluate(async (items) => {
+    const root = await navigator.storage.getDirectory();
+    const zhwp = await root.getDirectoryHandle("zhwp", { create: true });
+    const extra = await zhwp.getDirectoryHandle("extra", { create: true });
+    for (const item of items) {
+      const parts = item.path.split("/");
+      let dir = extra;
+      for (const part of parts.slice(0, -1)) {
+        dir = await dir.getDirectoryHandle(part, { create: true });
+      }
+      const file = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+      const writer = await file.createWritable();
+      await writer.write(new Uint8Array(item.size));
+      await writer.close();
+    }
+  }, legacy.map((entry) => ({ path: entry.path, size: entry.data.length })));
 
-  const result = await importZips(page, [
-    ...zipEntries(required),
-    { path: keep.path, data: keep.data, method: "store" },
-  ]);
+  const result = await importZips(page, zipEntries(required));
 
-  expect(result.removed).toBe(2);
-  expect(result.freedBytes).toBe(gone.data.length + goneRoot.data.length);
-  expect(await listExtra(page)).toEqual([{ path: keep.path, size: keep.data.length }]);
-  expect(await hasDirectory(page, ["zhwp", "extra", "Old"])).toBe(true);
+  expect(result.removed).toBe(3);
+  expect(result.freedBytes).toBe(
+    legacy.reduce((sum, entry) => sum + entry.data.length, 0),
+  );
+  expect(result.written).toBe(0);
+  expect(result.skipped).toBe(4);
+  expect(await listExtra(page)).toEqual([]);
+  expect(await hasDirectory(page, ["zhwp", "extra", "Old"])).toBe(false);
   expect(await hasDirectory(page, ["zhwp", "extra", "Old", "Deep"])).toBe(false);
   expect(await hasDirectory(page, ["zhwp", "extra", "Gone"])).toBe(false);
+  expect(await hasFile(page, ["zhwp", "extra", "Old", "keep.txt"])).toBe(false);
   expect(await hasFile(page, ["zhwp", "extra", "Old", "Deep", "file.txt"])).toBe(false);
   expect(await hasFile(page, ["zhwp", "extra", "Gone", "only.txt"])).toBe(false);
-  expect(await storedEntries(page)).toEqual(expectedEntries(required, [keep]));
+  expect(await storedEntries(page)).toEqual(expectedEntries(required));
 });
 
 test("8: picking ZIPs after an install replaces it and #status shows the removal first", async ({
@@ -917,7 +918,6 @@ test("8: picking ZIPs after an install replaces it and #status shows the removal
   const files = await storedFiles(page);
   expect(files).toEqual(
     [
-      "extra/new/notes.txt",
       "generals/BONLY1.big",
       "generals/BONLY2.big",
       "generals/INI.big",

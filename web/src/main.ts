@@ -3,7 +3,7 @@
 // engine runs from them. The DOM element ids are the page's contract.
 
 import { REQUIRED } from "./install";
-import { listStored, listExtra, clearStored, type StoredFile } from "./opfs-store";
+import { listStored, removeExtra, clearStored, type StoredFile } from "./opfs-store";
 import { prepareEngineOptions } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, formatBytes } from "./storage";
@@ -179,8 +179,8 @@ async function refresh(): Promise<void> {
 
 // Issue #128: imports picked or dropped ZIPs through importZips and owns the
 // progress line, the cancel button and the typed failure display. Nothing is
-// stored by the page itself here: importZips writes the archives and extra
-// files and reads every ZIP before the first write.
+// stored by the page itself here: importZips writes the archives and reads
+// every ZIP before the first write.
 let importAbort: AbortController | null = null;
 let importing = false;
 
@@ -211,10 +211,10 @@ async function warnIfZipsDoNotFit(zips: readonly Blob[]): Promise<void> {
   if (free === undefined) return;
   let removable = 0;
   try {
-    const [stored, extras] = await Promise.all([listStored(), listExtra()]);
-    removable =
-      stored.reduce((sum, file) => sum + file.size, 0) +
-      extras.reduce((sum, file) => sum + file.size, 0);
+    // Only the archives are stored now (issue #162), and the replace rule
+    // removes those the new ZIPs do not keep.
+    const stored = await listStored();
+    removable = stored.reduce((sum, file) => sum + file.size, 0);
   } catch {
     // The import itself reports a storage failure; warn on free space only.
   }
@@ -589,5 +589,8 @@ if (missing.length > 0) {
   });
   document.addEventListener("visibilitychange", applyMute);
 
-  void refresh().catch(fail);
+  // Issue #162: an extra/ tree left by an older import is dead weight; remove
+  // it once, before the stored summary, and ignore errors so cleanup never
+  // blocks the page.
+  void removeExtra().then(refresh).catch(fail);
 }

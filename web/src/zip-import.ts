@@ -1,7 +1,7 @@
 // Imports the player's ZIPs into OPFS (docs/briefs/127-zip-import.md): open
-// and classify every ZIP first, then stream each entry into
-// zhwp/<kind>/<name> for the game archives and zhwp/extra/<path> for
-// everything else, with progress, abort and typed errors. Memory stays
+// and classify every ZIP first, then stream each game archive into
+// zhwp/<kind>/<name> with progress, abort and typed errors. Everything else is
+// ignored: the engine reads only the `.big` archives (issue #162). Memory stays
 // bounded because entries are copied chunk by chunk.
 
 import { ImportError, type ImportErrorDetail } from "./import-error";
@@ -20,9 +20,6 @@ import {
   crc32Value,
   entryDataBlob,
   openZip,
-  readSmallEntry,
-  readSmallInflated,
-  smallEntryWithin,
   type ZipEntry,
 } from "./zip";
 
@@ -46,9 +43,9 @@ export interface ImportOptions {
 
 export interface ImportResult {
   written: number;
-  skipped: number; // files, extra files included
+  skipped: number; // files
   archives: { kind: GameKind; name: string; size: number }[];
-  extra: number; // non-.big files in `written + skipped`
+  extra: number; // always 0: non-.big entries are ignored (issue #162)
   removed: number; // stored files the replace rule removed
   freedBytes: number; // their total size
 }
@@ -63,7 +60,6 @@ interface PlannedFile {
   entry: ZipEntry;
   // null when the entry is a duplicate and must not be written.
   parts: string[] | null;
-  isExtra: boolean;
 }
 
 const STORAGE_ERRORS = new Set([
@@ -85,10 +81,6 @@ const ETA_AFTER_MS = 1000;
 // by coalescing decompressor chunks into one buffer before each write.
 const CRC_CHUNK_SIZE = 1024 * 1024;
 const INFLATE_WRITE_CHUNK = 8 * 1024 * 1024;
-const SMALL_EXTRA_LIMIT = 64 * 1024;
-const SMALL_EXTRA_PARALLEL = 16;
-const SMALL_EXTRA_SPAN = 4 * 1024 * 1024;
-const LARGE_PARALLEL = 4;
 
 function now(): number {
   return performance.now();
@@ -103,10 +95,6 @@ function archiveOf(path: string): ArchivePath | null {
 
 function archiveKey(archive: ArchivePath): string {
   return `${archive.kind}\u0000${archive.name.toLowerCase()}`;
-}
-
-function extraParts(path: string): string[] {
-  return ["extra", ...path.split("/").filter((segment) => segment !== "")];
 }
 
 function errorName(error: unknown): string {
@@ -184,35 +172,25 @@ export async function importZips(
   const selected = new Set(report.archives.map((archive) => archiveKey(archive)));
   const archiveSizes = new Map<string, number>();
   const seenArchives = new Set<string>();
-  const seenExtras = new Set<string>();
   const plan: PlannedFile[] = [];
 
   for (const source of opened) {
     for (const entry of source.entries) {
       if (entry.isDirectory) continue;
+      // Everything that is not a game archive is ignored: the engine reads
+      // nothing else (issue #162).
       const archive = archiveOf(entry.path);
-      if (archive !== null) {
-        const key = archiveKey(archive);
-        const first = selected.has(key) && !seenArchives.has(key);
-        if (first) {
-          seenArchives.add(key);
-          archiveSizes.set(key, entry.size);
-        }
-        plan.push({
-          blob: source.blob,
-          entry,
-          parts: first ? [archive.kind, archive.name] : null,
-          isExtra: false,
-        });
-        continue;
+      if (archive === null) continue;
+      const key = archiveKey(archive);
+      const first = selected.has(key) && !seenArchives.has(key);
+      if (first) {
+        seenArchives.add(key);
+        archiveSizes.set(key, entry.size);
       }
-      const firstExtra = !seenExtras.has(entry.path);
-      if (firstExtra) seenExtras.add(entry.path);
       plan.push({
         blob: source.blob,
         entry,
-        parts: firstExtra ? extraParts(entry.path) : null,
-        isExtra: true,
+        parts: first ? [archive.kind, archive.name] : null,
       });
     }
   }
@@ -249,7 +227,6 @@ export async function importZips(
   let filesDone = 0;
   let written = 0;
   let skipped = 0;
-  let extra = 0;
   const startedAt = now();
   let lastEmitAt = Number.NEGATIVE_INFINITY;
   const samples: { at: number; bytes: number }[] = [];
@@ -304,7 +281,6 @@ export async function importZips(
     committedBytes += file.entry.size;
     filesDone++;
     skipped++;
-    if (file.isExtra) extra++;
     emit(file.entry.path, true);
   };
 
@@ -312,7 +288,6 @@ export async function importZips(
     committedBytes += file.entry.size;
     filesDone++;
     written++;
-    if (file.isExtra) extra++;
     emit(file.entry.path, true);
   };
 
@@ -454,10 +429,10 @@ export async function importZips(
     if (prepared.writing !== null) await prepared.writing.catch(() => undefined);
   };
 
-  // Archives and large extras: dispatch every write, then verify the stored
-  // CRCs in plan order (concurrently writing while reading back), then let
-  // the caller commit. A failure keeps the files before it and discards the
-  // rest, exactly like the old one-at-a-time loop.
+  // Dispatch every archive write, then verify the stored CRCs in plan order
+  // (concurrently writing while reading back), then let the caller commit. A
+  // failure keeps the files before it and discards the rest, exactly like the
+  // old one-at-a-time loop.
   const dispatchLarge = async (file: PlannedFile): Promise<PreparedFile> => {
     if (file.parts === null) {
       return { file, target: null, writing: null, data: null, verified: true };
@@ -565,208 +540,36 @@ export async function importZips(
     await abortRemaining(group.pending, group.failedAt);
   };
 
-  interface ExtraSpan {
-    blob: Blob;
-    start: number;
-    bytes: Uint8Array;
+  // Every planned file is a game archive: dispatch all writes, verify the
+  // stored CRCs in plan order (concurrently writing while reading back), then
+  // commit them. A failure keeps the files before it and discards the rest.
+  if (signal?.aborted) throw aborted();
+  const group = await dispatchLargeGroup(plan);
+  if (group.failure !== null) {
+    await finishLargeFailure(group);
+    throw group.failure;
   }
 
-  // Consecutive small extras sit next to each other in the ZIP, so one read
-  // of their combined span replaces a header read and a data read per file.
-  // A span that would be large (or crosses ZIPs) falls back to per-file reads.
-  const readExtraSpan = async (files: PlannedFile[]): Promise<ExtraSpan | null> => {
-    const blob = files[0].blob;
-    if (!files.every((file) => file.blob === blob && file.parts !== null)) return null;
-    let start = Number.POSITIVE_INFINITY;
-    let end = 0;
-    for (const file of files) {
-      start = Math.min(start, file.entry.offset);
-      end = Math.max(
-        end,
-        file.entry.offset + 30 + 0xffff + 0xffff + file.entry.compressedSize,
-      );
-    }
-    end = Math.min(end, blob.size);
-    if (!Number.isFinite(start) || end - start > SMALL_EXTRA_SPAN) return null;
-    const bytes = new Uint8Array(await blob.slice(start, end).arrayBuffer());
-    return { blob, start, bytes };
-  };
+  const verified = await verifyLargeGroup(group.pending);
+  if (verified.failure !== null) {
+    await finishLargeFailure({
+      pending: group.pending,
+      failure: verified.failure,
+      failedAt: verified.failedAt,
+    });
+    throw verified.failure;
+  }
 
-  const prepareExtra = async (
-    file: PlannedFile,
-    span: ExtraSpan | null,
-  ): Promise<PreparedFile> => {
-    const parts = file.parts as string[];
-    const target = await openStoredFile(parts, knownOf(parts));
-    if (target.existed && target.size === file.entry.size) {
-      await target.abort();
-      countSkipped(file);
-      return { file, target: null, writing: null, data: null, verified: true };
-    }
-    try {
-      let bytes: Uint8Array;
-      if (file.entry.method === 0) {
-        bytes =
-          span !== null && span.blob === file.blob
-            ? smallEntryWithin(span.bytes, span.start, file.entry)
-            : await readSmallEntry(file.blob, file.entry);
-        if (
-          bytes.length !== file.entry.size ||
-          crc32Value(crc32Update(CRC32_INIT, bytes)) !== file.entry.crc32
-        ) {
-          throw new ImportError("bad-crc", { file: file.entry.path });
-        }
-      } else {
-        bytes = await readSmallInflated(file.blob, file.entry);
-      }
+  let committed = 0;
+  try {
+    while (committed < group.pending.length) {
       if (signal?.aborted) throw aborted();
-      await target.writable.write(bytes);
-      addBytes(file, bytes.length);
-      // Publish each extra as soon as it is complete: a cancel then keeps the
-      // ones already written, and filesDone advances during a large batch.
-      await target.commit();
-      countWritten(file);
-      return { file, target: null, writing: null, data: null, verified: true };
-    } catch (error) {
-      await discard(target, parts);
-      throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
+      await commitPrepared(group.pending[committed]);
+      committed++;
     }
-  };
-
-  // Small extras are independent, so a whole run opens and writes with a
-  // bounded worker pool and holds the writables open. The caller starts this
-  // while the archives' writes are still in flight, so the extra I/O hides
-  // behind them; nothing is closed before the archives commit, which keeps
-  // the failure behaviour (later files are discarded).
-  const prepareExtraGroup = async (files: PlannedFile[]): Promise<PreparedFile[]> => {
-    const span = await readExtraSpan(files);
-    if (signal?.aborted) throw aborted();
-    const prepared: (PreparedFile | undefined)[] = new Array(files.length);
-    let next = 0;
-    let failure: unknown = null;
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        if (failure !== null) return;
-        const index = next++;
-        if (index >= files.length) return;
-        try {
-          prepared[index] = await prepareExtra(files[index], span);
-        } catch (error) {
-          failure = error;
-          return;
-        }
-      }
-    };
-    const count = Math.min(SMALL_EXTRA_PARALLEL, files.length);
-    await Promise.all(Array.from({ length: count }, worker));
-    if (failure !== null) {
-      await Promise.all(
-        prepared.map(async (item) => {
-          if (item !== undefined) await abortPrepared(item);
-        }),
-      );
-      throw failure;
-    }
-    return prepared as PreparedFile[];
-  };
-
-  // All extras are written; closing is the last slow step, so the whole run
-  // closes at once and the counters still advance in plan order.
-  const commitExtraGroup = async (prepareds: PreparedFile[]): Promise<void> => {
-    const closed = await Promise.allSettled(
-      prepareds.map((prepared) =>
-        prepared.target === null ? Promise.resolve() : prepared.target.commit(),
-      ),
-    );
-    for (let index = 0; index < prepareds.length; index++) {
-      const outcome = closed[index];
-      if (outcome.status === "rejected") {
-        await abortRemaining(prepareds, index);
-        throw await toImportError(
-          outcome.reason,
-          prepareds[index].file.entry.path,
-          totalBytes - committedBytes,
-        );
-      }
-      const prepared = prepareds[index];
-      if (prepared.target !== null) countWritten(prepared.file);
-    }
-  };
-
-  const discardExtraGroup = async (
-    promise: Promise<PreparedFile[]>,
-  ): Promise<void> => {
-    let prepared: PreparedFile[] | null = null;
-    try {
-      prepared = await promise;
-    } catch {
-      prepared = null;
-    }
-    if (prepared !== null) {
-      await Promise.all(prepared.map((item) => abortPrepared(item)));
-    }
-  };
-
-  const batchable = (file: PlannedFile): boolean =>
-    file.isExtra && file.parts !== null && file.entry.size <= SMALL_EXTRA_LIMIT;
-
-  for (let index = 0; index < plan.length; ) {
-    if (signal?.aborted) throw aborted();
-    if (batchable(plan[index])) {
-      let end = index;
-      while (end < plan.length && batchable(plan[end])) end++;
-      const prepared = await prepareExtraGroup(plan.slice(index, end));
-      await commitExtraGroup(prepared);
-      index = end;
-      continue;
-    }
-    let largeEnd = index;
-    while (largeEnd < plan.length && !batchable(plan[largeEnd])) largeEnd++;
-    let extrasEnd = largeEnd;
-    while (extrasEnd < plan.length && batchable(plan[extrasEnd])) extrasEnd++;
-
-    const group = await dispatchLargeGroup(plan.slice(index, largeEnd));
-    if (group.failure !== null) {
-      await finishLargeFailure(group);
-      throw group.failure;
-    }
-
-    // Start the small extras while the archives' CRC reads run: their I/O is
-    // hidden behind those reads and none of them closes before every archive
-    // has committed, so a later failure still discards them.
-    const extraPromise: Promise<PreparedFile[]> | null =
-      extrasEnd > largeEnd ? prepareExtraGroup(plan.slice(largeEnd, extrasEnd)) : null;
-    extraPromise?.catch(() => undefined);
-
-    const verified = await verifyLargeGroup(group.pending);
-    if (verified.failure !== null) {
-      if (extraPromise !== null) await discardExtraGroup(extraPromise);
-      await finishLargeFailure({
-        pending: group.pending,
-        failure: verified.failure,
-        failedAt: verified.failedAt,
-      });
-      throw verified.failure;
-    }
-
-    let committed = 0;
-    try {
-      while (committed < group.pending.length) {
-        await commitPrepared(group.pending[committed]);
-        committed++;
-      }
-    } catch (error) {
-      await abortRemaining(group.pending, committed + 1);
-      if (extraPromise !== null) await discardExtraGroup(extraPromise);
-      throw error;
-    }
-    if (extraPromise !== null) {
-      const prepared = await extraPromise;
-      await commitExtraGroup(prepared);
-      index = extrasEnd;
-    } else {
-      index = largeEnd;
-    }
+  } catch (error) {
+    await abortRemaining(group.pending, committed + 1);
+    throw error;
   }
 
   if (doneBytes !== totalBytes) {
@@ -779,7 +582,7 @@ export async function importZips(
     written,
     skipped,
     archives,
-    extra,
+    extra: 0,
     removed: reconciled.removed,
     freedBytes: reconciled.freedBytes,
   };

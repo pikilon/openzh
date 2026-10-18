@@ -434,6 +434,19 @@ export async function listExtra(): Promise<ExtraFile[]> {
   return files;
 }
 
+// Issue #162: the import stores only the game archives, so an `extra/` tree
+// left by an older version is dead weight. It is removed once at launcher
+// start, before the stored summary; cleanup must never block the page, so
+// every failure is ignored.
+export async function removeExtra(): Promise<void> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry(EXTRA_DIR, { recursive: true });
+  } catch {
+    // Already gone, or storage is unavailable: the import reports that.
+  }
+}
+
 // Removes both the archives and the extra files (the whole zhwp tree), plus
 // any incomplete files left in the staging tree by an interrupted import.
 export async function clearStored(): Promise<void> {

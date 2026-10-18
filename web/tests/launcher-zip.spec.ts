@@ -379,6 +379,20 @@ test("4: a ~40 MB ZIP shows the detail line and current file while importing and
 });
 
 test("5: the ETA reads calculating… early and m:ss later", async ({ page }) => {
+  // The four archives are all that is imported now (issue #162), so slow
+  // closing them enough for the ETA to appear.
+  await page.addInitScript(() => {
+    const original = FileSystemFileHandle.prototype.createWritable;
+    FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
+      const stream = await original.call(this, options);
+      const close = stream.close.bind(stream);
+      stream.close = async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return close();
+      };
+      return stream;
+    };
+  });
   await openLauncher(page);
   await watch(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
@@ -423,6 +437,23 @@ test("6: while importing #play, #clear and #zip-input are disabled", async ({
 test("7: cancelling midway leaves Cancelled, keeps the completed archives and hides the error", async ({
   page,
 }) => {
+  // Hold the second archive's close so the cancel lands after the first one is
+  // complete; the archives after it are never committed. Non-.big files are
+  // ignored now (issue #162), so only the four archives count.
+  await page.addInitScript(() => {
+    const original = FileSystemFileHandle.prototype.createWritable;
+    FileSystemFileHandle.prototype.createWritable = async function (options?: unknown) {
+      const stream = await original.call(this, options);
+      if (this.name === "W3DZH.big") {
+        const close = stream.close.bind(stream);
+        stream.close = async () => {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          return close();
+        };
+      }
+      return stream;
+    };
+  });
   await openLauncher(page);
   await page.locator("#zip-input").setInputFiles(bigZip as string);
   await expect(page.locator("#import-cancel")).toBeVisible({ timeout: 10_000 });
@@ -435,7 +466,7 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
       },
       { timeout: 30_000 },
     )
-    .toBeGreaterThanOrEqual(10);
+    .toBeGreaterThanOrEqual(1);
 
   await page.locator("#import-cancel").click();
 
@@ -444,14 +475,10 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
   await expect(page.locator("#import-cancel")).toBeHidden();
   await expect(page.locator("#import-detail")).toBeHidden();
 
-  // The first two archives and the extra files written before the cancel stay;
-  // the second game's archives, placed after the extras, were never written.
+  // The first two archives stay; nothing is stored under extra/.
   const paths = await storedFiles(page);
-  expect(paths.filter((path) => path.endsWith(".big"))).toEqual([
-    "zh/INIZH.big",
-    "zh/W3DZH.big",
-  ]);
-  expect(paths.some((path) => path.startsWith("extra/Data/English/file-"))).toBe(true);
+  expect(paths).toEqual(["zh/INIZH.big", "zh/W3DZH.big"]);
+  expect(paths.some((path) => path.startsWith("extra/"))).toBe(false);
 
   await page.reload();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 2 archives");

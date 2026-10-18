@@ -58,12 +58,13 @@ The repository starts empty except for this file. Before writing any port code:
 
 * **Phase 0: Base.** Evaluation above; fork the chosen base into this repository
   keeping its history and license.
-* **Phase 1: Playable in the browser.** The player selects their game install
-  folder (the `.big` archives); files are stored in OPFS/IndexedDB and never
-  uploaded. Rendering through WebGPU (WebGL2 fallback only if needed) behind the
-  engine's existing `DX8Wrapper` layer. Threads need `SharedArrayBuffer`, so
-  hosting must send COOP/COEP headers. Done when skirmish vs. AI is playable in
-  current Chrome and Firefox.
+* **Phase 1: Playable in the browser.** The player loads their game install
+  from ZIP files (the whole install, the `.big` archives included, packed by
+  `web/scripts/make-game-zip.mjs` outside the repository); files are stored in
+  OPFS/IndexedDB and never uploaded. Rendering through WebGPU (WebGL2 fallback
+  only if needed) behind the engine's existing `DX8Wrapper` layer. Threads need
+  `SharedArrayBuffer`, so hosting must send COOP/COEP headers. Done when
+  skirmish vs. AI is playable in current Chrome and Firefox.
 * **Phase 2: Oracle.** Replays (`.rep`) played headless, comparing the
   engine's per-frame CRC of the WASM build across browsers and operating
   systems. WASM float semantics are deterministic, so every browser should
@@ -117,11 +118,14 @@ stay in this repository. If that changes, it is a new decision.
 ## Local Game Data
 
 The owner's machine has a legitimate copy of the game (Generals 1.0 and Zero
-Hour 1.04) outside the repository. Tests and manual checks that need it read
-the folder from `ZHWP_GAME_DIR` (set in the owner's shell; the exact path is in
-the gitignored `CLAUDE.local.md`). If the variable is set and the folder
-exists, use it: you do not need to ask the owner to install anything. Never
-copy it into the repository, build output, CI or artifacts.
+Hour 1.04) outside the repository. `web/scripts/make-game-zip.mjs` packs it into
+two ZIP files, `zero-hour.zip` and `generals.zip`; `ZHWP_GAME_DIR` is only that
+script's input (set in the owner's shell; the exact path is in the gitignored
+`CLAUDE.local.md`). Tests and manual checks that need the game read the ZIP
+paths from `ZHWP_GAME_ZIPS`, separated by `:`. If the variables are set and the
+files exist, use them: you do not need to ask the owner to install anything.
+Never copy the ZIPs or any game file into the repository, build output, CI or
+artifacts.
 
 ## Way of Working
 

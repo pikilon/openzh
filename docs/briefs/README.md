@@ -57,8 +57,8 @@ Two tasks may run at the same time only when their `test_paths` and
    `test_paths`; the new tests must fail.
 3. Implementer: follow `.agents/agents/local-implementer/agent.md`; change
    only `allowed_paths`; stop when the check exits 0.
-4. Do not commit unless the caller asked; never edit the brief, other
-   tests, `AGENTS.md`, `.agents/` or `docs/`.
+4. Do not commit unless the caller asked; never edit the brief, other tests,
+   `.agents/` or any path outside your allowed paths.
 5. Answer with results only:
    ```
    RESULT: DONE | BLOCKED
@@ -80,5 +80,5 @@ ZHWP_BUILD_DIR=$PWD/build scripts/pipeline/verify-task.sh --mode code <issue> <b
 Engine (C++) tasks: the architect runs `scripts/build-webgpu.sh` in the
 clean checkout before the check; agents cannot build the engine.
 
-Tasks that need real game data run only on the owner's machine with
-`ZHWP_GAME_DIR`, never in CI.
+Tasks that need real game data run only on the owner's machine with the ZIPs
+named by `ZHWP_GAME_ZIPS`, never in CI.

@@ -43,6 +43,12 @@ async function kindDirectory(kind: GameKind, create: boolean): Promise<FileSyste
 
 const EXTRA_DIR = "extra";
 
+// Incomplete files stay outside zhwp, under their final basename, and are
+// moved into place only once they are complete (issue #129). A reload in the
+// middle of an import therefore leaves nothing under zhwp that listStored
+// could mistake for a stored archive.
+const STAGING_DIR = "zhwp.tmp";
+
 // Root of everything the wrapper owns. Missing on a fresh profile.
 async function rootDirectory(create: boolean): Promise<FileSystemDirectoryHandle | null> {
   const root = await navigator.storage.getDirectory();
@@ -97,6 +103,29 @@ async function parentDirectory(
   return pending;
 }
 
+// Same caching as the final parents, for the staging tree under zhwp.tmp.
+const stagingParents = new Map<string, Promise<FileSystemDirectoryHandle>>();
+
+async function stagingDirectory(parts: string[]): Promise<FileSystemDirectoryHandle> {
+  const key = parts.slice(0, -1).join("\u0000");
+  let pending = stagingParents.get(key);
+  if (pending === undefined) {
+    pending = (async () => {
+      const root = await navigator.storage.getDirectory();
+      let dir = await root.getDirectoryHandle(STAGING_DIR, { create: true });
+      for (const segment of parts.slice(0, -1)) {
+        dir = await dir.getDirectoryHandle(segment, { create: true });
+      }
+      return dir;
+    })();
+    stagingParents.set(key, pending);
+    pending.catch(() => {
+      if (stagingParents.get(key) === pending) stagingParents.delete(key);
+    });
+  }
+  return pending;
+}
+
 // Size of an already stored file, or null when it is not there yet.
 export async function storedFileSize(parts: string[]): Promise<number | null> {
   const dir = await parentDirectory(parts, false);
@@ -114,6 +143,9 @@ export interface OpenedStoredFile {
   writable: FileSystemWritableFileStream;
   existed: boolean;
   size: number;
+  // Closes the staging file and moves it to its final name, or discards it.
+  commit(): Promise<void>;
+  abort(): Promise<void>;
 }
 
 export interface StoredSize {
@@ -143,28 +175,70 @@ export async function storedSnapshot(): Promise<Map<string, StoredSize>> {
 }
 
 // Opens a file under zhwp/<parts> for writing, creating parent directories.
-// The caller commits with close() or discards with abort().
+// The bytes go to zhwp.tmp/<parts> and only commit() publishes them at the
+// final name, so an interrupted write is never visible as a stored archive.
 export async function openStoredFile(
   parts: string[],
   known?: StoredSize,
 ): Promise<OpenedStoredFile> {
   const dir = (await parentDirectory(parts, true)) as FileSystemDirectoryHandle;
   const name = parts[parts.length - 1];
+  let existed: boolean;
+  let size: number;
   if (known !== undefined) {
-    const handle = await dir.getFileHandle(name, { create: true });
-    return { writable: await createWritable(handle), existed: known.existed, size: known.size };
+    existed = known.existed;
+    size = known.size;
+  } else {
+    try {
+      const handle = await dir.getFileHandle(name, { create: false });
+      existed = true;
+      size = (await handle.getFile()).size;
+    } catch (error) {
+      if ((error as DOMException).name !== "NotFoundError") throw error;
+      existed = false;
+      size = 0;
+    }
   }
-  let handle: FileSystemFileHandle;
-  let existed = true;
+  const stagingDir = await stagingDirectory(parts);
+  const staging = await stagingDir.getFileHandle(name, { create: true });
+  let writable: FileSystemWritableFileStream;
   try {
-    handle = await dir.getFileHandle(name, { create: false });
+    writable = await createWritable(staging);
   } catch (error) {
-    if ((error as DOMException).name !== "NotFoundError") throw error;
-    handle = await dir.getFileHandle(name, { create: true });
-    existed = false;
+    await stagingDir.removeEntry(name).catch(() => undefined);
+    throw error;
   }
-  const size = existed ? (await handle.getFile()).size : 0;
-  return { writable: await createWritable(handle), existed, size };
+  const commit = async (): Promise<void> => {
+    await writable.close();
+    const move = (
+      staging as FileSystemFileHandle & {
+        move?: (parent: FileSystemDirectoryHandle, name: string) => Promise<void>;
+      }
+    ).move;
+    if (typeof move === "function") {
+      // One atomic rename: the final name appears complete or not at all.
+      await move.call(staging, dir, name);
+      return;
+    }
+    // Browsers without the experimental move() copy the finished bytes in one
+    // write. The final name only exists while that copy runs.
+    const data = await staging.getFile();
+    const final = await dir.getFileHandle(name, { create: true });
+    const stream = await createWritable(final);
+    try {
+      await stream.write(data);
+      await stream.close();
+    } catch (error) {
+      await stream.abort().catch(() => undefined);
+      throw error;
+    }
+    await stagingDir.removeEntry(name).catch(() => undefined);
+  };
+  const abort = async (): Promise<void> => {
+    await writable.abort().catch(() => undefined);
+    await stagingDir.removeEntry(name).catch(() => undefined);
+  };
+  return { writable, existed, size, commit, abort };
 }
 
 // Removes a stored file; a file that is not there is already the wanted state.
@@ -204,11 +278,14 @@ export async function storeFiles(
       // Same size already stored: skip the copy, but count it as done.
       skipped++;
     } else {
-      const dir = await kindDirectory(entry.kind, true);
-      const file = await (dir as FileSystemDirectoryHandle).getFileHandle(entry.name, { create: true });
-      const stream = await createWritable(file);
-      await stream.write(entry.file);
-      await stream.close();
+      const target = await openStoredFile([entry.kind, entry.name]);
+      try {
+        await target.writable.write(entry.file);
+        await target.commit();
+      } catch (error) {
+        await target.abort();
+        throw error;
+      }
       written++;
     }
     done += entry.file.size;
@@ -271,11 +348,15 @@ export async function listExtra(): Promise<ExtraFile[]> {
   return files;
 }
 
-// Removes both the archives and the extra files (the whole zhwp tree).
+// Removes both the archives and the extra files (the whole zhwp tree), plus
+// any incomplete files left in the staging tree by an interrupted import.
 export async function clearStored(): Promise<void> {
   createdParents.clear();
+  stagingParents.clear();
   const root = await navigator.storage.getDirectory();
-  await root.removeEntry(ROOT_DIR, { recursive: true }).catch((error) => {
-    if ((error as DOMException).name !== "NotFoundError") throw error;
-  });
+  for (const name of [ROOT_DIR, STAGING_DIR]) {
+    await root.removeEntry(name, { recursive: true }).catch((error) => {
+      if ((error as DOMException).name !== "NotFoundError") throw error;
+    });
+  }
 }

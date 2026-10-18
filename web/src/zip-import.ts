@@ -290,7 +290,7 @@ export async function importZips(
   };
 
   const discard = async (target: OpenedStoredFile, parts: string[]): Promise<void> => {
-    await target.writable.abort().catch(() => undefined);
+    await target.abort();
     if (!target.existed) await removeStoredFile(parts).catch(() => undefined);
   };
 
@@ -438,7 +438,7 @@ export async function importZips(
     const parts = file.parts;
     const target = await openStoredFile(parts, knownOf(parts));
     if (target.existed && target.size === file.entry.size) {
-      await target.writable.abort().catch(() => undefined);
+      await target.abort();
       return { file, target: null, writing: null, data: null, verified: true };
     }
     try {
@@ -506,7 +506,7 @@ export async function importZips(
     }
     try {
       if (writing !== null) await writing;
-      await target.writable.close();
+      await target.commit();
     } catch (error) {
       await discard(target, file.parts as string[]);
       throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
@@ -572,7 +572,8 @@ export async function importZips(
     const parts = file.parts as string[];
     const target = await openStoredFile(parts, knownOf(parts));
     if (target.existed && target.size === file.entry.size) {
-      await target.writable.abort().catch(() => undefined);
+      await target.abort();
+      countSkipped(file);
       return { file, target: null, writing: null, data: null, verified: true };
     }
     try {
@@ -594,7 +595,11 @@ export async function importZips(
       if (signal?.aborted) throw aborted();
       await target.writable.write(bytes);
       addBytes(file, bytes.length);
-      return { file, target, writing: null, data: null, verified: true };
+      // Publish each extra as soon as it is complete: a cancel then keeps the
+      // ones already written, and filesDone advances during a large batch.
+      await target.commit();
+      countWritten(file);
+      return { file, target: null, writing: null, data: null, verified: true };
     } catch (error) {
       await discard(target, parts);
       throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
@@ -643,7 +648,7 @@ export async function importZips(
   const commitExtraGroup = async (prepareds: PreparedFile[]): Promise<void> => {
     const closed = await Promise.allSettled(
       prepareds.map((prepared) =>
-        prepared.target === null ? Promise.resolve() : prepared.target.writable.close(),
+        prepared.target === null ? Promise.resolve() : prepared.target.commit(),
       ),
     );
     for (let index = 0; index < prepareds.length; index++) {
@@ -657,8 +662,7 @@ export async function importZips(
         );
       }
       const prepared = prepareds[index];
-      if (prepared.target === null) countSkipped(prepared.file);
-      else countWritten(prepared.file);
+      if (prepared.target !== null) countWritten(prepared.file);
     }
   };
 

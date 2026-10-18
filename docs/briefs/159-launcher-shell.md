@@ -299,6 +299,8 @@ imports accumulate.
 * `web/tests/harness/overlay/records.js`: a fake engine that records
   `_GeneralsXSetDebugOverlay` calls in `window.__overlayCalls`, sets
   `window.__fakeEngineLoaded = "overlay"`, and can omit the export.
+* `web/tests/harness/shell/`: small fakes for the factory-call count, the
+  fail-then-succeed retry and any other auto-start state the criteria need.
 
 ### T2 — migrate the existing specs (write only these)
 

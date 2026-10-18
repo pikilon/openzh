@@ -1254,6 +1254,7 @@
         "web/tests/launcher-style.spec.ts",
         "web/tests/launcher-debug-overlay.spec.ts",
         "web/tests/harness/overlay/",
+        "web/tests/harness/shell/",
         "web/tests/launcher.spec.ts",
         "web/tests/launcher-canvas.spec.ts",
         "web/tests/launcher-window-layout.spec.ts",

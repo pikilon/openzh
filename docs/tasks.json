@@ -1234,6 +1234,33 @@
         "web/src/test-api.ts"
       ],
       "summary": "Loading ZIPs removes whatever an earlier import stored that the new ZIPs do not bring, once the new ZIPs are known good."
+    },
+    {
+      "issue": 162,
+      "title": "ZIP import keeps only the game archives (.big); the engine never reads the rest",
+      "phase": 1,
+      "status": "ready",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/162-skip-unused-files.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [],
+      "allowed_paths": [
+        "web/src/zip-import.ts",
+        "web/src/opfs-store.ts",
+        "web/src/main.ts",
+        "docs/decisions.md",
+        "web/tests/zip-import.spec.ts",
+        "web/tests/zip-persistence.spec.ts",
+        "web/tests/zip-replace.spec.ts",
+        "web/tests/launcher-zip.spec.ts",
+        "web/tests/launcher-storage.spec.ts",
+        "web/tests/store.spec.ts"
+      ],
+      "summary": "Import stores only .big archives; extras are ignored and any old extra/ tree is removed at start. No new tests by owner decision."
     }
   ]
 }

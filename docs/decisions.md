@@ -123,3 +123,23 @@ split of work.
 * Paid models run under a spending cap the owner states for each working
   session; work stops at the cap.
 * Procedure: `.agents/skills/tdd-pipeline/SKILL.md`.
+
+## D-07: The project is called OpenZH
+
+Date: 2026-10-18. Owner's decision, taken when the trademark question of
+`AGENTS.md` was raised before the repository goes public. Numbered D-07 because
+D-06 is reserved for the network architecture (#47).
+
+* The project name is **OpenZH**: repository, site, page title and domain.
+  `ZH` abbreviates *Zero Hour* the way `TTD` abbreviates *Transport Tycoon
+  Deluxe* in OpenTTD; it is an abbreviation of the mark, not the mark.
+* EA's marks stay out of the name, the logo, the domain, the page title and the
+  favicon. They are allowed in descriptions, where descriptive use is allowed:
+  "compatible with C&C Generals: Zero Hour game data", "the C&C Generals engine
+  in a browser".
+* The `README` keeps the disclaimer: not affiliated with, sponsored or endorsed
+  by Electronic Arts.
+* This is tolerance, not a licence. The GPL-3.0 grant on the source release
+  covers copyright; it grants no trademark rights, so the icon of the game used
+  as the site's favicon is the one branding item still to replace.
+* The licence of the code does not change: GPL-3.0.

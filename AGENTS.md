@@ -106,9 +106,10 @@ Never send a large or speculative PR upstream without the owner's approval.
   synthetic test data.
 * Do not use EA trademarks ("Command & Conquer", "Generals", "Zero Hour", logos)
   in the UI or branding. "Compatible with C&C Generals game data" in
-  descriptions is fine. The repository name `zero-hour-web-port` is the owner's
-  choice while the repository is private; before it goes public or is
-  published as a playable site, raise the trademark question with the owner.
+  descriptions is fine. The trademark question was raised before the repository
+  went public and is decided in D-07: the project is called **OpenZH**, and the
+  marks appear only in descriptive sentences, never in the name, the logo, the
+  domain or the page title.
 
 ## Local Game Data
 

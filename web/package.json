@@ -1,5 +1,5 @@
 {
-  "name": "zero-hour-web-port-web",
+  "name": "openzh-web",
   "private": true,
   "type": "module",
   "description": "Browser wrapper and browser tests for the WebAssembly engine build.",

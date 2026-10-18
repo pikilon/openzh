@@ -884,6 +884,265 @@
         "web/scripts/serve.mjs"
       ],
       "summary": "The launcher links a 48x48 PNG favicon converted from the game's own launcher icon in EA's GPL source release (catalog 01_EA_GPL_Source_Releases), and the packager ships it next to app/index.html."
+    },
+    {
+      "issue": 125,
+      "title": "Import errors: typed ImportError and one message catalogue",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/125-import-errors.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/import-error.spec.ts",
+      "test_paths": [
+        "web/tests/import-error.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/import-error.ts",
+        "web/src/test-api.ts"
+      ],
+      "summary": "Typed ImportError codes and one describeImportError catalogue for every ZIP import failure."
+    },
+    {
+      "issue": 126,
+      "title": "ZIP reader: streaming parse of a game ZIP (ZIP64, deflate, CRC)",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/126-zip-reader.md",
+      "depends_on": [
+        125
+      ],
+      "check": "cd web && npx playwright test tests/zip.spec.ts tests/import-error.spec.ts",
+      "test_paths": [
+        "web/tests/zip.spec.ts",
+        "web/tests/helpers/zip.ts"
+      ],
+      "allowed_paths": [
+        "web/src/zip.ts",
+        "web/src/test-api.ts"
+      ],
+      "summary": "Dependency-free streaming ZIP reader: central directory, ZIP64, stored/deflate, CRC and typed errors."
+    },
+    {
+      "issue": 127,
+      "title": "ZIP import: stream a ZIP's files into OPFS with progress and abort",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/127-zip-import.md",
+      "depends_on": [
+        125,
+        126
+      ],
+      "check": "cd web && npx playwright test tests/zip-import.spec.ts tests/zip.spec.ts tests/store.spec.ts",
+      "test_paths": [
+        "web/tests/zip-import.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/zip-import.ts",
+        "web/src/opfs-store.ts",
+        "web/src/test-api.ts"
+      ],
+      "summary": "importZips streams every file of one or more ZIPs into OPFS with progress, abort and typed errors."
+    },
+    {
+      "issue": 128,
+      "title": "Launcher: load one or more ZIPs with detailed progress, errors and cancel",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/128-launcher-zip.md",
+      "depends_on": [
+        127
+      ],
+      "check": "cd web && npx playwright test tests/launcher-zip.spec.ts tests/launcher.spec.ts tests/launcher-errors.spec.ts tests/launcher-storage.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-zip.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts"
+      ],
+      "summary": "The launcher loads ZIPs by pick or drop, with detailed progress, cancel and clear errors; the folder pick stays for now."
+    },
+    {
+      "issue": 129,
+      "title": "Persistence: a stored install survives reloads and a partial import resumes",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/129-zip-persistence.md",
+      "depends_on": [
+        128
+      ],
+      "check": "cd web && npx playwright test tests/zip-persistence.spec.ts tests/launcher-zip.spec.ts tests/launcher-storage.spec.ts",
+      "test_paths": [
+        "web/tests/zip-persistence.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/main.ts",
+        "web/src/zip-import.ts",
+        "web/src/opfs-store.ts",
+        "web/app/index.html"
+      ],
+      "summary": "A stored install survives reloads and an interrupted import resumes with only the missing files."
+    },
+    {
+      "issue": 130,
+      "title": "ZIP import speed: at most 1.25x the time of a plain copy",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/130-zip-import-speed.md",
+      "depends_on": [
+        127
+      ],
+      "check": "cd web && npx playwright test --config playwright.bench.config.ts bench/zip-import.bench.ts && npx playwright test tests/zip.spec.ts tests/zip-import.spec.ts",
+      "test_paths": [
+        "web/bench/zip-import.bench.ts"
+      ],
+      "allowed_paths": [
+        "web/src/zip.ts",
+        "web/src/zip-import.ts",
+        "web/src/opfs-store.ts"
+      ],
+      "summary": "Benchmark and tune the ZIP import to at most 1.25x the folder copy time."
+    },
+    {
+      "issue": 131,
+      "title": "Tool: script that builds the full-game ZIPs outside the repo",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/131-make-game-zip.md",
+      "depends_on": [
+        126
+      ],
+      "check": "cd web && npx playwright test tests/make-game-zip.spec.ts tests/zip.spec.ts",
+      "test_paths": [
+        "web/tests/make-game-zip.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/make-game-zip.mjs"
+      ],
+      "summary": "make-game-zip.mjs packs the whole installed game, unfiltered, into one or two ZIPs outside the repository."
+    },
+    {
+      "issue": 132,
+      "title": "Move the real-data tests and dev flow from the game folder to ZIPs",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/132-real-data-zips.md",
+      "depends_on": [
+        128,
+        129,
+        130,
+        131
+      ],
+      "check": "cd web && env -u ZHWP_GAME_ZIPS npx playwright test && ../scripts/check-no-ea-assets.sh, then the real-data specs with `ZHWP_GAME_ZIPS` set.",
+      "test_paths": [],
+      "allowed_paths": [
+        "web/tests/real-data*.spec.ts",
+        "web/tests/helpers/real-game.ts",
+        "web/AGENTS.md"
+      ],
+      "summary": "Run by the lead: real-data specs load ZHWP_GAME_ZIPS through #zip-input."
+    },
+    {
+      "issue": 133,
+      "title": "Remove the folder pick, the dev game-folder server and local-gamedata",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": true,
+      "blocked_by": "final-acceptance",
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/133-remove-folder-pick.md",
+      "depends_on": [
+        129,
+        130,
+        132,
+        "final-acceptance"
+      ],
+      "check": "cd web && npm ci && npx playwright test",
+      "test_paths": [
+        "web/tests/folder-removed.spec.ts",
+        "web/tests/helpers/install-zip.ts",
+        "web/tests/launcher.spec.ts",
+        "web/tests/launcher-canvas.spec.ts",
+        "web/tests/launcher-errors.spec.ts",
+        "web/tests/launcher-favicon.spec.ts",
+        "web/tests/launcher-features.spec.ts",
+        "web/tests/launcher-fullscreen.spec.ts",
+        "web/tests/launcher-fullscreen-fallbacks.spec.ts",
+        "web/tests/launcher-input.spec.ts",
+        "web/tests/launcher-mute.spec.ts",
+        "web/tests/launcher-storage.spec.ts",
+        "web/tests/launcher-window-layout.spec.ts",
+        "web/tests/serve.spec.ts",
+        "web/tests/local-gamedata.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts",
+        "web/src/local-gamedata.ts",
+        "web/scripts/serve.mjs",
+        "web/package.json",
+        "web/playwright.config.ts"
+      ],
+      "summary": "ZIPs become the only way to load the game; the folder path and its dev server are deleted."
+    },
+    {
+      "issue": 134,
+      "title": "Docs: decision for ZIP loading and updated web guides",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/134-zip-docs.md",
+      "depends_on": [
+        133
+      ],
+      "check": "cd web && npx playwright test tests/docs-zip.spec.ts && ../scripts/check-no-ea-assets.sh",
+      "test_paths": [
+        "web/tests/docs-zip.spec.ts"
+      ],
+      "allowed_paths": [
+        "docs/decisions.md",
+        "web/AGENTS.md",
+        "README.md",
+        "docs/briefs/README.md",
+        "AGENTS.md"
+      ],
+      "summary": "D-10, web/AGENTS.md and README describe ZIP-only loading."
     }
   ]
 }

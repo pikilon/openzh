@@ -44,6 +44,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/Gadget.h"
 #include "GameClient/Shell.h"
+#include "GameClient/InGameUI.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
@@ -278,6 +279,52 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetPaused(Int paused)
 	if ((TheGameLogic->isGamePaused() ? TRUE : FALSE) == want)
 		return TRUE;
 	TheGameLogic->setGamePaused(want);
+	return TRUE;
+}
+
+// GeneralsX @feature 18/10/2026 Issue #159: show or hide the performance counters (render FPS,
+// network latency, system time and game time) from the browser menu. A font size of zero disables
+// each counter. Hiding saves the sizes the game loaded the first time, so showing again restores
+// the player's options instead of a hardcoded value; with nothing saved, the GlobalData defaults
+// of 8 apply. Refresh the display strings when the UI exists; it is still null while booting.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetDebugOverlay(Int visible)
+{
+	if (TheWritableGlobalData == nullptr)
+		return FALSE;
+	static Bool s_haveSavedFontSizes = FALSE;
+	static Int s_renderFpsFontSize = 8;
+	static Int s_networkLatencyFontSize = 8;
+	static Int s_systemTimeFontSize = 8;
+	static Int s_gameTimeFontSize = 8;
+	if (visible)
+	{
+		TheWritableGlobalData->m_renderFpsFontSize = s_renderFpsFontSize;
+		TheWritableGlobalData->m_networkLatencyFontSize = s_networkLatencyFontSize;
+		TheWritableGlobalData->m_systemTimeFontSize = s_systemTimeFontSize;
+		TheWritableGlobalData->m_gameTimeFontSize = s_gameTimeFontSize;
+	}
+	else
+	{
+		if (!s_haveSavedFontSizes)
+		{
+			s_renderFpsFontSize = TheWritableGlobalData->m_renderFpsFontSize;
+			s_networkLatencyFontSize = TheWritableGlobalData->m_networkLatencyFontSize;
+			s_systemTimeFontSize = TheWritableGlobalData->m_systemTimeFontSize;
+			s_gameTimeFontSize = TheWritableGlobalData->m_gameTimeFontSize;
+			s_haveSavedFontSizes = TRUE;
+		}
+		TheWritableGlobalData->m_renderFpsFontSize = 0;
+		TheWritableGlobalData->m_networkLatencyFontSize = 0;
+		TheWritableGlobalData->m_systemTimeFontSize = 0;
+		TheWritableGlobalData->m_gameTimeFontSize = 0;
+	}
+	if (TheInGameUI != nullptr)
+	{
+		TheInGameUI->refreshRenderFpsResources();
+		TheInGameUI->refreshNetworkLatencyResources();
+		TheInGameUI->refreshSystemTimeResources();
+		TheInGameUI->refreshGameTimeResources();
+	}
 	return TRUE;
 }
 

@@ -143,3 +143,30 @@ D-06 is reserved for the network architecture (#47).
   covers copyright; it grants no trademark rights, so the icon of the game used
   as the site's favicon is the one branding item still to replace.
 * The licence of the code does not change: GPL-3.0.
+
+## D-08: The fork is independent; no upstream contributions
+
+Date: 2026-10-18. Owner's decision. Replaces the "Upstream Help" section of
+`AGENTS.md`.
+
+* This repository sends no pull requests and no comments to `fbraz3/GeneralsX`,
+  `TheSuperHackers/GeneralsGameCode` or `origami-ltd/wasm-generals`.
+* Reason: their AI policies make the human submitter responsible for
+  understanding and explaining every line in review. The owner does not write
+  the code and will not defend it there, so the cost of contributing is higher
+  than the benefit. The fork lives on its own and anyone may read it.
+* Credit and licence obligations do not change: the code stays GPL-3.0 and the
+  lineage stays in the README.
+
+## D-09: The native reference belongs to phase 3
+
+Date: 2026-10-18. Owner's decision.
+
+* Phase 2 compares the WASM build **across browsers** only. That is the property
+  cross-platform play depends on, and it needs no native build.
+* The native reference (#14 native build, #43 native runner, #44 one-command
+  oracle) moves to phase 3, as its first milestone.
+* Reason: the native build answers one question — is a divergence caused by the
+  WASM toolchain or by the shared code — and that question is worth paying for
+  when online play has to debug a desync, not before.
+* Consequence: #14 no longer blocks phase 1 or phase 2.

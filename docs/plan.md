@@ -17,8 +17,8 @@ Written 2026-10-17. Revisit after the first run on real game data (#33).
   the synchronous bridge (D-03), persists user data (IDBFS) and has a
   launcher page. Browser tests run in Brave only (D-04).
 * Game data (#6) is available on the owner's machine through `ZHWP_GAME_DIR`.
-  Blocked on the owner: native toolchain (#14). Public CI is
-  deferred (#2).
+  The native toolchain (#14) no longer blocks phase 1 or phase 2: it opens
+  phase 3 (D-09). Public CI is deferred (#2).
 
 ## Phase 1: playable in the browser
 
@@ -48,28 +48,26 @@ other; #26, #27 and #37/#40 (phase 2, independent) run in parallel with them.
 
 ## Phase 2: oracle
 
-Goal: replays played headless; the per-frame logic CRC of the browser build
-is compared with a native build of the same commit and across browsers.
+Goal: replays played headless; the per-frame logic CRC of the browser build is
+compared **across browsers**. The native reference moved to phase 3 (D-09),
+where online play needs it; this phase proves that the WASM build agrees with
+itself, which is the property cross-platform play depends on.
 
 | Milestone | Tasks | Needs |
 | --- | --- | --- |
 | 2a. Browser harness | #37 URL arguments, #38 exit code, #39 replay file into user data, #42 replay runner | nothing (fake engines) |
 | 2b. Comparison | #40 compare two CRC logs | nothing |
 | 2c. Engine CRC output | #41 `-crclog` | #6 |
-| 2d. Native reference | #43 native runner, #44 one-command oracle | #14, #6 |
-| 2e. Data | #45 replay corpus, #46 cross-browser matrix | owner decisions |
+| 2d. Data | #45 replay corpus, #46 cross-browser matrix | owner decisions |
 
 Order: #37 → #38 → #39 → #42 (same files, in sequence); #40 in parallel.
-#41 waits for #6; #43 and #44 wait for #14.
+#41 waits for #6.
 
 **Done (machine-checkable):**
-1. For every replay of the agreed corpus (#45),
-   `scripts/oracle/oracle.sh <replay>` prints `MATCH` (native vs Brave), or
-   each divergence has an issue with its first diverging frame and an entry
-   in `docs/porting-notes.md`.
-2. The same replays give identical CRC logs in every browser of the matrix
-   agreed in #46 (`compare-crc.mjs` exits 0 for each pair).
-3. All phase 1 checks still pass.
+1. The replays of the agreed corpus (#45) give identical CRC logs in every
+   browser of the matrix agreed in #46 (`compare-crc.mjs` exits 0 for each
+   pair).
+2. All phase 1 checks still pass.
 
 ## Phase 3: online multiplayer
 
@@ -77,17 +75,26 @@ Starts only when phase 2 is done (identical CRCs across browsers). All its
 issues are blocked until then; briefs are written when it starts, after the
 network decision D-06 (#47).
 
+Its first milestone is the native reference, moved here from phase 2 (D-09):
+until a replay can be compared against a native build of the same commit, a
+desync and a network bug are indistinguishable.
+
 | Milestone | Tasks |
 | --- | --- |
-| 3a. Decision | #47 D-06: WebRTC lockstep, signalling/relay, hosting |
-| 3b. Pieces | #48 signalling/relay server, #49 engine transport over data channels |
-| 3c. Lobby | #50 lobby through the signalling server |
-| 3d. Proof | #51 two or more headless clients, identical CRCs |
+| 3a. Native reference | #14 native build, #43 native runner, #44 one-command oracle |
+| 3b. Decision | #47 D-06: WebRTC lockstep, signalling/relay, hosting |
+| 3c. Pieces | #48 signalling/relay server, #49 engine transport over data channels |
+| 3d. Lobby | #50 lobby through the signalling server |
+| 3e. Proof | #51 two or more headless clients, identical CRCs |
 
-**Done (machine-checkable):** #51's test passes for the browser matrix of
-#46: a scripted match between two or more headless clients through the real
-network code ends with identical per-frame CRCs; a desync fails the test
-and reports the first diverging frame.
+**Done (machine-checkable):**
+1. For every replay of the corpus of #45, `scripts/oracle/oracle.sh <replay>`
+   prints `MATCH` (native vs Brave), or each divergence has an issue with its
+   first diverging frame and an entry in `docs/porting-notes.md`.
+2. #51's test passes for the browser matrix of #46: a scripted match between
+   two or more headless clients through the real network code ends with
+   identical per-frame CRCs; a desync fails the test and reports the first
+   diverging frame.
 
 ## Phase 4: modifiable
 
@@ -108,7 +115,8 @@ their own CRC baselines (#55).
 
 * #6 game data (owner): available locally via `ZHWP_GAME_DIR` since 2026-10-17; it blocked #33–#36 and #41, and through them the phase 1
   and phase 2 exits.
-* #14 native build (owner action on the toolchain): blocks #43, #44.
+* #14 native build (owner action on the toolchain): blocks #43 and #44, both in
+  phase 3 (D-09).
 * #2 public CI (deferred): until it is picked up, every check runs locally
   from a clean checkout (`scripts/pipeline/verify-task.sh`, #26).
 

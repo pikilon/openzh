@@ -65,16 +65,18 @@ The repository starts empty except for this file. Before writing any port code:
   hosting must send COOP/COEP headers. Done when skirmish vs. AI is playable in
   current Chrome and Firefox.
 * **Phase 2: Oracle.** Replays (`.rep`) played headless, comparing the
-  engine's per-frame CRC. Two references:
-  * a native build of the same commit, to find where the WASM build diverges;
-  * the WASM build itself across browsers and operating systems. WASM float
-    semantics are deterministic, so every browser should produce identical
-    CRCs. Prove or refute this with data: it is the path to cross-platform
-    multiplayer, which native ports currently break.
+  engine's per-frame CRC of the WASM build across browsers and operating
+  systems. WASM float semantics are deterministic, so every browser should
+  produce identical CRCs. Prove or refute this with data: it is the path to
+  cross-platform multiplayer, which native ports currently break. The native
+  reference moved to phase 3 (D-09).
 * **Phase 3: Online multiplayer (a goal, not an experiment).** Not part of
   phases 0 to 2: it starts only when the single-player port is done and
-  phase 2 shows matching CRCs across browsers. Lockstep over WebRTC, with a
-  small relay/signalling server because browsers cannot open raw UDP.
+  phase 2 shows matching CRCs across browsers. It opens with the native
+  reference (D-09): a native build of the same commit, to find where the WASM
+  build diverges, because otherwise a desync and a network bug look the same.
+  Then lockstep over WebRTC, with a small relay/signalling server because
+  browsers cannot open raw UDP.
   Verified automatically: two or more headless clients play a scripted match
   through the real network code and must finish with identical per-frame
   CRCs, across a matrix of browsers and operating systems. A desync fails the
@@ -87,12 +89,13 @@ The repository starts empty except for this file. Before writing any port code:
   priority, so new assets replace originals one at a time. Missing models
   render as team-coloured placeholder boxes.
 
-## Upstream Help
+## Upstream
 
-Fixes that also help GeneralsX, TheSuperHackers or `wasm-generals` go upstream
-as small, separate pull requests, respecting their AI policy. The best first
-contribution is probably the replay CRC harness, since it helps every port.
-Never send a large or speculative PR upstream without the owner's approval.
+This fork is independent: it sends no pull requests and no comments to
+GeneralsX, TheSuperHackers or `wasm-generals` (D-08). Their AI policies put the
+whole contribution on the human submitter, who must explain every line in
+review, and the owner does not write or defend the code. Fixes and port work
+stay in this repository. If that changes, it is a new decision.
 
 ## Legal Limits (Non-Negotiable)
 
@@ -163,7 +166,6 @@ copy it into the repository, build output, CI or artifacts.
 
 ## Open Questions for the Owner
 
-* Public project name, before the repository goes public (see Legal Limits).
 * Which browsers and devices count as supported in phase 1 (desktop only, or
   also mobile).
 * Where the relay/signalling server is hosted, and who pays for it.

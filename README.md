@@ -8,7 +8,7 @@
   Built from EA's GPL-3.0 source release. Ships no game assets: it reads the copy of the game you already own.
 </p>
 
-> **Status: early.** The engine builds to WebAssembly, starts in the browser, imports your game folder and reaches the main menu. It is not yet playable end to end; see [the plan](docs/plan.md).
+> **Status: early.** The engine builds to WebAssembly, starts in the browser, imports your game ZIP files and reaches the main menu. It is not yet playable end to end; see [the plan](docs/plan.md).
 
 ## What this is
 
@@ -22,8 +22,9 @@ It is a port, not a remake: the goal is the original game, unchanged, in a tab.
 ## What you need
 
 * **Your own copy of the game.** OpenZH contains no models, textures, audio,
-  maps or strings. You point it at your install folder (Steam, EA App, The First
-  Decade or the retail discs) and the files stay on your machine.
+  maps or strings. You pack your install (Steam, EA App, The First Decade or the
+  retail discs) into ZIP files with `web/scripts/make-game-zip.mjs` and load
+  them; the files stay on your machine.
 * **A desktop browser with WebGPU** (current Chrome, Edge or Brave) and
   `SharedArrayBuffer`, which means the page needs COOP/COEP headers.
 
@@ -34,13 +35,12 @@ scripts/build-webgpu.sh          # builds the engine to WebAssembly
 cd web && npm ci && npm run dev  # serves the launcher
 ```
 
-The launcher asks for your game folder, copies the `.big` archives into OPFS and
-starts the engine. Browser tests run with `cd web && npx playwright test`.
+Pick or drop the game ZIP files in the launcher: they stay in the browser, nothing is uploaded, and the page remembers them for next time. Browser tests run with `cd web && npx playwright test`.
 
 ## Documentation
 
 * [`docs/plan.md`](docs/plan.md) — phases and where the project is.
-* [`docs/decisions.md`](docs/decisions.md) — D-01 to D-07, the binding decisions.
+* [`docs/decisions.md`](docs/decisions.md) — D-01 to D-10, the binding decisions.
 * [`docs/base-evaluation.md`](docs/base-evaluation.md) — why this base.
 * [`docs/porting-notes.md`](docs/porting-notes.md) — recurring classes of bug.
 

@@ -5,8 +5,6 @@ The browser side of the port: the launcher page, the TypeScript wrapper
 the browser tests. Root `AGENTS.md` rules apply; these add to them.
 
 * Nothing here comes from wasm-generals' `web/` (D-01): write it here.
-* No game data in this directory, its fixtures or test output. Tests use
-  synthetic data; real data only through `ZHWP_GAME_ZIPS` (the ZIPs built by `scripts/make-game-zip.mjs`), locally.
 * Every response the dev server sends carries COOP `same-origin`, COEP
   `require-corp` and CORP `same-origin`: threads and `SharedArrayBuffer`
   need cross-origin isolation.
@@ -15,3 +13,14 @@ the browser tests. Root `AGENTS.md` rules apply; these add to them.
   Chrome or Firefox. The engine must be built first with
   `scripts/build-webgpu.sh` at the repository root.
 * Keep dependencies few and pinned to exact versions.
+
+## Local Game Data
+
+The owner's machine has a legitimate copy of the game outside the repository.
+The launcher loads it from ZIP files only. No game data lives in this directory,
+its fixtures or test output: tests use synthetic data, and real data only
+through `ZHWP_GAME_ZIPS` (the ZIPs built by `web/scripts/make-game-zip.mjs
+--split`), locally. `ZHWP_GAME_DIR` (the exact path is in the gitignored
+`CLAUDE.local.md`) is only the input of that script, not an import path. Never
+copy the ZIPs or any game file into the repository, its build output, CI or
+artifacts.

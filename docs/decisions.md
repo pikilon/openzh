@@ -170,3 +170,29 @@ Date: 2026-10-18. Owner's decision.
   WASM toolchain or by the shared code — and that question is worth paying for
   when online play has to debug a desync, not before.
 * Consequence: #14 no longer blocks phase 1 or phase 2.
+
+## D-10: The game is loaded from ZIP files
+
+Date: 2026-10-18. Status: accepted. Issues #131–#133. Replaces the folder pick
+of #72 and the dev game-folder server.
+
+Context: the launcher asked the player for the game install folder and the dev
+server exposed it. ZIP files replace that: the player picks or drops the ZIPs
+and the launcher reads them entry by entry. The whole game is packed, nothing
+is filtered. The ZIPs are copied once into OPFS and the engine reads them
+through the bridge of D-03. Nothing is uploaded: no cloud, no remote source,
+and the game files never leave the player's machine.
+
+* Decision: `web/scripts/make-game-zip.mjs` packs an install folder into the
+  ZIPs the launcher loads. `ZHWP_GAME_DIR` is only the input of that script;
+  it is no longer a way to import the game.
+* Consequence: because Brave reports a quota of about 2 GB (#70), the game is
+  split into two ZIPs, one per install (`zero-hour.zip` and `generals.zip`).
+* Consequence: the real-data tests read the ZIPs named by `ZHWP_GAME_ZIPS`,
+  never a folder.
+* Consequence: the ZIPs never live in the repository, its build output, CI or
+  artifacts; they are built outside it.
+
+Rejected: keeping the folder pick as a second import path (two paths to
+maintain and test) and a remote or cloud source for the game files (the player
+supplies their own copy and the files must not be uploaded).

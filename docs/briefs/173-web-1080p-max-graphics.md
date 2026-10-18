@@ -84,14 +84,15 @@ always wins, including `Resolution`, `StaticGameLOD`, `AntiAliasing`,
 The page and its layout code are unchanged: it fits whatever drawing buffer
 the engine sets below the top bar. A 1920x1080 buffer must display without page
 scroll at 1280x800 (width-limited, 1280x720 at y=56) and at 1920x1080
-(height-limited to 1920x1080 at y=56), keeping the aspect ratio.
+(height-limited to 1024 px tall, about 1820 px wide and centred, because the
+56 px top bar leaves 1024 px), keeping the aspect ratio.
 
 ## Acceptance criteria
 
 1. On a fresh web profile with synthetic archives, the real engine logs exactly one `GENERALSX_GRAPHICS xres=1920 yres=1080 lod=VeryHigh aa=4 filter=4 anisotropy=16 dynamicLOD=0` line.
 2. In that run `#canvas.width` is 1920 and `#canvas.height` is 1080, even if the engine later fails on the synthetic assets.
 3. With a fake engine that sets a 1920x1080 buffer, at 1280x800 the page does not scroll, the canvas keeps 16:9, starts at the top bar's bottom (within 1 px), and is 1280 wide.
-4. With the same fake engine at 1920x1080, the canvas is 1920x1080 at the top bar's bottom, the page does not scroll, and it is horizontally centred.
+4. With the same fake engine at 1920x1080, the canvas is height-limited to the viewport minus the top bar (1024 px tall, about 1820 px wide, 16:9), starts at the top bar's bottom, the page does not scroll, and it is horizontally centred.
 5. The `GENERALSX_GRAPHICS` line is absent on the old build (the test fails before the implementation).
 6. Native builds are unchanged: the new defaults and the log are behind `__EMSCRIPTEN__`, and `DEFAULT_DISPLAY_WIDTH/HEIGHT` remain 1024x768.
 

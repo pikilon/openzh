@@ -327,25 +327,23 @@ imports accumulate.
 `launcher-fullscreen-fallbacks.spec.ts`, `launcher-errors.spec.ts`,
 `launcher-features.spec.ts`, `launcher-input.spec.ts`,
 `launcher-mute.spec.ts`, `launcher-storage.spec.ts`,
-`launcher-visibility.spec.ts`, `launcher-favicon.spec.ts`, and
-`web/tests/helpers/` if a shared auto-start/reset helper is needed. Cover
-criteria 17-18 and 24-25 there and keep every existing behaviour. Do not edit
-T1's new files.
+`launcher-zip.spec.ts`, `launcher-visibility.spec.ts`,
+`launcher-favicon.spec.ts`, and `web/tests/helpers/` if a shared
+auto-start/reset helper is needed. Cover criteria 17-18 and 24-25 there and
+keep every existing behaviour. Do not edit T1's new files.
 
 T1 and T2 must run on the old code first and fail for the reason each
 criterion names, not because of a typo or a missing helper. Tests wait on
 observable state, never fixed delays. Fake engines are selected with the
 `module` query parameter. All game data in tests is synthetic.
 
-Another session owns issue #157 (ZIP import replaces the previous install).
-It owns `web/tests/launcher-zip.spec.ts`, `web/tests/zip-import.spec.ts`,
-`web/tests/zip-replace.spec.ts`, `web/src/zip-import.ts`,
-`web/src/opfs-store.ts`, and its changes in `web/src/main.ts` and
-`web/app/index.html`. Do not edit those test files, and preserve its
-`Removing the previous install`/replace-the-previous-install behaviour when
-this task rebases on it. #159 is merged after #157; a final reconciliation
-pass rewrites the remaining `launcher-zip.spec.ts` assumptions only after
-#157 has landed.
+Issue #157 (ZIP import replaces the previous install) is merged on main. Its
+`web/src/main.ts` / `web/src/zip-import.ts` / `web/src/opfs-store.ts` changes
+and its `Removing the previous install` status are preserved. The migration
+keeps #157's replacement assertions in `launcher-zip.spec.ts` and
+`launcher-storage.spec.ts` and only changes their DOM/auto-start assumptions.
+Do not edit `zip-import.spec.ts` or `zip-replace.spec.ts`; they exercise the
+import module directly and are not part of this task.
 
 ## Allowed paths
 
@@ -384,8 +382,8 @@ tests/launcher-window-layout.spec.ts tests/launcher-fullscreen.spec.ts
 tests/launcher-fullscreen-fallbacks.spec.ts tests/launcher-errors.spec.ts
 tests/launcher-features.spec.ts tests/launcher-input.spec.ts
 tests/launcher-mute.spec.ts tests/launcher-storage.spec.ts
-tests/launcher-visibility.spec.ts tests/launcher-favicon.spec.ts` (expected
-to fail before implementation).
+tests/launcher-zip.spec.ts tests/launcher-visibility.spec.ts
+tests/launcher-favicon.spec.ts` (expected to fail before implementation).
 
 ## Out of scope
 

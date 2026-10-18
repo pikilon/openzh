@@ -458,10 +458,12 @@ async function clearAll(): Promise<void> {
   // picked during those milliseconds would otherwise be classified into a
   // stale, empty summary.
   play.disabled = true;
-  await clearStored();
+  // Reset before the await: a status written by a folder picked meanwhile is
+  // newer than the clear and must survive it.
   hideStorageWarning();
   status.textContent = "";
   hideProgress();
+  await clearStored();
   await refresh();
 }
 

@@ -1239,7 +1239,7 @@
       "issue": 159,
       "title": "Launcher: game-styled shell, auto-start and hamburger menu",
       "phase": 1,
-      "status": "needs-tests",
+      "status": "ready",
       "blocked": false,
       "blocked_by": null,
       "size": "m",

@@ -342,8 +342,20 @@ Issue #157 (ZIP import replaces the previous install) is merged on main. Its
 and its `Removing the previous install` status are preserved. The migration
 keeps #157's replacement assertions in `launcher-zip.spec.ts` and
 `launcher-storage.spec.ts` and only changes their DOM/auto-start assumptions.
-Do not edit `zip-import.spec.ts` or `zip-replace.spec.ts`; they exercise the
-import module directly and are not part of this task.
+`zip-import.spec.ts` exercises the import module directly and is not edited.
+
+### T3 — migrate the remaining launcher consumers (write only these)
+
+`web/tests/zip-replace.spec.ts`, `zip-persistence.spec.ts`,
+`folder-removed.spec.ts`, `real-data.spec.ts`, `real-data-audio.spec.ts`,
+`real-data-fonts.spec.ts`, `real-data-textures.spec.ts`,
+`real-data-webgpu.spec.ts`, `real-data-replay.spec.ts`, and
+`web/tests/helpers/` if needed. Replace `#play`/`#clear`/`#play-controls`
+with the auto-start shell: a complete install starts the engine by itself,
+the harness page resets OPFS, and real-data specs keep their own
+`ZHWP_GAME_ZIPS` skips and import path. Preserve #157's replacement
+expectations in `zip-replace.spec.ts`. Do not edit T1/T2 files. The real-data
+specs are not run without the owner's ZIPs but must compile and be migrated.
 
 ## Allowed paths
 
@@ -387,11 +399,19 @@ tests/launcher-mute.spec.ts tests/launcher-storage.spec.ts
 tests/launcher-zip.spec.ts tests/launcher-visibility.spec.ts
 tests/launcher-favicon.spec.ts` (expected to fail before implementation).
 
+T3's local check: `cd web && ZHWP_PORT=4194 npx playwright test
+tests/zip-replace.spec.ts tests/zip-persistence.spec.ts
+tests/folder-removed.spec.ts tests/real-data.spec.ts
+tests/real-data-audio.spec.ts tests/real-data-fonts.spec.ts
+tests/real-data-textures.spec.ts tests/real-data-webgpu.spec.ts
+tests/real-data-replay.spec.ts` (the real-data specs skip without
+`ZHWP_GAME_ZIPS`; the others are expected to fail on the old page).
+
 ## Out of scope
 
 * New in-game menus, unit art or any EA asset.
 * Networking, replays and the oracle.
-* Import-replacement internals and tests (#157), including
-  `web/tests/launcher-zip.spec.ts`.
+* Import-replacement internals (#157); its launcher-facing tests are migrated,
+  not changed in behaviour.
 * An audio volume slider (the engine has no export for it).
 * Downloading logs or telemetry.

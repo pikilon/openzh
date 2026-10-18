@@ -166,7 +166,7 @@
       "issue": 33,
       "title": "Real data: first run to the main menu and triage",
       "phase": 1,
-      "status": "needs-owner",
+      "status": "done",
       "blocked": false,
       "blocked_by": null,
       "size": "s",
@@ -186,20 +186,25 @@
       "issue": 34,
       "title": "Real data: a replay plays in the browser with rendering",
       "phase": 1,
-      "status": "needs-spec",
+      "status": "needs-tests",
       "blocked": false,
       "blocked_by": null,
       "size": "m",
       "local_model_ok": false,
-      "brief": null,
+      "brief": "docs/briefs/34-real-replay.md",
       "depends_on": [
         33,
         39,
         37
       ],
-      "check": null,
-      "test_paths": [],
-      "allowed_paths": [],
+      "check": "cd web && npm ci && npx playwright test tests/user-files.spec.ts && ZHWP_REPLAY=<file.rep> npx playwright test tests/real-data-replay.spec.ts",
+      "test_paths": [
+        "web/tests/user-files.spec.ts",
+        "web/tests/real-data-replay.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/smoke/smoke.js"
+      ],
       "summary": "Local-only test: a real replay plays in the windowed engine for N seconds with no WebGPU failure and a non-uniform canvas. Spec after the first real run."
     },
     {

@@ -4,7 +4,7 @@
 // Usage (from web/):
 //   node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split] [--zip64]
 //                                   [--no-videos] [--recode-audio] [--tga-rle]
-//                                   [--music-kbps <n>]
+//                                   [--music-kbps <n>] [--voices-mp3 <n>]
 //
 // --src defaults to $ZHWP_GAME_DIR. --out must be outside the repository: the
 // game files are the player's and never become part of this project. Entries
@@ -16,8 +16,11 @@
 // .big archives with the IMA ADPCM encoder while packing, keeping the original
 // relative paths and never touching the source folder. --tga-rle applies the
 // lossless TGA RLE encoder to the .tga entries of every .big, and
-// --music-kbps re-encodes the .mp3 entries at a lower bit rate. An archive
-// touched by several flags is rebuilt once.
+// --music-kbps re-encodes the .mp3 entries at a lower bit rate. --voices-mp3
+// turns the .wav entries of speech*/audio* .big archives into raw MP3 under the
+// same .wav name; with --recode-audio it wins when the MP3 shrinks and falls
+// back to the IMA ADPCM recode otherwise. An archive touched by several flags
+// is rebuilt once.
 import { mkdir, open, readdir, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +29,7 @@ import { readBigDirectory, rewriteBig } from "./lib/big-archive.mjs";
 import { encodeImaWav } from "./lib/ima-adpcm.mjs";
 import { encodeTgaRle } from "./lib/tga-rle.mjs";
 import { ffmpegAvailable, reencodeMp3 } from "./lib/mp3-reencode.mjs";
+import { encodeWavAsMp3 } from "./lib/wav-mp3.mjs";
 
 const LOCAL_SIGNATURE = 0x04034b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -336,8 +340,39 @@ async function readEntryData(handle, entry) {
   return data;
 }
 
+// Encodes every .wav entry with at most `limit` simultaneous ffmpeg
+// processes. The archive handle is shared: positioned reads are safe
+// concurrently, and only the workers' current inputs stay in memory.
+async function encodeWavEntries(handle, entries, kbps, limit) {
+  const replacements = new Map();
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= entries.length) return;
+      const entry = entries[index];
+      const data = await readEntryData(handle, entry);
+      const encoded = await encodeWavAsMp3(data, kbps);
+      if (encoded !== null) replacements.set(entryKey(entry), encoded);
+    }
+  };
+  const workers = [];
+  for (let i = 0; i < Math.min(limit, entries.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  return replacements;
+}
+
 function emptyChanges() {
-  return { wav: 0, tga: 0, mp3: 0, savedWav: 0, savedTga: 0, savedMp3: 0 };
+  return {
+    wav: 0,
+    tga: 0,
+    mp3: 0,
+    voices: 0,
+    savedWav: 0,
+    savedTga: 0,
+    savedMp3: 0,
+    savedVoices: 0,
+  };
 }
 
 // Applies every requested .big transform under tmpDir. An archive that several
@@ -345,7 +380,8 @@ function emptyChanges() {
 // flag that applies to it; archives without matching entries stay untouched.
 // Returns the original path -> temporary file map plus the summary counters.
 async function recodeArchives(files, tmpDir, options) {
-  const { audio, tgaRle, musicKbps } = options;
+  const { audio, tgaRle, musicKbps, voicesKbps } = options;
+  const voices = Number.isInteger(voicesKbps) && voicesKbps > 0;
   const recoded = new Map();
   const summary = {
     wav: 0,
@@ -357,6 +393,9 @@ async function recodeArchives(files, tmpDir, options) {
     mp3: 0,
     mp3Archives: 0,
     musicSaved: 0,
+    voices: 0,
+    voicesArchives: 0,
+    voicesSaved: 0,
   };
   let index = 0;
 
@@ -372,16 +411,16 @@ async function recodeArchives(files, tmpDir, options) {
 
     const names = directory.entries.map((entry) => entry.name.toLowerCase());
     const wantsWav =
-      audio !== false &&
+      (audio || voices) &&
       isAudioArchive(file.path) &&
       names.some((name) => name.endsWith(".wav"));
     const wantsTga = tgaRle !== false && names.some((name) => name.endsWith(".tga"));
     const wantsMp3 = musicKbps !== null && names.some((name) => name.endsWith(".mp3"));
     if (!wantsWav && !wantsTga && !wantsMp3) continue;
 
-    // The MP3 encoder is asynchronous and rewriteBig transforms entries
-    // synchronously, so the .mp3 entries are re-encoded here one at a time and
-    // the results are looked up during the rebuild.
+    // The MP3 encoders are asynchronous and rewriteBig transforms entries
+    // synchronously, so the .mp3 and .wav entries are re-encoded here before
+    // the rebuild and the results are looked up during it.
     const replacements = new Map();
     if (wantsMp3) {
       let handle;
@@ -393,6 +432,21 @@ async function recodeArchives(files, tmpDir, options) {
           const encoded = await reencodeMp3(data, musicKbps);
           if (encoded !== null) replacements.set(entryKey(entry), encoded);
         }
+      } catch (error) {
+        throw new Error(`${file.path}: ${errorMessage(error)}`);
+      } finally {
+        if (handle) await handle.close();
+      }
+    }
+    if (wantsWav && voices) {
+      let handle;
+      try {
+        handle = await open(file.absolute, "r");
+        const wavEntries = directory.entries.filter((entry) =>
+          entry.name.toLowerCase().endsWith(".wav"),
+        );
+        const encoded = await encodeWavEntries(handle, wavEntries, voicesKbps, 4);
+        for (const [key, value] of encoded) replacements.set(key, value);
       } catch (error) {
         throw new Error(`${file.path}: ${errorMessage(error)}`);
       } finally {
@@ -429,6 +483,15 @@ async function recodeArchives(files, tmpDir, options) {
             return encoded;
           }
           if (name.endsWith(".wav")) {
+            // With both flags the MP3 wins when it shrinks, always encoded from
+            // the original WAV; otherwise fall back to the IMA ADPCM recode.
+            const replacement = replacements.get(entryKey(entry));
+            if (replacement !== undefined) {
+              changes.voices += 1;
+              changes.savedVoices += data.length - replacement.length;
+              return replacement;
+            }
+            if (!audio) return null;
             const encoded = encodeImaWav(data);
             if (encoded === null || encoded.length >= data.length) return null;
             changes.wav += 1;
@@ -443,7 +506,7 @@ async function recodeArchives(files, tmpDir, options) {
       throw new Error(`${file.path}: ${errorMessage(error)}`);
     }
 
-    if (changes.wav + changes.tga + changes.mp3 === 0) {
+    if (changes.wav + changes.tga + changes.mp3 + changes.voices === 0) {
       // Nothing shrank: keep the archive's original bytes.
       await rm(tempPath, { force: true });
       continue;
@@ -465,6 +528,11 @@ async function recodeArchives(files, tmpDir, options) {
       summary.mp3Archives += 1;
       summary.musicSaved += changes.savedMp3;
     }
+    if (changes.voices > 0) {
+      summary.voices += changes.voices;
+      summary.voicesArchives += 1;
+      summary.voicesSaved += changes.savedVoices;
+    }
   }
 
   return { recoded, summary };
@@ -474,7 +542,7 @@ function usage(message) {
   console.error(message);
   console.error(
     "usage: node scripts/make-game-zip.mjs --src <dir> --out <dir> [--split] [--zip64] " +
-      "[--no-videos] [--recode-audio] [--tga-rle] [--music-kbps <n>]",
+      "[--no-videos] [--recode-audio] [--tga-rle] [--music-kbps <n>] [--voices-mp3 <n>]",
   );
   return 2;
 }
@@ -500,6 +568,7 @@ async function main() {
         "recode-audio": { type: "boolean" },
         "tga-rle": { type: "boolean" },
         "music-kbps": { type: "string" },
+        "voices-mp3": { type: "string" },
       },
       strict: true,
       allowPositionals: false,
@@ -517,6 +586,18 @@ async function main() {
     musicKbps = Number(value);
     if (!Number.isSafeInteger(musicKbps) || musicKbps <= 0) {
       return usage(`--music-kbps must be a positive integer: ${value}`);
+    }
+  }
+
+  let voicesKbps = null;
+  if (values["voices-mp3"] !== undefined) {
+    const value = values["voices-mp3"];
+    if (!/^[0-9]+$/.test(value)) {
+      return usage(`--voices-mp3 must be a positive integer: ${value}`);
+    }
+    voicesKbps = Number(value);
+    if (!Number.isSafeInteger(voicesKbps) || voicesKbps <= 0) {
+      return usage(`--voices-mp3 must be a positive integer: ${value}`);
     }
   }
 
@@ -544,6 +625,18 @@ async function main() {
     console.error("refusing to write game data inside the repository");
     return 2;
   }
+
+  // Refuse before creating or touching anything when the encoders' tools are
+  // missing: the flags would otherwise silently keep the original bytes.
+  if ((musicKbps !== null || voicesKbps !== null) && !(await ffmpegAvailable())) {
+    if (voicesKbps !== null) {
+      console.error("--voices-mp3 requires ffmpeg and ffprobe on PATH");
+    } else {
+      console.error("--music-kbps requires ffmpeg and ffprobe on PATH");
+    }
+    return 2;
+  }
+
   try {
     await mkdir(out, { recursive: true });
     const outStat = await stat(out);
@@ -552,10 +645,6 @@ async function main() {
     return usage(`--out is not a usable directory: ${values.out}`);
   }
 
-  if (musicKbps !== null && !(await ffmpegAvailable())) {
-    console.error("--music-kbps requires ffmpeg and ffprobe on PATH");
-    return 2;
-  }
 
   const { files, warnings } = await collectFiles(source);
   for (const warning of warnings) console.warn(warning);
@@ -584,12 +673,13 @@ async function main() {
   try {
     const recodeAudio = values["recode-audio"] === true;
     const recodeTga = values["tga-rle"] === true;
-    if (recodeAudio || recodeTga || musicKbps !== null) {
+    if (recodeAudio || recodeTga || musicKbps !== null || voicesKbps !== null) {
       try {
         const result = await recodeArchives(packed, tmpDir, {
           audio: recodeAudio,
           tgaRle: recodeTga,
           musicKbps,
+          voicesKbps,
         });
         recoded = result.recoded;
         recodeSummary = result.summary;
@@ -662,6 +752,12 @@ async function main() {
         console.log(
           `music: ${recodeSummary.mp3} mp3 re-encoded at ${musicKbps} kbps in ` +
             `${recodeSummary.mp3Archives} archives, saved ${recodeSummary.musicSaved} bytes`,
+        );
+      }
+      if (voicesKbps !== null) {
+        console.log(
+          `voices mp3: ${recodeSummary.voices} wav in ${recodeSummary.voicesArchives} archives ` +
+            `at ${voicesKbps} kbps, saved ${recodeSummary.voicesSaved} bytes`,
         );
       }
       if (recodeAudio) {

@@ -116,6 +116,9 @@ async function parseBig(path) {
     }
 
     for (const entry of entries) {
+      // A zero-size entry carries no data, so its offset may point anywhere
+      // (real PatchZH.big has `Data\*` at offset 0, inside the header).
+      if (entry.size === 0) continue;
       if (entry.offset < headerSize) {
         throw archiveError("bad-header", "entry offset lies inside the header");
       }
@@ -185,6 +188,13 @@ export async function rewriteBig(srcPath, dstPath, options = {}) {
       }
 
       const record = directory.records[i];
+      // A kept zero-size entry writes no data and keeps its original offset,
+      // so an identity rewrite stays byte-identical.
+      if (replacement === null && entry.size === 0) {
+        header.writeUInt32BE(entry.offset, record);
+        header.writeUInt32BE(0, record + 4);
+        continue;
+      }
       header.writeUInt32BE(dataOffset, record);
       header.writeUInt32BE(replacement === null ? entry.size : replacement.length, record + 4);
 

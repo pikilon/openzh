@@ -6,8 +6,24 @@
 
 import { ImportError, type ImportErrorDetail } from "./import-error";
 import { classifyArchives, type GameKind } from "./install";
-import { openStoredFile, removeStoredFile, storedFileSize } from "./opfs-store";
-import { entryStream, openZip, type ZipEntry } from "./zip";
+import {
+  openStoredFile,
+  removeStoredFile,
+  storedSnapshot,
+  type OpenedStoredFile,
+  type StoredSize,
+} from "./opfs-store";
+import {
+  CRC32_INIT,
+  crc32Update,
+  crc32Value,
+  entryDataBlob,
+  openZip,
+  readSmallEntry,
+  readSmallInflated,
+  smallEntryWithin,
+  type ZipEntry,
+} from "./zip";
 
 export interface ImportProgress {
   doneBytes: number;
@@ -56,6 +72,17 @@ const STORAGE_ERRORS = new Set([
 const THROTTLE_MS = 100;
 const WINDOW_MS = 3000;
 const ETA_AFTER_MS = 1000;
+
+// Stored entries are written as one blob (the browser copies it natively)
+// while their CRC is read back in 1 MiB slices, which keeps the read side
+// small and overlaps it with the write. Inflated entries keep bounded memory
+// by coalescing decompressor chunks into one buffer before each write.
+const CRC_CHUNK_SIZE = 1024 * 1024;
+const INFLATE_WRITE_CHUNK = 8 * 1024 * 1024;
+const SMALL_EXTRA_LIMIT = 64 * 1024;
+const SMALL_EXTRA_PARALLEL = 16;
+const SMALL_EXTRA_SPAN = 4 * 1024 * 1024;
+const LARGE_PARALLEL = 4;
 
 function now(): number {
   return performance.now();
@@ -232,74 +259,483 @@ export async function importZips(
 
   emit(plan.length === 0 ? "" : plan[0].entry.path, true);
 
-  for (const file of plan) {
-    if (signal?.aborted) throw aborted();
-    const currentFile = file.entry.path;
+  // One walk instead of a failed handle lookup per planned file. Every path is
+  // written at most once per import (later duplicates are skipped), so this
+  // snapshot stays valid for the whole run.
+  const known = await storedSnapshot();
+  if (signal?.aborted) throw aborted();
+  const knownOf = (parts: string[]): StoredSize =>
+    known.get(parts.join("/")) ?? { existed: false, size: 0 };
 
-    if (file.parts === null) {
-      // Duplicate path: the first copy already won, count this one as done.
-      doneBytes += file.entry.size;
-      committedBytes = doneBytes;
-      filesDone++;
-      skipped++;
-      if (file.isExtra) extra++;
-      emit(currentFile, true);
-      continue;
-    }
+  const addBytes = (file: PlannedFile, count: number): void => {
+    doneBytes += count;
+    emit(file.entry.path, false);
+  };
 
-    const existing = await storedFileSize(file.parts);
-    if (existing === file.entry.size) {
-      doneBytes += file.entry.size;
-      committedBytes = doneBytes;
-      filesDone++;
-      skipped++;
-      if (file.isExtra) extra++;
-      emit(currentFile, true);
-      continue;
-    }
+  const countSkipped = (file: PlannedFile): void => {
+    doneBytes += file.entry.size;
+    committedBytes += file.entry.size;
+    filesDone++;
+    skipped++;
+    if (file.isExtra) extra++;
+    emit(file.entry.path, true);
+  };
 
-    const target = await openStoredFile(file.parts);
-    if (target.existed && target.size === file.entry.size) {
-      await target.writable.abort();
-      doneBytes += file.entry.size;
-      committedBytes = doneBytes;
-      filesDone++;
-      skipped++;
-      if (file.isExtra) extra++;
-      emit(currentFile, true);
-      continue;
-    }
-
-    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-    try {
-      reader = entryStream(file.blob, file.entry).getReader();
-      for (;;) {
-        if (signal?.aborted) throw aborted();
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        if (signal?.aborted) throw aborted();
-        await target.writable.write(chunk.value);
-        doneBytes += chunk.value.length;
-        emit(currentFile, false);
-      }
-      await target.writable.close();
-    } catch (error) {
-      const active = reader;
-      reader = null;
-      if (active !== null) await active.cancel().catch(() => undefined);
-      // Aborting the writable discards the temp file; an old version stays.
-      await target.writable.abort().catch(() => undefined);
-      if (!target.existed) await removeStoredFile(file.parts).catch(() => undefined);
-      throw await toImportError(error, currentFile, totalBytes - committedBytes);
-    } finally {
-      reader = null;
-    }
-
-    committedBytes = doneBytes;
+  const countWritten = (file: PlannedFile): void => {
+    committedBytes += file.entry.size;
     filesDone++;
     written++;
     if (file.isExtra) extra++;
-    emit(currentFile, true);
+    emit(file.entry.path, true);
+  };
+
+  const discard = async (target: OpenedStoredFile, parts: string[]): Promise<void> => {
+    await target.writable.abort().catch(() => undefined);
+    if (!target.existed) await removeStoredFile(parts).catch(() => undefined);
+  };
+
+  // Stored entries: one blob write (the browser copies it natively), with
+  // the CRC read in 1 MiB slices behind it. The write is returned in flight
+  // so several entries can be written at once; the CRC runs later, in plan
+  // order, so a slow blob (the tests' SlowBlob) still paces the import.
+  const dispatchStored = async (
+    file: PlannedFile,
+    target: OpenedStoredFile,
+  ): Promise<PreparedFile> => {
+    const data = await entryDataBlob(file.blob, file.entry);
+    if (signal?.aborted) throw aborted();
+    let writing: Promise<void> | null = null;
+    if (data.size > 0) {
+      writing = target.writable.write(data);
+      writing.catch(() => undefined);
+    }
+    return { file, target, writing, data, verified: false };
+  };
+
+  const verifyStored = async (
+    prepared: PreparedFile,
+    ignoreAbort = false,
+  ): Promise<void> => {
+    if (prepared.data === null || prepared.verified) return;
+    const data = prepared.data;
+    let crc = CRC32_INIT;
+    let total = 0;
+    let pending: Promise<ArrayBuffer> | null =
+      data.size > 0 ? data.slice(0, Math.min(CRC_CHUNK_SIZE, data.size)).arrayBuffer() : null;
+    pending?.catch(() => undefined);
+    for (let at = 0; at < data.size; ) {
+      if (!ignoreAbort && signal?.aborted) throw aborted();
+      const bytes = new Uint8Array(await (pending as Promise<ArrayBuffer>));
+      const next = at + CRC_CHUNK_SIZE;
+      pending =
+        next < data.size
+          ? data.slice(next, Math.min(next + CRC_CHUNK_SIZE, data.size)).arrayBuffer()
+          : null;
+      pending?.catch(() => undefined);
+      crc = crc32Update(crc, bytes);
+      total += bytes.length;
+      at = next;
+      addBytes(prepared.file, bytes.length);
+    }
+    if (
+      total !== prepared.file.entry.size ||
+      crc32Value(crc) !== prepared.file.entry.crc32
+    ) {
+      throw new ImportError("bad-crc", { file: prepared.file.entry.path });
+    }
+    prepared.verified = true;
+  };
+
+  // Inflates straight from the entry's compressed blob, verifies size and CRC
+  // while reading, and coalesces ~8 MiB before each write so the OPFS write
+  // side is not one tiny call per decompressor chunk.
+  const writeInflatedData = async (
+    file: PlannedFile,
+    target: OpenedStoredFile,
+  ): Promise<void> => {
+    const compressed = await entryDataBlob(file.blob, file.entry);
+    const reader = compressed
+      .stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"))
+      .getReader();
+    const bufferSize = Math.min(INFLATE_WRITE_CHUNK, Math.max(file.entry.size, 1));
+    let buffer = new Uint8Array(bufferSize);
+    let used = 0;
+    let crc = CRC32_INIT;
+    let total = 0;
+    let writing: Promise<void> | null = null;
+    const flush = async (): Promise<void> => {
+      if (used === 0) return;
+      const out = buffer.subarray(0, used);
+      buffer = new Uint8Array(bufferSize);
+      used = 0;
+      const previous = writing;
+      const write = target.writable.write(out);
+      write.catch(() => undefined);
+      writing = write;
+      if (previous !== null) await previous;
+    };
+    try {
+      for (;;) {
+        if (signal?.aborted) throw aborted();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          if (error instanceof ImportError) throw error;
+          throw new ImportError("truncated", { file: file.entry.path }, error);
+        }
+        if (chunk.done) break;
+        if (signal?.aborted) throw aborted();
+        const value = chunk.value;
+        crc = crc32Update(crc, value);
+        total += value.length;
+        let at = 0;
+        while (at < value.length) {
+          const take = Math.min(bufferSize - used, value.length - at);
+          buffer.set(value.subarray(at, at + take), used);
+          used += take;
+          at += take;
+          if (used === bufferSize) await flush();
+        }
+        addBytes(file, value.length);
+      }
+      await flush();
+      if (writing !== null) await writing;
+      if (total !== file.entry.size || crc32Value(crc) !== file.entry.crc32) {
+        throw new ImportError("bad-crc", { file: file.entry.path });
+      }
+    } catch (error) {
+      reader.cancel().catch(() => undefined);
+      if (writing !== null) await writing.catch(() => undefined);
+      throw error;
+    }
+  };
+
+  interface PreparedFile {
+    file: PlannedFile;
+    target: OpenedStoredFile | null; // null: duplicate or already stored
+    writing: Promise<void> | null; // in flight after dispatch
+    data: Blob | null; // stored entries only: raw bytes for the CRC pass
+    verified: boolean;
+  }
+
+  const abortPrepared = async (prepared: PreparedFile): Promise<void> => {
+    if (prepared.target !== null) {
+      await discard(prepared.target, prepared.file.parts as string[]);
+    }
+    if (prepared.writing !== null) await prepared.writing.catch(() => undefined);
+  };
+
+  // Archives and large extras: dispatch every write, then verify the stored
+  // CRCs in plan order (concurrently writing while reading back), then let
+  // the caller commit. A failure keeps the files before it and discards the
+  // rest, exactly like the old one-at-a-time loop.
+  const dispatchLarge = async (file: PlannedFile): Promise<PreparedFile> => {
+    if (file.parts === null) {
+      return { file, target: null, writing: null, data: null, verified: true };
+    }
+    const parts = file.parts;
+    const target = await openStoredFile(parts, knownOf(parts));
+    if (target.existed && target.size === file.entry.size) {
+      await target.writable.abort().catch(() => undefined);
+      return { file, target: null, writing: null, data: null, verified: true };
+    }
+    try {
+      if (file.entry.method === 0) return await dispatchStored(file, target);
+      await writeInflatedData(file, target);
+      return { file, target, writing: null, data: null, verified: true };
+    } catch (error) {
+      await discard(target, parts);
+      throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
+    }
+  };
+
+  interface LargeGroup {
+    pending: PreparedFile[];
+    failure: unknown;
+    failedAt: number; // index of the first file that must not be committed
+  }
+
+  const dispatchLargeGroup = async (files: PlannedFile[]): Promise<LargeGroup> => {
+    const pending: PreparedFile[] = [];
+    let failure: unknown = null;
+    let failedAt = files.length;
+    for (const file of files) {
+      if (signal?.aborted) {
+        failure = aborted();
+        failedAt = pending.length;
+        break;
+      }
+      try {
+        pending.push(await dispatchLarge(file));
+      } catch (error) {
+        failure = error;
+        failedAt = pending.length;
+        break;
+      }
+      if (signal?.aborted) {
+        // Aborted while this file's write was starting: that file is the
+        // first one not to keep, everything before it still finishes.
+        failure = aborted();
+        failedAt = pending.length - 1;
+        break;
+      }
+    }
+    return { pending, failure, failedAt };
+  };
+
+  const verifyLargeGroup = async (
+    pending: PreparedFile[],
+  ): Promise<{ failure: unknown; failedAt: number }> => {
+    for (let index = 0; index < pending.length; index++) {
+      try {
+        await verifyStored(pending[index]);
+      } catch (error) {
+        return { failure: error, failedAt: index };
+      }
+    }
+    return { failure: null, failedAt: pending.length };
+  };
+
+  const commitPrepared = async (prepared: PreparedFile): Promise<void> => {
+    const { file, target, writing } = prepared;
+    if (target === null) {
+      countSkipped(file);
+      return;
+    }
+    try {
+      if (writing !== null) await writing;
+      await target.writable.close();
+    } catch (error) {
+      await discard(target, file.parts as string[]);
+      throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
+    }
+    countWritten(file);
+  };
+
+  const abortRemaining = async (pending: PreparedFile[], from: number): Promise<void> => {
+    for (let index = from; index < pending.length; index++) {
+      await abortPrepared(pending[index]);
+    }
+  };
+
+  // Finishes a group that failed part way: commit the entries before the
+  // failure, discard the failed one and everything after it.
+  const finishLargeFailure = async (group: LargeGroup): Promise<void> => {
+    for (let index = 0; index < group.failedAt; index++) {
+      const prepared = group.pending[index];
+      try {
+        // These were dispatched before the failure; finish them even if the
+        // failure was an abort, which is what the old in-order loop did.
+        await verifyStored(prepared, true);
+        await commitPrepared(prepared);
+      } catch (error) {
+        await abortRemaining(group.pending, index);
+        throw error;
+      }
+    }
+    await abortRemaining(group.pending, group.failedAt);
+  };
+
+  interface ExtraSpan {
+    blob: Blob;
+    start: number;
+    bytes: Uint8Array;
+  }
+
+  // Consecutive small extras sit next to each other in the ZIP, so one read
+  // of their combined span replaces a header read and a data read per file.
+  // A span that would be large (or crosses ZIPs) falls back to per-file reads.
+  const readExtraSpan = async (files: PlannedFile[]): Promise<ExtraSpan | null> => {
+    const blob = files[0].blob;
+    if (!files.every((file) => file.blob === blob && file.parts !== null)) return null;
+    let start = Number.POSITIVE_INFINITY;
+    let end = 0;
+    for (const file of files) {
+      start = Math.min(start, file.entry.offset);
+      end = Math.max(
+        end,
+        file.entry.offset + 30 + 0xffff + 0xffff + file.entry.compressedSize,
+      );
+    }
+    end = Math.min(end, blob.size);
+    if (!Number.isFinite(start) || end - start > SMALL_EXTRA_SPAN) return null;
+    const bytes = new Uint8Array(await blob.slice(start, end).arrayBuffer());
+    return { blob, start, bytes };
+  };
+
+  const prepareExtra = async (
+    file: PlannedFile,
+    span: ExtraSpan | null,
+  ): Promise<PreparedFile> => {
+    const parts = file.parts as string[];
+    const target = await openStoredFile(parts, knownOf(parts));
+    if (target.existed && target.size === file.entry.size) {
+      await target.writable.abort().catch(() => undefined);
+      return { file, target: null, writing: null, data: null, verified: true };
+    }
+    try {
+      let bytes: Uint8Array;
+      if (file.entry.method === 0) {
+        bytes =
+          span !== null && span.blob === file.blob
+            ? smallEntryWithin(span.bytes, span.start, file.entry)
+            : await readSmallEntry(file.blob, file.entry);
+        if (
+          bytes.length !== file.entry.size ||
+          crc32Value(crc32Update(CRC32_INIT, bytes)) !== file.entry.crc32
+        ) {
+          throw new ImportError("bad-crc", { file: file.entry.path });
+        }
+      } else {
+        bytes = await readSmallInflated(file.blob, file.entry);
+      }
+      if (signal?.aborted) throw aborted();
+      await target.writable.write(bytes);
+      addBytes(file, bytes.length);
+      return { file, target, writing: null, data: null, verified: true };
+    } catch (error) {
+      await discard(target, parts);
+      throw await toImportError(error, file.entry.path, totalBytes - committedBytes);
+    }
+  };
+
+  // Small extras are independent, so a whole run opens and writes with a
+  // bounded worker pool and holds the writables open. The caller starts this
+  // while the archives' writes are still in flight, so the extra I/O hides
+  // behind them; nothing is closed before the archives commit, which keeps
+  // the failure behaviour (later files are discarded).
+  const prepareExtraGroup = async (files: PlannedFile[]): Promise<PreparedFile[]> => {
+    const span = await readExtraSpan(files);
+    if (signal?.aborted) throw aborted();
+    const prepared: (PreparedFile | undefined)[] = new Array(files.length);
+    let next = 0;
+    let failure: unknown = null;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (failure !== null) return;
+        const index = next++;
+        if (index >= files.length) return;
+        try {
+          prepared[index] = await prepareExtra(files[index], span);
+        } catch (error) {
+          failure = error;
+          return;
+        }
+      }
+    };
+    const count = Math.min(SMALL_EXTRA_PARALLEL, files.length);
+    await Promise.all(Array.from({ length: count }, worker));
+    if (failure !== null) {
+      await Promise.all(
+        prepared.map(async (item) => {
+          if (item !== undefined) await abortPrepared(item);
+        }),
+      );
+      throw failure;
+    }
+    return prepared as PreparedFile[];
+  };
+
+  // All extras are written; closing is the last slow step, so the whole run
+  // closes at once and the counters still advance in plan order.
+  const commitExtraGroup = async (prepareds: PreparedFile[]): Promise<void> => {
+    const closed = await Promise.allSettled(
+      prepareds.map((prepared) =>
+        prepared.target === null ? Promise.resolve() : prepared.target.writable.close(),
+      ),
+    );
+    for (let index = 0; index < prepareds.length; index++) {
+      const outcome = closed[index];
+      if (outcome.status === "rejected") {
+        await abortRemaining(prepareds, index);
+        throw await toImportError(
+          outcome.reason,
+          prepareds[index].file.entry.path,
+          totalBytes - committedBytes,
+        );
+      }
+      const prepared = prepareds[index];
+      if (prepared.target === null) countSkipped(prepared.file);
+      else countWritten(prepared.file);
+    }
+  };
+
+  const discardExtraGroup = async (
+    promise: Promise<PreparedFile[]>,
+  ): Promise<void> => {
+    let prepared: PreparedFile[] | null = null;
+    try {
+      prepared = await promise;
+    } catch {
+      prepared = null;
+    }
+    if (prepared !== null) {
+      await Promise.all(prepared.map((item) => abortPrepared(item)));
+    }
+  };
+
+  const batchable = (file: PlannedFile): boolean =>
+    file.isExtra && file.parts !== null && file.entry.size <= SMALL_EXTRA_LIMIT;
+
+  for (let index = 0; index < plan.length; ) {
+    if (signal?.aborted) throw aborted();
+    if (batchable(plan[index])) {
+      let end = index;
+      while (end < plan.length && batchable(plan[end])) end++;
+      const prepared = await prepareExtraGroup(plan.slice(index, end));
+      await commitExtraGroup(prepared);
+      index = end;
+      continue;
+    }
+    let largeEnd = index;
+    while (largeEnd < plan.length && !batchable(plan[largeEnd])) largeEnd++;
+    let extrasEnd = largeEnd;
+    while (extrasEnd < plan.length && batchable(plan[extrasEnd])) extrasEnd++;
+
+    const group = await dispatchLargeGroup(plan.slice(index, largeEnd));
+    if (group.failure !== null) {
+      await finishLargeFailure(group);
+      throw group.failure;
+    }
+
+    // Start the small extras while the archives' CRC reads run: their I/O is
+    // hidden behind those reads and none of them closes before every archive
+    // has committed, so a later failure still discards them.
+    const extraPromise: Promise<PreparedFile[]> | null =
+      extrasEnd > largeEnd ? prepareExtraGroup(plan.slice(largeEnd, extrasEnd)) : null;
+    extraPromise?.catch(() => undefined);
+
+    const verified = await verifyLargeGroup(group.pending);
+    if (verified.failure !== null) {
+      if (extraPromise !== null) await discardExtraGroup(extraPromise);
+      await finishLargeFailure({
+        pending: group.pending,
+        failure: verified.failure,
+        failedAt: verified.failedAt,
+      });
+      throw verified.failure;
+    }
+
+    let committed = 0;
+    try {
+      while (committed < group.pending.length) {
+        await commitPrepared(group.pending[committed]);
+        committed++;
+      }
+    } catch (error) {
+      await abortRemaining(group.pending, committed + 1);
+      if (extraPromise !== null) await discardExtraGroup(extraPromise);
+      throw error;
+    }
+    if (extraPromise !== null) {
+      const prepared = await extraPromise;
+      await commitExtraGroup(prepared);
+      index = extrasEnd;
+    } else {
+      index = largeEnd;
+    }
   }
 
   if (doneBytes !== totalBytes) {

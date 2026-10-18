@@ -177,12 +177,35 @@ async function samples(page: Page): Promise<Sample[]> {
   );
 }
 
+// Whether one archive has been committed under zhwp yet. A small targeted read
+// instead of walking the whole tree: the cancel test polls it while the import
+// is still writing.
+async function archiveStored(page: Page, kind: string, name: string): Promise<boolean> {
+  return page.evaluate(async ({ kind, name }: { kind: string; name: string }) => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const dir = await (await root.getDirectoryHandle("zhwp")).getDirectoryHandle(kind);
+      await dir.getFileHandle(name);
+      return true;
+    } catch {
+      return false;
+    }
+  }, { kind, name });
+}
+
 // One ~40 MB ZIP with the four REQUIRED archives around 2000 extra files: the
-// many small writes keep the import running long enough to see the detail line,
-// the ETA and the disabled input, and to cancel halfway. It also leaves the
-// first two archives stored when it is cancelled between the two games.
+// many writes keep the import running long enough to see the detail line, the
+// ETA and the disabled input (tests 4-6).
+//
+// The cancel test gets its own, deliberately slow ZIP: the two ZH archives
+// first, then 20000 one-kilobyte extra files, then the generals archives. The
+// per-file OPFS overhead keeps the copy running for seconds after the archives
+// commit, so a cancel right after they appear cannot race the end of the
+// import; that is what makes the old one-shot import deterministic under the
+// automatic engine start (#159).
 let bigDir: string | undefined;
 let bigZip: string | undefined;
+let cancelZip: string | undefined;
 
 test.beforeAll(async () => {
   bigDir = mkdtempSync(join(tmpdir(), "zhwp-launcher-zip-"));
@@ -210,6 +233,31 @@ test.beforeAll(async () => {
     });
   }
   writeFileSync(bigZip, await buildZip(entries));
+
+  cancelZip = join(bigDir, "cancel-game.zip");
+  const cancelEntries: BuildZipEntry[] = [];
+  for (const name of ZH) {
+    cancelEntries.push({
+      path: name,
+      data: archiveData(name.replace(/\.big$/i, "")),
+      method: "store",
+    });
+  }
+  for (let i = 0; i < 20_000; i++) {
+    cancelEntries.push({
+      path: `Data/English/file-${String(i).padStart(5, "0")}.dat`,
+      data: new Uint8Array(1024),
+      method: "store",
+    });
+  }
+  for (const name of GENERALS) {
+    cancelEntries.push({
+      path: name,
+      data: archiveData(name.replace(/\.big$/i, "")),
+      method: "store",
+    });
+  }
+  writeFileSync(cancelZip, await buildZip(cancelEntries));
 });
 
 test.afterAll(() => {
@@ -411,18 +459,20 @@ test("7: cancelling midway leaves Cancelled, keeps the completed archives and hi
   page,
 }) => {
   await openLauncher(page, RESOLVES);
-  await page.locator("#zip-input").setInputFiles(bigZip as string);
+  // The slow fixture commits the two ZH archives first and then spends seconds
+  // copying tiny extras, so waiting for the archives and cancelling at once is
+  // deterministic: #import-cancel is still there, and what was completed before
+  // the cancel is the two ZH archives plus the extras copied so far.
+  await page.locator("#zip-input").setInputFiles(cancelZip as string);
   await expect(page.locator("#import-cancel")).toBeVisible({ timeout: 10_000 });
   await expect
     .poll(
-      async () => {
-        const text = await page.locator("#import-detail").innerText();
-        const match = text.match(/· (\d+) of (\d+) files ·/);
-        return match === null ? 0 : Number(match[1]);
-      },
+      async () =>
+        (await archiveStored(page, "zh", "INIZH.big")) &&
+        (await archiveStored(page, "zh", "W3DZH.big")),
       { timeout: 30_000 },
     )
-    .toBeGreaterThanOrEqual(10);
+    .toBe(true);
 
   await page.locator("#import-cancel").click();
 

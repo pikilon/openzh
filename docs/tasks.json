@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "repo": "pikilon/zero-hour-web-port",
+  "repo": "pikilon/openzh",
   "note": "Machine-readable task index. Source of truth for status is the issue's labels; keep both in sync. See docs/briefs/README.md.",
   "tasks": [
     {

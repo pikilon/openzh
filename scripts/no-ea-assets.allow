@@ -15,3 +15,6 @@ Core/Tools/W3DView/Res/grab.tga
 Core/Tools/W3DView/Res/orbit.tga
 Core/Tools/W3DView/Res/zoom.tga
 GeneralsZH/Data/Window/Menus/ExtrasMenu.wnd
+
+# Synthetic replay fixture written by our own tests (issue #39); not game data.
+web/tests/harness/replays/zhwp-synthetic.rep

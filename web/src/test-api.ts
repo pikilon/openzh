@@ -5,3 +5,4 @@ export { ImportError, describeImportError, isRecoverable } from "./import-error"
 export { storeFiles, listStored, clearStored } from "./opfs-store";
 export { formatBytes, bytesNeeded, available } from "./storage";
 export { FileBridge } from "./bridge";
+export { openZip, entryStream } from "./zip";

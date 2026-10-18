@@ -250,6 +250,92 @@ export async function removeStoredFile(parts: string[]): Promise<void> {
   });
 }
 
+function abortError(): DOMException {
+  return new DOMException("The import was aborted", "AbortError");
+}
+
+async function removeEmptyDirectories(
+  dir: FileSystemDirectoryHandle,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const children: [string, FileSystemDirectoryHandle][] = [];
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === "directory") {
+      children.push([name, handle as FileSystemDirectoryHandle]);
+    }
+  }
+  for (const [name, child] of children) {
+    if (signal?.aborted) throw abortError();
+    await removeEmptyDirectories(child, signal);
+    let empty = true;
+    for await (const _ of child.entries()) {
+      empty = false;
+      break;
+    }
+    if (empty) {
+      if (signal?.aborted) throw abortError();
+      await dir.removeEntry(name);
+    }
+  }
+}
+
+export interface ReconcileResult {
+  removed: number;
+  freedBytes: number;
+  // Every file still stored afterwards, with the size the write loop compares.
+  remaining: Map<string, StoredSize>;
+}
+
+// Replaces the stored install with the incoming one (issue #157): a stored file
+// stays only when the incoming set has the same path and size, and every other
+// file is removed before the import writes anything. Directories left empty
+// under extra/ go too. Throws a DOMException AbortError when `signal` aborts
+// during the removal; every other failure is left to the caller.
+export async function reconcileStored(
+  keep: ReadonlyMap<string, number>,
+  signal?: AbortSignal,
+): Promise<ReconcileResult> {
+  if (signal?.aborted) throw abortError();
+  const snapshot = await storedSnapshot();
+  if (signal?.aborted) throw abortError();
+  const remaining = new Map<string, StoredSize>();
+  let removed = 0;
+  let freedBytes = 0;
+  for (const [path, known] of snapshot) {
+    const underInstall =
+      KINDS.some((kind) => path.startsWith(`${kind}/`)) ||
+      path.startsWith(`${EXTRA_DIR}/`);
+    if (!underInstall) {
+      remaining.set(path, known);
+      continue;
+    }
+    if (keep.get(path) === known.size) {
+      remaining.set(path, known);
+      continue;
+    }
+    if (signal?.aborted) throw abortError();
+    await removeStoredFile(path.split("/"));
+    removed++;
+    freedBytes += known.size;
+    if (signal?.aborted) throw abortError();
+  }
+  if (removed > 0) {
+    // A cached parent handle for a directory removed here would create files
+    // in the old, detached directory.
+    createdParents.clear();
+    const root = await rootDirectory(false);
+    if (root !== null) {
+      try {
+        const extra = await root.getDirectoryHandle(EXTRA_DIR, { create: false });
+        await removeEmptyDirectories(extra, signal);
+      } catch (error) {
+        if ((error as DOMException).name !== "NotFoundError") throw error;
+      }
+    }
+  }
+  return { removed, freedBytes, remaining };
+}
+
 async function findFile(
   kind: GameKind,
   name: string,

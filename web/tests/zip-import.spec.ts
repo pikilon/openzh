@@ -519,7 +519,8 @@ test("7: etaSeconds is null at the first call and a non-negative number later in
   expect(outcome.result.written).toBe(4);
   expect(outcome.progress.length).toBeGreaterThan(1);
   expect(outcome.progress[0].etaSeconds).toBeNull();
-  const late = outcome.progress.filter((value) => value.at >= 1500);
+  const origin = outcome.progress[0].at;
+  const late = outcome.progress.filter((value) => value.at - origin >= 1500);
   expect(late.length).toBeGreaterThan(0);
   for (const value of late) {
     expect(typeof value.etaSeconds).toBe("number");

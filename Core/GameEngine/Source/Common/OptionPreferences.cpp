@@ -71,7 +71,10 @@ WW3D::MultiSampleModeEnum OptionPreferences::getAntiAliasing() const
 {
 	OptionPreferences::const_iterator it = find("AntiAliasing");
 	if (it == end())
-		return WW3D::MULTISAMPLE_MODE_NONE;
+	{
+		// GeneralsX @feature DeepSeek 19/10/2026 Fall back to the engine default, which the web build raises to 4x MSAA.
+		return (WW3D::MultiSampleModeEnum)TheGlobalData->m_antiAliasLevel;
+	}
 
 	WW3D::MultiSampleModeEnum level = (WW3D::MultiSampleModeEnum)atoi(it->second.str());
 	level = clamp(WW3D::MULTISAMPLE_MODE_NONE, level, WW3D::MULTISAMPLE_MODE_8X);
@@ -84,7 +87,10 @@ TextureFilterClass::TextureFilterMode OptionPreferences::getTextureFilterMode() 
 {
 	OptionPreferences::const_iterator it = find("TextureFilter");
 	if (it == end())
-		return TextureFilterClass::TEXTURE_FILTER_BILINEAR;
+	{
+		// GeneralsX @feature DeepSeek 19/10/2026 Fall back to the engine default, which the web build raises to anisotropic.
+		return (TextureFilterClass::TextureFilterMode)TheGlobalData->m_textureFilteringMode;
+	}
 
 	return TextureFilterClass::getTextureFilterMode(it->second.str());
 }
@@ -93,7 +99,10 @@ TextureFilterClass::AnisotropicFilterMode OptionPreferences::getTextureAnisotrop
 {
 	OptionPreferences::const_iterator it = find("AnisotropyLevel");
 	if (it == end())
-		return TextureFilterClass::TEXTURE_FILTER_ANISOTROPIC_2X;
+	{
+		// GeneralsX @feature DeepSeek 19/10/2026 Fall back to the engine default, which the web build raises to 16x.
+		return (TextureFilterClass::AnisotropicFilterMode)TheGlobalData->m_textureAnisotropyLevel;
+	}
 
 	TextureFilterClass::AnisotropicFilterMode level = (TextureFilterClass::AnisotropicFilterMode)atoi(it->second.str());
 	level = clamp(TextureFilterClass::TEXTURE_FILTER_ANISOTROPIC_2X, level, TextureFilterClass::TEXTURE_FILTER_ANISOTROPIC_16X);

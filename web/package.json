@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Browser wrapper and browser tests for the WebAssembly engine build.",
   "scripts": {
-    "serve": "npm run build && node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /app=app --mount /engine=../build/webgpu/GeneralsMD --mount /dist=dist --mount /harness=tests/harness --gamedata \"${ZHWP_GAME_DIR:-}\"",
+    "serve": "npm run build && node scripts/serve.mjs --port 4173 --mount /smoke=smoke --mount /app=app --mount /engine=../build/webgpu/GeneralsMD --mount /dist=dist --mount /harness=tests/harness",
     "test": "playwright test",
     "test:smoke": "playwright test tests/smoke.spec.ts",
     "replay": "node scripts/run-replay.mjs",

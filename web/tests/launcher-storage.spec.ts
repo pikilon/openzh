@@ -1,7 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { statSync } from "node:fs";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #31: persistent storage and a storage estimate before import. Issue
 // #70: the estimate warns instead of refusing the import. The pure helpers are
@@ -17,19 +16,8 @@ type StorageMock = {
   persist?: boolean | "count";
 };
 
-function makeInstall(dir: string, data = "GameData\nEnd\n"): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data }]));
-  }
-  return root;
-}
-
-function installBytes(root: string): number {
-  return ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]
-    .map((name) => statSync(join(root, name)).size)
-    .reduce((sum, size) => sum + size, 0);
+function zipBytes(path: string): number {
+  return statSync(path).size;
 }
 
 async function openHarness(page: Page): Promise<void> {
@@ -155,7 +143,7 @@ test("6: when estimate rejects, #storage reads Storage: unknown and import still
 
   await expect(page.locator("#picker #storage")).toHaveText("Storage: unknown");
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
@@ -169,7 +157,7 @@ test("70.1: when the estimate is smaller than needed, the import finishes and co
   });
   await page.goto("/app/index.html");
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
 
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
@@ -183,10 +171,10 @@ test("70.2: when the estimate is smaller than needed, #storage-warning shows bot
     persist: false,
   });
   await page.goto("/app/index.html");
-  const root = makeInstall(info.outputPath());
-  const needed = installBytes(root);
+  const zip = await installZip(info.outputPath());
+  const needed = zipBytes(zip);
 
-  await page.locator("#folder-input").setInputFiles(root);
+  await page.locator("#zip-input").setInputFiles(zip);
 
   const warning = page.locator("#picker #storage-warning");
   await expect(warning).toBeVisible();
@@ -205,7 +193,7 @@ test("70.3: when the estimate leaves enough space, #storage-warning stays hidden
   await expect(warning).toHaveCount(1);
   await expect(warning).toBeHidden();
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(warning).toBeHidden();
 });
@@ -217,7 +205,7 @@ test("70.4: after a warning, Clear hides #storage-warning", async ({ page }, inf
     persist: false,
   });
   await page.goto("/app/index.html");
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   const warning = page.locator("#picker #storage-warning");
   await expect(warning).toBeVisible();
 
@@ -235,7 +223,7 @@ test("70.5: a QuotaExceededError during storing is reported and keeps what is st
   });
   await page.goto("/app/index.html");
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath("first")));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath("first")));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
@@ -250,9 +238,12 @@ test("70.5: a QuotaExceededError during storing is reported and keeps what is st
     });
   });
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath("second"), "GameData\nEnd\nEnd\n"));
+  await page.locator("#zip-input").setInputFiles(
+    await installZip(info.outputPath("second"), undefined, { data: "GameData\nEnd\nEnd\n" }),
+  );
 
-  await expect(page.locator("#status")).toHaveText(/^Import failed: QuotaExceededError: /);
+  await expect(page.locator("#status")).toHaveText("Import failed");
+  await expect(page.locator("#import-error")).toHaveAttribute("data-code", "quota-exceeded");
   await expect(page.locator("#import-progress")).toBeHidden();
   await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
   await expect(page.locator("#play")).toBeEnabled();
@@ -277,7 +268,7 @@ test("70.6: no path of the page writes Not enough storage into #status", async (
     });
   });
 
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect
     .poll(async () => page.locator("#status").textContent(), { timeout: 30_000 })
     .not.toBe("Importing");
@@ -286,7 +277,7 @@ test("70.6: no path of the page writes Not enough storage into #status", async (
   expect(seen.some((text) => text.includes("Not enough storage"))).toBe(false);
 });
 
-test("8: a complete folder pick calls navigator.storage.persist() once", async ({ page }, info) => {
+test("8: a complete ZIP pick calls navigator.storage.persist() once", async ({ page }, info) => {
   await mockStorage(page, {
     estimate: { usage: 0, quota: 2 * GB },
     persisted: false,
@@ -299,7 +290,7 @@ test("8: a complete folder pick calls navigator.storage.persist() once", async (
   await page.evaluate(() => {
     (window as unknown as { __persistCalls: number }).__persistCalls = 0;
   });
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
 
   const calls = await page.evaluate(() => (window as unknown as { __persistCalls: number }).__persistCalls);

@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #91: a Fullscreen button above the canvas. Play starts the engine
 // windowed; the player presses #fullscreen and the page puts the canvas
@@ -18,15 +16,6 @@ const FIT_WIDTH = (FIT_HEIGHT * 1024) / 768;
 // The fullscreen fit and the re-fit after a drawing-buffer change are the
 // page's job, so the tests wait for the displayed size, never a fixed delay.
 const WAIT = 10_000;
-
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
 
 type Fullscreen = { id: string | null; isScreen: boolean };
 
@@ -54,7 +43,7 @@ async function startPlaying(page: Page, dir: string): Promise<void> {
 
   await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#folder-input").setInputFiles(makeInstall(dir));
+  await page.locator("#zip-input").setInputFiles(await installZip(dir));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

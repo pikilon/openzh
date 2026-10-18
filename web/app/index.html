@@ -36,7 +36,6 @@
       #picker {
         margin-top: 1.5rem;
       }
-      #folder-input,
       #zip-input {
         display: block;
         margin: 0.75rem 0;
@@ -156,9 +155,7 @@
 
       <section id="picker">
         <h2>Game data</h2>
-        <p class="note">
-          Pick the game ZIP files, or the folder of your game installation.
-        </p>
+        <p class="note">Pick the game ZIP files.</p>
         <label for="zip-input">Pick the game ZIP files</label>
         <input id="zip-input" type="file" accept=".zip,application/zip" multiple />
         <div id="drop-zone">Drop the game ZIP files here</div>
@@ -167,8 +164,6 @@
         <button id="import-cancel" hidden>Cancel import</button>
         <div id="import-error" role="alert" hidden></div>
         <p id="unsupported" role="alert" hidden></p>
-        <label for="folder-input">Pick the folder of your game installation</label>
-        <input id="folder-input" type="file" webkitdirectory multiple />
         <progress id="import-progress" hidden></progress>
         <p id="status"></p>
         <p id="storage">Storage: unknown</p>

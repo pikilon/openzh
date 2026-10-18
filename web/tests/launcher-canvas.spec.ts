@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #80: while the game runs, the whole canvas is visible without
 // scrolling at 1280x800, keeping its drawing-buffer aspect ratio. The fake
@@ -10,15 +8,6 @@ import { buildBig } from "./helpers/big";
 
 const FAKE = "/harness/canvas/fit.js";
 const VIEWPORT = { width: 1280, height: 800 };
-
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
 
 // Opens the launcher at the target viewport, imports a complete synthetic
 // install (what enables Play) and starts the fake engine. On return the canvas
@@ -32,7 +21,7 @@ async function startCanvas(page: Page, dir: string): Promise<void> {
 
   await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#folder-input").setInputFiles(makeInstall(dir));
+  await page.locator("#zip-input").setInputFiles(await installZip(dir));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

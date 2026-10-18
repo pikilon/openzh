@@ -1,21 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #28: the canvas keeps the right mouse button and the keyboard. The
 // context menu must never open over the game, and after Play the keys must
 // reach the canvas without an extra click.
-
-function makeInstall(dir: string, names: string[]): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of names) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  writeFileSync(join(root, "readme.txt"), "not an archive");
-  return root;
-}
 
 async function openLauncher(page: Page): Promise<void> {
   await page.goto("/app/index.html");
@@ -63,8 +51,10 @@ test("3: a contextmenu event elsewhere on the page is not cancelled", async ({ p
 });
 
 test("4: after Play #canvas has focus while the engine module loads", async ({ page }, info) => {
-  const dir = makeInstall(info.outputPath(), ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]);
-  await page.locator("#folder-input").setInputFiles(dir);
+  const zip = await installZip(info.outputPath(), ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"], {
+    extraFiles: [{ path: "readme.txt", data: "not an archive" }],
+  });
+  await page.locator("#zip-input").setInputFiles(zip);
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

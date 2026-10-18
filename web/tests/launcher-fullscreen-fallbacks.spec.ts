@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #91: the Fullscreen button above the canvas is a progressive
 // enhancement. These are its degraded paths: a browser that offers no
@@ -22,15 +20,6 @@ const WAIT = 10_000;
 
 type Done = { status: "resolved" | "error"; message?: string };
 
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
-
 // Opens the launcher at 1280x800, clears whatever a previous test stored and
 // imports a complete synthetic install (what enables Play) in the page that
 // loads the fake engine. The viewport is set before the first `goto`, so the
@@ -44,7 +33,7 @@ async function prepareLauncher(page: Page, dir: string, module: string): Promise
 
   await page.goto(`/app/index.html?module=${encodeURIComponent(module)}`);
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#folder-input").setInputFiles(makeInstall(dir));
+  await page.locator("#zip-input").setInputFiles(await installZip(dir));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 }

@@ -1,7 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { buildBig } from "./helpers/big";
+import { installZip } from "./helpers/install-zip";
 
 // Issue #103: the launcher links a PNG icon at /app/favicon.png. The icon is an
 // extra: a 404 for it must never block importing the game data or starting the
@@ -11,15 +9,6 @@ const FAKE = "/harness/canvas/fit.js";
 const ICON_PATH = "/app/favicon.png";
 // The eight bytes every PNG file starts with.
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-function makeInstall(dir: string): string {
-  const root = join(dir, "install");
-  mkdirSync(root, { recursive: true });
-  for (const name of ["INIZH.big", "W3DZH.big", "INI.big", "W3D.big"]) {
-    writeFileSync(join(root, name), buildBig([{ path: "Data\\INI\\Default\\GameData.ini", data: "GameData\nEnd\n" }]));
-  }
-  return root;
-}
 
 // The path each <link rel="icon"> on the page resolves to, as the browser
 // resolves it against the page's own URL.
@@ -63,7 +52,7 @@ test("3: a 404 for the icon still imports the install and starts the fake engine
 
   await page.goto(`/app/index.html?module=${encodeURIComponent(FAKE)}`);
   await expect(page.locator("#stored-summary")).toHaveText(/Stored: \d+ archives/);
-  await page.locator("#folder-input").setInputFiles(makeInstall(info.outputPath()));
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await expect(page.locator("#status")).toContainText("Ready", { timeout: 30_000 });
   await expect(page.locator("#play")).toBeEnabled();
 

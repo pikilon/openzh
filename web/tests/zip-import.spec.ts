@@ -203,6 +203,8 @@ test("1: one ZIP stores the four REQUIRED archives at zhwp/<kind>/<name> and lis
     written: 4,
     skipped: 0,
     extra: 0,
+    removed: 0,
+    freedBytes: 0,
     archives: sortedArchives(files),
   });
 
@@ -237,6 +239,8 @@ test("2: non-.big files, nested folders included, go under extra/ and listExtra 
     written: 6,
     skipped: 0,
     extra: 2,
+    removed: 0,
+    freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(await page.evaluate(() => (window as any).zhwp.listStored())).toEqual(
@@ -394,12 +398,16 @@ test("5: importing the same ZIP again writes nothing and skips every file", asyn
     written: 6,
     skipped: 0,
     extra: 2,
+    removed: 0,
+    freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(outcome.second).toEqual({
     written: 0,
     skipped: 6,
     extra: 2,
+    removed: 0,
+    freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(outcome.stored).toEqual(sortedStored(files));
@@ -608,13 +616,15 @@ test("8: aborting midway throws aborted, keeps completed files, leaves no partia
     written: 3,
     skipped: 1,
     extra: 0,
+    removed: 0,
+    freedBytes: 0,
     archives: sortedArchives(files),
   });
   expect(outcome.finalStored).toEqual(sortedStored(files));
   expect(await readStored(page, files)).toEqual(expectedBytes(files));
 });
 
-test("9: a corrupt entry throws bad-crc with detail.file, keeps earlier files and the old content", async ({
+test("9: a corrupt entry throws bad-crc with detail.file and the replace rule keeps only the earlier new files", async ({
   page,
 }) => {
   const validFiles = requiredFiles([100, 200, 300, 400]);
@@ -640,7 +650,7 @@ test("9: a corrupt entry throws bad-crc with detail.file, keeps earlier files an
     return {
       failure: captured.error === undefined ? null : t.errorOf(captured.error),
       stored: await z.listStored(),
-      oldContent: await t.fileAt(["zhwp", "generals", "W3D.big"]),
+      oldContent: await t.hasFile(["zhwp", "generals", "W3D.big"]),
       newContent: await t.fileAt(["zhwp", "zh", "INIZH.big"]),
     };
   });
@@ -649,16 +659,14 @@ test("9: a corrupt entry throws bad-crc with detail.file, keeps earlier files an
   expect(outcome.failure.name).toBe("ImportError");
   expect(outcome.failure.code).toBe("bad-crc");
   expect(outcome.failure.detail).toEqual({ file: "W3D.big" });
+  // The new sizes differ, so the replace rule removed the old install before
+  // writing; the three files committed before the corrupt one are the new ones.
   expect(outcome.stored).toEqual([
     { kind: "zh", name: "INIZH.big", size: 101 },
     { kind: "zh", name: "W3DZH.big", size: 201 },
     { kind: "generals", name: "INI.big", size: 301 },
-    { kind: "generals", name: "W3D.big", size: 400 },
   ]);
-  expect(outcome.oldContent).toEqual({
-    size: validFiles[3].data.length,
-    sha256: sha256(validFiles[3].data),
-  });
+  expect(outcome.oldContent).toBe(false);
   expect(outcome.newContent).toEqual({
     size: newFiles[0].data.length,
     sha256: sha256(newFiles[0].data),
@@ -744,8 +752,8 @@ test("11: a forced QuotaExceededError becomes quota-exceeded and keeps the earli
         files: await t.fileAt(["zhwp", "zh", "INIZH.big"]).then(async (inizh: any) => ({
           inizh,
           w3dzh: await t.fileAt(["zhwp", "zh", "W3DZH.big"]),
-          ini: await t.fileAt(["zhwp", "generals", "INI.big"]),
-          w3d: await t.fileAt(["zhwp", "generals", "W3D.big"]),
+          ini: await t.hasFile(["zhwp", "generals", "INI.big"]),
+          w3d: await t.hasFile(["zhwp", "generals", "W3D.big"]),
         })),
       };
     } finally {
@@ -760,13 +768,12 @@ test("11: a forced QuotaExceededError becomes quota-exceeded and keeps the earli
   expect(typeof outcome.failure.detail.needed).toBe("number");
   expect(outcome.failure.detail.needed).toBeGreaterThan(0);
 
-  // INIZH.big and W3DZH.big completed before the quota failure; INI.big kept
-  // its previous bytes and W3D.big was never touched.
+  // The new sizes differ, so the old install was removed first. INIZH.big and
+  // W3DZH.big completed before the quota failure; INI.big and W3D.big were
+  // removed and never rewritten.
   expect(outcome.stored).toEqual([
     { kind: "zh", name: "INIZH.big", size: 101 },
     { kind: "zh", name: "W3DZH.big", size: 201 },
-    { kind: "generals", name: "INI.big", size: 300 },
-    { kind: "generals", name: "W3D.big", size: 400 },
   ]);
   expect(outcome.files.inizh).toEqual({
     size: newFiles[0].data.length,
@@ -776,14 +783,8 @@ test("11: a forced QuotaExceededError becomes quota-exceeded and keeps the earli
     size: newFiles[1].data.length,
     sha256: sha256(newFiles[1].data),
   });
-  expect(outcome.files.ini).toEqual({
-    size: validFiles[2].data.length,
-    sha256: sha256(validFiles[2].data),
-  });
-  expect(outcome.files.w3d).toEqual({
-    size: validFiles[3].data.length,
-    sha256: sha256(validFiles[3].data),
-  });
+  expect(outcome.files.ini).toBe(false);
+  expect(outcome.files.w3d).toBe(false);
 });
 
 test("12: a 64 MiB stored entry keeps JS heap growth under 48 MiB", async ({

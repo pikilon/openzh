@@ -8,9 +8,10 @@ import { ImportError, type ImportErrorDetail } from "./import-error";
 import { classifyArchives, type GameKind } from "./install";
 import {
   openStoredFile,
+  reconcileStored,
   removeStoredFile,
-  storedSnapshot,
   type OpenedStoredFile,
+  type ReconcileResult,
   type StoredSize,
 } from "./opfs-store";
 import {
@@ -38,6 +39,9 @@ export interface ImportProgress {
 export interface ImportOptions {
   onProgress?: (progress: ImportProgress) => void;
   signal?: AbortSignal;
+  // Called around the replace step: "removing" before the stored install is
+  // reconciled, "importing" once it is gone and the writes may start.
+  onPhase?: (phase: "removing" | "importing") => void;
 }
 
 export interface ImportResult {
@@ -45,6 +49,8 @@ export interface ImportResult {
   skipped: number; // files, extra files included
   archives: { kind: GameKind; name: string; size: number }[];
   extra: number; // non-.big files in `written + skipped`
+  removed: number; // stored files the replace rule removed
+  freedBytes: number; // their total size
 }
 
 interface ArchivePath {
@@ -148,6 +154,7 @@ export async function importZips(
 ): Promise<ImportResult> {
   const signal = options?.signal;
   const onProgress = options?.onProgress;
+  const onPhase = options?.onPhase;
 
   if (signal?.aborted) throw aborted();
 
@@ -215,6 +222,26 @@ export async function importZips(
     return { kind: archive.kind, name: archive.name, size: archiveSizes.get(key) ?? 0 };
   });
 
+  // Every file the new install will contain, after the first-duplicate rule.
+  // Nothing is written until the stored files that are not in this set (or
+  // whose size differs) are gone.
+  const incoming = new Map<string, number>();
+  for (const file of plan) {
+    if (file.parts === null) continue;
+    const key = file.parts.join("/");
+    if (!incoming.has(key)) incoming.set(key, file.entry.size);
+  }
+
+  onPhase?.("removing");
+  let reconciled: ReconcileResult;
+  try {
+    reconciled = await reconcileStored(incoming, signal);
+  } catch (error) {
+    if (signal?.aborted) throw aborted();
+    throw new ImportError("storage-unavailable", {}, error);
+  }
+  onPhase?.("importing");
+
   const totalBytes = plan.reduce((sum, file) => sum + file.entry.size, 0);
   const filesTotal = plan.length;
   let doneBytes = 0;
@@ -259,10 +286,10 @@ export async function importZips(
 
   emit(plan.length === 0 ? "" : plan[0].entry.path, true);
 
-  // One walk instead of a failed handle lookup per planned file. Every path is
-  // written at most once per import (later duplicates are skipped), so this
-  // snapshot stays valid for the whole run.
-  const known = await storedSnapshot();
+  // The files the replace rule kept. Every path is written at most once per
+  // import (later duplicates are skipped), so this snapshot stays valid for the
+  // whole run.
+  const known = reconciled.remaining;
   if (signal?.aborted) throw aborted();
   const knownOf = (parts: string[]): StoredSize =>
     known.get(parts.join("/")) ?? { existed: false, size: 0 };
@@ -748,5 +775,12 @@ export async function importZips(
   }
   emit(plan.length === 0 ? "" : plan[plan.length - 1].entry.path, true);
 
-  return { written, skipped, archives, extra };
+  return {
+    written,
+    skipped,
+    archives,
+    extra,
+    removed: reconciled.removed,
+    freedBytes: reconciled.freedBytes,
+  };
 }

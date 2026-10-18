@@ -71,5 +71,13 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-18 | #35 | tests | deepseek-flash (dsh) | ok | ~1.5 min | regression test only (nothing to implement); architect ran it with the real data: 5 pass |
 | 2026-10-18 | #36 | tests | deepseek-flash (dsh) | ok | ~1.5 min | bench only; architect ran it with the real data: 3601 frames, p99 16.67 ms |
 | 2026-10-18 | #74 | analysis+fix | sonnet (claude_agent, owner-authorised) | ok | ~10 min | root causes: clearAll() reset status after its await; harness read before the IDB load finished; 180/180 twice, full web suite 140 pass (call 50) |
+| 2026-10-18 | #125 | tests | deepseek-flash (dsh) | ok | ~3 min | 9 tests; architect check: fail from clean worktree (call 51) |
+| 2026-10-18 | #125 | code | deepseek-flash (dsh) | ok | ~0.5 min | 10 pass (call 52) |
+| 2026-10-18 | #126 | tests | deepseek-flash (dsh) | ok | ~4.7 min | 12 tests plus zip builder helper (call 53) |
+| 2026-10-18 | #126 | code | deepseek-flash (dsh) | ok | ~1.5 min | 22 pass (call 54) |
+| 2026-10-18 | #127 | tests | deepseek-flash (dsh) | ok | ~7.8 min | 13 tests (call 55) |
+| 2026-10-18 | #127 | code | deepseek-flash (dsh) | failed | ~5.5 min | BLOCKED: agent says test 7 cannot pass (filters progress by absolute performance.now()); 28 pass, 1 fail from a clean worktree; branch failed/127-code-deepseek-flash (call 57) |
+| 2026-10-18 | #131 | tests | deepseek-flash (dsh) | ok | ~2.7 min | 9 tests (call 56) |
+| 2026-10-18 | #131 | code | deepseek-flash (dsh) | ok | ~3.5 min | 21 pass (call 58) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.

@@ -178,8 +178,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXMouseY()
 // Never patch window.AudioContext for this: doing so wedges MiniAudio init and the game never starts.
 // GeneralsX @bugfix Codex 06/08/2026 Mute through the script-volume slot, not setOn(): the on/off
 // flags only gate NEW events, so muting left the looping music audible and unmuting never brought
-// anything back. A volume write reaches every playing voice via m_volumeHasChanged, and the system
-// (options) volumes stay untouched — unmute restores exactly what the player configured.
+// anything back.
+// GeneralsX @bugfix 17/10/2026 Issue #99: mute through AudioManager::muteAudio/unmuteAudio with
+// MuteAudioReason_WindowFocus, the mechanism the native WM_ACTIVATE path in WinMain.cpp uses: it saves
+// the four system volumes, silences them, and restores them on unmute. The old setVolume(0/1,
+// AudioAffect_All) wrote the scripting volumes, so unmuting with 1.0 discarded the values the game's
+// scripts had set.
 #include "Common/ArchiveFileSystem.h"
 #include "Common/ArchiveFile.h"
 #include "Common/LocalFileSystem.h"
@@ -254,7 +258,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetAudioMuted(Int muted)
 {
 	if (TheAudio == nullptr)
 		return FALSE;
-	TheAudio->setVolume(muted ? 0.0f : 1.0f, AudioAffect_All);
+	if (muted)
+		TheAudio->muteAudio(AudioManager::MuteAudioReason_WindowFocus);
+	else
+		TheAudio->unmuteAudio(AudioManager::MuteAudioReason_WindowFocus);
 	return TRUE;
 }
 

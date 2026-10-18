@@ -1288,7 +1288,7 @@
         "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp",
         "web/scripts/package.mjs"
       ],
-      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and \u20ac1/\u20ac2/\u20ac5 PayPal support tips."
+      "summary": "The launcher becomes an OpenZH command console: top bar with title/fullscreen/mute/menu, auto-start when game data is stored, ZIP loader otherwise, a menu with destructive reload, a persisted FPS overlay toggle, an About dialog and €1/€2/€5 PayPal support tips."
     },
     {
       "issue": 162,
@@ -1379,6 +1379,26 @@
         "web/scripts/make-game-zip.mjs"
       ],
       "summary": "make-game-zip can store TGAs RLE-encoded (lossless) and re-encode music at a lower bitrate while packing."
+    },
+    {
+      "issue": 175,
+      "title": "BIG rewrite accepts zero-size entries (real PatchZH.big)",
+      "phase": 1,
+      "status": "needs-tests",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/175-big-zero-size.md",
+      "depends_on": [],
+      "check": "cd web && npm ci && npx playwright test tests/big-archive.spec.ts",
+      "test_paths": [
+        "web/tests/big-archive.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/scripts/lib/big-archive.mjs"
+      ],
+      "summary": "Zero-size BIG entries are exempt from the header-offset check and keep their offset on rewrite."
     }
   ]
 }

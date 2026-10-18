@@ -682,8 +682,14 @@ GlobalData::GlobalData()
 	m_headless = FALSE;
 	m_checkForUpdates = TRUE;
 	m_windowed = 0;
+	// GeneralsX @feature DeepSeek 19/10/2026 Web builds open at 1920x1080; native keeps the 1024x768 design reference.
+#if defined(__EMSCRIPTEN__)
+	m_xResolution = 1920;
+	m_yResolution = 1080;
+#else
 	m_xResolution = DEFAULT_DISPLAY_WIDTH;
 	m_yResolution = DEFAULT_DISPLAY_HEIGHT;
+#endif
 	m_maxShellScreens = 0;
 	m_useCloudMap = FALSE;
 	m_use3WayTerrainBlends = 1;
@@ -694,9 +700,16 @@ GlobalData::GlobalData()
 	m_adjustCliffTextures = FALSE;
 	m_stretchTerrain = FALSE;
 	m_useHalfHeightMap = FALSE;
+	// GeneralsX @feature DeepSeek 19/10/2026 Web builds default to maximum terrain detail with dynamic LOD off.
+#if defined(__EMSCRIPTEN__)
+	m_terrainLOD = TERRAIN_LOD_MAX;
+	m_terrainLODTargetTimeMS = 0;
+	m_enableDynamicLOD = FALSE;
+#else
 	m_terrainLOD = TERRAIN_LOD_AUTOMATIC;
 	m_terrainLODTargetTimeMS = 0;
 	m_enableDynamicLOD = TRUE;
+#endif
 	m_enableStaticLOD = TRUE;
 	m_rightMouseAlwaysScrolls = FALSE;
 	m_jpegQuality = DEFAULT_JPEG_QUALITY;
@@ -1000,9 +1013,16 @@ GlobalData::GlobalData()
 
 	m_standardPublicBones.clear();
 
+	// GeneralsX @feature DeepSeek 19/10/2026 Web builds default to 4x MSAA and 16x anisotropic filtering; native keeps none/bilinear/2x.
+#if defined(__EMSCRIPTEN__)
+	m_antiAliasLevel = WW3D::MultiSampleModeEnum::MULTISAMPLE_MODE_4X;
+	m_textureFilteringMode = TextureFilterClass::TextureFilterMode::TEXTURE_FILTER_ANISOTROPIC;
+	m_textureAnisotropyLevel = TextureFilterClass::AnisotropicFilterMode::TEXTURE_FILTER_ANISOTROPIC_16X;
+#else
 	m_antiAliasLevel = WW3D::MultiSampleModeEnum::MULTISAMPLE_MODE_NONE;
 	m_textureFilteringMode = TextureFilterClass::TextureFilterMode::TEXTURE_FILTER_BILINEAR;
 	m_textureAnisotropyLevel = TextureFilterClass::AnisotropicFilterMode::TEXTURE_FILTER_ANISOTROPIC_2X;
+#endif
 
 //	m_languageFilterPref = false;
 	m_languageFilterPref = true;

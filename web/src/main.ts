@@ -1,6 +1,8 @@
-// Launcher page logic (docs/briefs/5c-launcher.md): the player picks their
-// game ZIP files, the archives are classified and copied into OPFS, and the
-// engine runs from them. The DOM element ids are the page's contract.
+// Launcher shell logic (docs/briefs/159-launcher-shell.md): the page is a
+// command console around the game. The top bar is the only chrome, the engine
+// starts by itself once its archives are stored, and a modal menu holds the
+// game-data controls and the player's preferences. The DOM element ids are the
+// page's contract.
 
 import { REQUIRED } from "./install";
 import { listStored, listExtra, clearStored, type StoredFile } from "./opfs-store";
@@ -9,47 +11,105 @@ import { currentEnv, missingFeatures } from "./features";
 import { available, formatBytes } from "./storage";
 import { ImportError, describeImportError } from "./import-error";
 import { importZips, type ImportProgress } from "./zip-import";
+import {
+  readMuted,
+  readPerformanceOverlay,
+  writeMuted,
+  writePerformanceOverlay,
+} from "./prefs";
+import { byId, closeDialog, openDialog } from "./shell";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
 
-function byId<T extends HTMLElement>(id: string): T {
-  const element = document.getElementById(id);
-  if (element === null) throw new Error(`missing #${id}`);
-  return element as T;
-}
+// The one state `body[data-state]` carries at any time.
+type PageState =
+  | "boot"
+  | "no-assets"
+  | "importing"
+  | "starting"
+  | "playing"
+  | "error"
+  | "unsupported";
+
+// The exports the page uses on the object the engine factory resolves to.
+type EngineModule = {
+  _GeneralsXSetAudioMuted?: (muted: number) => unknown;
+  _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
+};
 
 const status = byId<HTMLElement>("status");
 const progress = byId<HTMLProgressElement>("import-progress");
 const summary = byId<HTMLElement>("stored-summary");
 const storage = byId<HTMLElement>("storage");
 const storageWarning = byId<HTMLElement>("storage-warning");
-const play = byId<HTMLButtonElement>("play");
-const clear = byId<HTMLButtonElement>("clear");
 const canvas = byId<HTMLCanvasElement>("canvas");
 const engineError = byId<HTMLElement>("engine-error");
-const picker = byId<HTMLElement>("picker");
 const unsupported = byId<HTMLElement>("unsupported");
-const playControls = byId<HTMLElement>("play-controls");
 const screen = byId<HTMLElement>("screen");
+const topbar = byId<HTMLElement>("topbar");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
+const mute = byId<HTMLButtonElement>("mute");
+const menuButton = byId<HTMLButtonElement>("menu-button");
 const importDetail = byId<HTMLElement>("import-detail");
 const importCurrent = byId<HTMLElement>("import-current");
 const importCancel = byId<HTMLButtonElement>("import-cancel");
 const importError = byId<HTMLElement>("import-error");
 const zipInput = byId<HTMLInputElement>("zip-input");
 const dropZone = byId<HTMLElement>("drop-zone");
+const loader = byId<HTMLElement>("loader");
+const loading = byId<HTMLElement>("loading");
+const errorPanel = byId<HTMLElement>("error-panel");
+const retry = byId<HTMLButtonElement>("retry");
+const menu = byId<HTMLDialogElement>("menu");
+const menuClose = byId<HTMLButtonElement>("menu-close");
+const menuStored = byId<HTMLElement>("menu-stored");
+const menuStorage = byId<HTMLElement>("menu-storage");
+const reload = byId<HTMLButtonElement>("reload");
+const reloadDialog = byId<HTMLDialogElement>("reload-dialog");
+const reloadWarning = byId<HTMLElement>("reload-warning");
+const reloadCancel = byId<HTMLButtonElement>("reload-cancel");
+const reloadConfirm = byId<HTMLButtonElement>("reload-confirm");
+const fpsToggle = byId<HTMLInputElement>("fps-toggle");
+const about = byId<HTMLButtonElement>("about");
+const aboutDialog = byId<HTMLDialogElement>("about-dialog");
+const aboutClose = byId<HTMLButtonElement>("about-close");
 
 // Set once an import asks for persisting storage and the browser denies it
 // (issue #129): the storage line then says the browser may clear it.
 let storageMayBeCleared = false;
-const STORAGE_MAY_BE_CLEARED =
-  " Storage may be cleared by the browser when space is low.";
+const STORAGE_MAY_BE_CLEARED = " Storage may be cleared by the browser when space is low.";
+
+let pageState: PageState = "boot";
+let starting = false;
+let engineFailed = false;
+let engineModule: EngineModule | null = null;
+let storedFiles: StoredFile[] = [];
+let importAbort: AbortController | null = null;
+let importing = false;
+
+// The player's own choices (persisted by src/prefs.ts).
+let userMuted = readMuted();
+let performanceOverlay = readPerformanceOverlay();
+
+// The browser's focus state, tracked from the events rather than polled: the
+// engine is silent while the document is hidden or the window has lost focus.
+let windowFocused = document.hasFocus();
+
+// The features the launcher needs; a non-empty list means `unsupported`.
+const missingFeatureNames = missingFeatures(currentEnv());
+
+function setState(next: PageState): void {
+  pageState = next;
+  document.body.dataset.state = next;
+}
 
 function hasRequired(stored: readonly { name: string }[]): boolean {
   const names = new Set(stored.map((file) => file.name.toLowerCase()));
   return [...REQUIRED.zh, ...REQUIRED.generals].every((name) => names.has(name.toLowerCase()));
 }
+
+// ----- status, storage and import lines -----
 
 function showProgress(value: number, max: number): void {
   progress.hidden = false;
@@ -77,9 +137,18 @@ function showStorageWarning(availableBytes: number, neededBytes: number): void {
   storageWarning.hidden = false;
 }
 
+function storedText(count: number): string {
+  return `Stored: ${count} archives`;
+}
+
+// The hidden summary is the page's machine-readable archive count; the menu
+// shows the same line and the reload action follows the same count.
 function showStored(stored: StoredFile[]): void {
-  summary.textContent = `Stored: ${stored.length} archives`;
-  play.disabled = !hasRequired(stored);
+  storedFiles = stored;
+  const text = storedText(stored.length);
+  summary.textContent = text;
+  menuStored.textContent = text;
+  reload.disabled = stored.length === 0;
 }
 
 function hideImportError(): void {
@@ -142,10 +211,13 @@ function showImportProgress(state: ImportProgress): void {
 function fail(message: unknown): void {
   status.textContent = String(message instanceof Error ? message.message : message);
   hideProgress();
+  setState("no-assets");
 }
 
 function showStorageText(text: string): void {
-  storage.textContent = storageMayBeCleared ? `${text}${STORAGE_MAY_BE_CLEARED}` : text;
+  const value = storageMayBeCleared ? `${text}${STORAGE_MAY_BE_CLEARED}` : text;
+  storage.textContent = value;
+  menuStorage.textContent = value;
 }
 
 async function refreshStorage(): Promise<void> {
@@ -173,16 +245,280 @@ async function refreshStorage(): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  showStored(await listStored());
+  try {
+    showStored(await listStored());
+  } catch {
+    showStored([]);
+  }
   await refreshStorage();
 }
 
-// Issue #128: imports picked or dropped ZIPs through importZips and owns the
-// progress line, the cancel button and the typed failure display. Nothing is
-// stored by the page itself here: importZips writes the archives and extra
-// files and reads every ZIP before the first write.
-let importAbort: AbortController | null = null;
-let importing = false;
+// ----- preferences: mute and the performance overlay -----
+
+function audibleMuted(): boolean {
+  return userMuted || document.visibilityState !== "visible" || !windowFocused;
+}
+
+function updateMuteButton(): void {
+  const label = userMuted ? "Unmute game audio" : "Mute game audio";
+  mute.setAttribute("aria-pressed", userMuted ? "true" : "false");
+  mute.setAttribute("aria-label", label);
+  mute.title = label;
+}
+
+// Re-applied when the module becomes available and on every later change. A
+// build without the export is ignored, and the game keeps playing.
+function applyMute(): void {
+  const engine = engineModule;
+  if (engine === null) return;
+  const setMuted = engine._GeneralsXSetAudioMuted;
+  if (typeof setMuted !== "function") return;
+  try {
+    setMuted.call(engine, audibleMuted() ? 1 : 0);
+  } catch {
+    // The engine object can be gone with the game; there is nothing to tell.
+  }
+}
+
+function applyPerformanceOverlay(): void {
+  const engine = engineModule;
+  if (engine === null) return;
+  const setOverlay = engine._GeneralsXSetDebugOverlay;
+  if (typeof setOverlay !== "function") return;
+  try {
+    setOverlay.call(engine, performanceOverlay ? 1 : 0);
+  } catch {
+    // Same as the mute export: a missing or failed export is a no-op.
+  }
+}
+
+// ----- engine start -----
+
+// A browser without the Fullscreen API offers no button at all.
+function canFullscreen(): boolean {
+  return typeof screen.requestFullscreen === "function";
+}
+
+function updateFullscreenButton(): void {
+  const active = document.fullscreenElement === screen;
+  const label = active ? "Exit fullscreen" : "Enter fullscreen";
+  fullscreen.setAttribute("aria-pressed", active ? "true" : "false");
+  fullscreen.setAttribute("aria-label", label);
+  fullscreen.title = label;
+}
+
+function leaveFullscreen(): void {
+  if (typeof document.exitFullscreen !== "function") return;
+  if (document.fullscreenElement !== null) {
+    void document.exitFullscreen().catch(() => undefined);
+  }
+}
+
+// The largest box with the drawing buffer's aspect ratio that fits the screen;
+// the flex layout of #screen:fullscreen centres it. The drawing buffer itself
+// is never written.
+function fitFullscreenCanvas(): void {
+  if (document.fullscreenElement !== screen) return;
+  const bufferWidth = canvas.width;
+  const bufferHeight = canvas.height;
+  if (bufferWidth <= 0 || bufferHeight <= 0) return;
+  const scale = Math.min(window.innerWidth / bufferWidth, window.innerHeight / bufferHeight);
+  canvas.style.width = `${Math.floor(bufferWidth * scale)}px`;
+  canvas.style.height = `${Math.floor(bufferHeight * scale)}px`;
+}
+
+// Out of fullscreen the windowed fit sizes the canvas again.
+function unfullscreenCanvas(): void {
+  canvas.style.width = "";
+  canvas.style.height = "";
+}
+
+// Issue #97: while the game runs windowed, the canvas is the largest box with
+// the drawing buffer's aspect ratio that fits between the bottom of #topbar and
+// the bottom of the window; `justify-content: center` on #screen centres it
+// horizontally. The drawing buffer itself is never written.
+function fitWindowedCanvas(): void {
+  if (document.fullscreenElement !== null || canvas.hidden) return;
+  const bufferWidth = canvas.width;
+  const bufferHeight = canvas.height;
+  if (bufferWidth <= 0 || bufferHeight <= 0) return;
+  const availableWidth = window.innerWidth;
+  const availableHeight = window.innerHeight - topbar.getBoundingClientRect().bottom;
+  if (availableWidth <= 0 || availableHeight <= 0) return;
+  const scale = Math.min(availableWidth / bufferWidth, availableHeight / bufferHeight);
+  // Whole pixels, rounded down: the layout would otherwise keep the fraction of
+  // a pixel that puts the canvas past the bottom of the window.
+  canvas.style.width = `${Math.floor(bufferWidth * scale)}px`;
+  canvas.style.height = `${Math.floor(bufferHeight * scale)}px`;
+}
+
+function fitCanvas(): void {
+  if (document.fullscreenElement === screen) fitFullscreenCanvas();
+  else fitWindowedCanvas();
+}
+
+function onFullscreenChange(): void {
+  updateFullscreenButton();
+  if (document.fullscreenElement !== screen) {
+    unfullscreenCanvas();
+    // The windowed playing layout (#97) is what the page returns to.
+    fitWindowedCanvas();
+    return;
+  }
+  // A failed engine must not keep the screen: the message has to stay readable
+  // and #fullscreen is not offered again, even when the browser grants a
+  // request that was still pending when the engine aborted.
+  if (engineFailed) {
+    leaveFullscreen();
+    return;
+  }
+  fitFullscreenCanvas();
+  // The keyboard input follows the game (#28) without another click.
+  canvas.focus();
+  // The fullscreen layout lands in the next frame: fit again then, against the
+  // screen size it really gives the canvas.
+  window.requestAnimationFrame(fitFullscreenCanvas);
+}
+
+function enterFullscreen(): void {
+  if (!canFullscreen()) return;
+  const requested = screen.requestFullscreen();
+  void Promise.resolve(requested).then(
+    () => {
+      if (engineFailed) leaveFullscreen();
+      else {
+        fitFullscreenCanvas();
+        canvas.focus();
+      }
+    },
+    // A refused request keeps the game windowed and shows no error: the
+    // button stays so the player can retry.
+    () => undefined,
+  );
+}
+
+function showStarting(): void {
+  loader.hidden = true;
+  loading.hidden = false;
+  errorPanel.hidden = true;
+  engineError.hidden = true;
+  engineError.textContent = "";
+  canvas.hidden = true;
+  fullscreen.disabled = true;
+  fullscreen.hidden = !canFullscreen();
+}
+
+function reportEngineError(message: unknown, record: (line: string) => void): void {
+  const text = String(message ?? "").trim() || "unknown error";
+  engineFailed = true;
+  engineModule = null;
+  setState("error");
+  status.textContent = `Engine failed: ${text}`;
+  engineError.textContent = text;
+  engineError.hidden = false;
+  errorPanel.hidden = false;
+  loading.hidden = true;
+  loader.hidden = true;
+  canvas.hidden = true;
+  fullscreen.hidden = true;
+  fullscreen.disabled = true;
+  leaveFullscreen();
+  record("[page] " + text);
+  (window as Page).__zhwpDone = { status: "error", message: text };
+}
+
+// Issue #91: the game plays in the page, and the Fullscreen button above it
+// puts #screen in the browser's fullscreen mode. The engine and its render
+// resolution do not change: only the canvas's CSS size does, because the
+// engine maps the mouse through the element box.
+
+// The `module` query parameter lets tests start a fake engine instead of the
+// real one (docs/briefs/29-launcher-errors.md), the same rule as smoke.js.
+function engineModuleUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("module") ?? "/engine/GeneralsXZH.js";
+}
+
+// src/engine.ts keeps the archives open through the FileBridge and releases
+// them on pagehide, because the worker's sync access handles stay locked while
+// it lives. An engine attempt that ended, or a reload that deletes the store,
+// must hand them back first: a second attempt could not open the same files,
+// and neither could the delete.
+function releaseStoredArchives(): void {
+  window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false }));
+}
+
+// One engine start at a time, including the automatic one. A second call while
+// starting or playing is a no-op; #retry comes from the error state.
+async function startEngine(): Promise<void> {
+  if (starting || pageState === "playing" || pageState === "unsupported") return;
+  if (missingFeatureNames.length > 0) return;
+  if (!hasRequired(storedFiles)) return;
+
+  starting = true;
+  engineFailed = false;
+  engineModule = null;
+  // A previous attempt may have failed with its archive handles still open.
+  releaseStoredArchives();
+  showStarting();
+  setState("starting");
+  status.textContent = "Starting";
+
+  const page = window as Page;
+  page.__zhwpLog = [];
+  page.__zhwpDone = undefined;
+  const record = (line: string) => {
+    page.__zhwpLog?.push(line);
+  };
+
+  try {
+    const moduleUrl = engineModuleUrl();
+    const module = (await import(moduleUrl)) as { default?: unknown };
+    if (typeof module.default !== "function") {
+      throw new Error(`module ${moduleUrl} has no default-exported factory`);
+    }
+    const options = await prepareEngineOptions({
+      canvas,
+      arguments: ["-win"],
+      print: record,
+      printErr: record,
+      onAbort: (message: unknown) => {
+        reportEngineError(message, record);
+      },
+    });
+    const engine = (await (module.default as (options: unknown) => Promise<unknown>)(
+      options,
+    )) as EngineModule | null | undefined;
+
+    // An abort during the factory already replaced this start with an error.
+    if (engineFailed) return;
+
+    engineModule = engine ?? null;
+    setState("playing");
+    loading.hidden = true;
+    loader.hidden = true;
+    errorPanel.hidden = true;
+    canvas.hidden = false;
+    fullscreen.hidden = !canFullscreen();
+    fullscreen.disabled = false;
+    fitWindowedCanvas();
+    canvas.focus();
+    // Applied as soon as the engine object exists; the player may have changed
+    // either choice while the archives were still loading.
+    applyMute();
+    applyPerformanceOverlay();
+    if (page.__zhwpDone === undefined) {
+      page.__zhwpDone = { status: "resolved" };
+    }
+    status.textContent = "Ready";
+  } catch (error) {
+    if (!engineFailed) reportEngineError(error, record);
+  } finally {
+    starting = false;
+  }
+}
+
+// ----- ZIP import -----
 
 async function requestPersist(): Promise<void> {
   const manager = navigator.storage;
@@ -226,9 +562,8 @@ function beginZipImport(): AbortController {
   hideImportError();
   hideStorageWarning();
   importing = true;
+  setState("importing");
   status.textContent = "Importing";
-  play.disabled = true;
-  clear.disabled = true;
   zipInput.disabled = true;
   importCancel.hidden = false;
   importCurrent.hidden = true;
@@ -247,7 +582,6 @@ function endZipImport(): void {
   importing = false;
   importAbort = null;
   hideImportDetail();
-  clear.disabled = false;
   zipInput.disabled = false;
   zipInput.value = "";
 }
@@ -277,11 +611,19 @@ async function importZipFiles(files: readonly File[]): Promise<void> {
       showImportError(error);
     }
     await refresh();
+    setState("no-assets");
     return;
   }
   endZipImport();
   status.textContent = "Ready";
   await refresh();
+  // Issue #159: a complete install starts the engine by itself; the player
+  // never presses a Play button.
+  if (hasRequired(storedFiles) && missingFeatureNames.length === 0) {
+    void startEngine();
+  } else {
+    setState("no-assets");
+  }
 }
 
 // A dropped file counts as a ZIP by its extension alone, case-insensitive.
@@ -291,6 +633,7 @@ function droppedZips(files: FileList | null): File[] {
 
 function dropZipFiles(event: DragEvent): void {
   event.preventDefault();
+  dropZone.classList.remove("is-over");
   if (importing) return;
   const zips = droppedZips(event.dataTransfer?.files ?? null);
   if (zips.length === 0) {
@@ -304,230 +647,87 @@ function dropZipFiles(event: DragEvent): void {
   void importZipFiles(zips).catch(fail);
 }
 
-// Issue #91: the game plays in the page, and the Fullscreen button above it
-// puts #screen in the browser's fullscreen mode. Play never asks for it: SDL
-// drops a page-owned fullscreen while the engine starts, so the player presses
-// the button once the game is up, and again after any exit. The engine and its
-// render resolution do not change: only the canvas's CSS size does, because the
-// engine maps the mouse through the element box.
-let engineFailed = false;
+// ----- menu and dialogs -----
 
-// A browser without the Fullscreen API offers no button at all.
-function canFullscreen(): boolean {
-  return typeof screen.requestFullscreen === "function";
+function openMenu(): void {
+  openDialog(menu);
+  menuButton.setAttribute("aria-expanded", "true");
 }
 
-function leaveFullscreen(): void {
-  if (document.fullscreenElement !== null) void document.exitFullscreen().catch(() => undefined);
+function closeMenu(): void {
+  closeDialog(menu);
 }
 
-// The largest box with the drawing buffer's aspect ratio that fits the screen;
-// the flex layout of #screen:fullscreen centres it. The drawing buffer itself
-// is never written.
-function fitFullscreenCanvas(): void {
-  if (document.fullscreenElement !== screen) return;
-  const bufferWidth = canvas.width;
-  const bufferHeight = canvas.height;
-  if (bufferWidth <= 0 || bufferHeight <= 0) return;
-  const scale = Math.min(window.innerWidth / bufferWidth, window.innerHeight / bufferHeight);
-  canvas.style.width = `${bufferWidth * scale}px`;
-  canvas.style.height = `${bufferHeight * scale}px`;
+function showReloadConfirmation(): void {
+  const count = storedFiles.length;
+  const noun = count === 1 ? "archive" : "archives";
+  reloadWarning.textContent =
+    `This permanently deletes the ${count} stored ${noun}. ` +
+    "The game data must be selected from the ZIP files again.";
+  openDialog(reloadDialog);
 }
 
-// Out of fullscreen #80's page CSS fits the canvas to the page again.
-function unfullscreenCanvas(): void {
-  canvas.style.width = "";
-  canvas.style.height = "";
-}
-
-// Issue #97: while the game runs windowed, the canvas is the largest box with
-// the drawing buffer's aspect ratio that fits between the bottom of
-// #play-controls and the bottom of the window, inside the body's content
-// width; `margin-inline: auto` centres it. The body's horizontal padding is the
-// gap to the window, and the drawing buffer itself is never written.
-function fitWindowedCanvas(): void {
-  if (document.fullscreenElement !== null || canvas.hidden) return;
-  const bufferWidth = canvas.width;
-  const bufferHeight = canvas.height;
-  if (bufferWidth <= 0 || bufferHeight <= 0) return;
-  const bodyStyle = window.getComputedStyle(document.body);
-  const availableWidth =
-    document.documentElement.clientWidth -
-    parseFloat(bodyStyle.paddingLeft) -
-    parseFloat(bodyStyle.paddingRight);
-  const controlsBottom = playControls.hidden ? 0 : playControls.getBoundingClientRect().bottom;
-  const availableHeight = window.innerHeight - controlsBottom;
-  if (availableWidth <= 0 || availableHeight <= 0) return;
-  const scale = Math.min(availableWidth / bufferWidth, availableHeight / bufferHeight);
-  // Whole pixels, rounded down: the layout would otherwise keep the fraction of
-  // a pixel that puts the canvas past the bottom of the window.
-  canvas.style.width = `${Math.floor(bufferWidth * scale)}px`;
-  canvas.style.height = `${Math.floor(bufferHeight * scale)}px`;
-}
-
-// The displayed size the page's current mode needs: the whole screen in
-// fullscreen (#91), the space below the page text while windowed (#97).
-function fitCanvas(): void {
-  if (document.fullscreenElement === screen) fitFullscreenCanvas();
-  else fitWindowedCanvas();
-}
-
-function onFullscreenChange(): void {
-  if (document.fullscreenElement !== screen) {
-    unfullscreenCanvas();
-    // The windowed playing layout (#97) is what the page returns to.
-    fitWindowedCanvas();
-    return;
-  }
-  // A failed engine must not keep the screen: the message has to stay readable
-  // and #fullscreen is not offered again, even when the browser grants a
-  // request that was still pending when the engine aborted.
-  if (engineFailed) {
-    leaveFullscreen();
-    return;
-  }
-  fitFullscreenCanvas();
-  // The keyboard input follows the game (#28) without another click.
-  canvas.focus();
-  // The fullscreen layout lands in the next frame: fit again then, against the
-  // screen size it really gives the canvas.
-  window.requestAnimationFrame(fitFullscreenCanvas);
-}
-
-function enterFullscreen(): void {
-  if (!canFullscreen()) return;
-  const requested = screen.requestFullscreen();
-  void Promise.resolve(requested).then(
-    () => {
-      if (engineFailed) leaveFullscreen();
-      else {
-        fitFullscreenCanvas();
-        canvas.focus();
-      }
-    },
-    // A refused request keeps the game windowed and shows no error: the
-    // button stays so the player can retry.
-    () => undefined,
-  );
-}
-
-// Issue #99: the game is silent while the page is hidden or the window has lost
-// focus, and comes back only when it is visible and focused again. The engine
-// object is the module the factory resolved to; the page keeps it because Play
-// may be pressed from a page that was never visible or focused. Visibility wins
-// over focus: a focused page in a hidden document stays muted.
-type EngineModule = { _GeneralsXSetAudioMuted?: (muted: number) => unknown };
-
-let engineModule: EngineModule | null = null;
-let windowFocused = document.hasFocus();
-
-// 1 while the game must be silent, 0 only while the page is visible and focused.
-function muteValue(): number {
-  return document.visibilityState === "visible" && windowFocused ? 0 : 1;
-}
-
-// Re-applied when the module becomes available and on every later change. A
-// build without the export is ignored, and the game keeps playing.
-function applyMute(): void {
-  const engine = engineModule;
-  if (engine === null) return;
-  const setMuted = engine._GeneralsXSetAudioMuted;
-  if (typeof setMuted !== "function") return;
-  setMuted.call(engine, muteValue());
-}
-
-async function playNow(): Promise<void> {
-  play.disabled = true;
-  canvas.hidden = false;
-  canvas.focus();
-  picker.hidden = true;
-  // The controls sit above the game from Play on, so the player can go
-  // fullscreen while it runs.
-  engineFailed = false;
-  playControls.hidden = false;
-  fullscreen.hidden = !canFullscreen();
-  // Issue #97: from here the page is the window's width and the canvas takes
-  // the space below the controls. The drawing buffer may still have the
-  // attribute's size; the observer below fits it again when the engine writes
-  // it.
-  document.body.classList.add("playing");
-  fitWindowedCanvas();
-  status.textContent = "Starting";
-  // The `module` query parameter lets tests start a fake engine instead of the
-  // real one (docs/briefs/29-launcher-errors.md), the same rule as smoke.js.
-  const params = new URLSearchParams(window.location.search);
-  const moduleUrl = params.get("module") ?? "/engine/GeneralsXZH.js";
-  const page = window as Page;
-  page.__zhwpLog = [];
-  page.__zhwpDone = undefined;
-  const record = (line: string) => {
-    page.__zhwpLog?.push(line);
-  };
-  // An abort after the factory resolved replaces the resolved outcome.
-  const reportError = (message: unknown) => {
-    const text = String(message ?? "").trim() || "unknown error";
-    status.textContent = `Engine failed: ${text}`;
-    engineError.textContent = text;
-    engineError.hidden = false;
-    // #91: the failure ends the playing view's fullscreen session, and the
-    // button is not offered again, so the message stays readable.
-    engineFailed = true;
-    fullscreen.hidden = true;
-    leaveFullscreen();
-    record("[page] " + text);
-    page.__zhwpDone = { status: "error", message: text };
-  };
+async function deleteStoredAndReload(): Promise<void> {
+  reloadConfirm.disabled = true;
+  reloadCancel.disabled = true;
+  // The running engine holds the archives open; hand them back before deleting.
+  releaseStoredArchives();
   try {
-    const module = (await import(moduleUrl)) as { default?: unknown };
-    if (typeof module.default !== "function") {
-      throw new Error(`module ${moduleUrl} has no default-exported factory`);
-    }
-    const options = await prepareEngineOptions({
-      canvas,
-      arguments: ["-win"],
-      print: record,
-      printErr: record,
-      onAbort: reportError,
-    });
-    const engine = (await (module.default as (options: unknown) => Promise<unknown>)(options)) as EngineModule;
-    // Issue #99: keep the object the factory resolved to and tell it the page's
-    // current state, since Play may have been pressed from a hidden or
-    // unfocused page.
-    engineModule = engine ?? null;
-    applyMute();
-    if (page.__zhwpDone === undefined) {
-      page.__zhwpDone = { status: "resolved" };
-      status.textContent = "Ready";
-    }
-  } catch (error) {
-    reportError(error);
+    await clearStored();
+  } catch {
+    // A failed delete still reloads the page: the loader then shows what is
+    // really stored instead of claiming a state the browser refused.
   }
+  window.location.reload();
 }
 
-async function clearAll(): Promise<void> {
-  // The import controls stay enabled while the store is cleared: an import
-  // started during those milliseconds would otherwise be classified into a
-  // stale, empty summary.
-  play.disabled = true;
-  // Reset before the await: a status written by an import started meanwhile is
-  // newer than the clear and must survive it.
-  hideStorageWarning();
-  status.textContent = "";
-  hideProgress();
-  await clearStored();
-  await refresh();
+// ----- wiring -----
+
+function wireMenu(): void {
+  menuButton.addEventListener("click", () => {
+    if (menu.open) closeMenu();
+    else openMenu();
+  });
+  // A click whose target is the dialog itself is the modal backdrop.
+  menu.addEventListener("click", (event) => {
+    if (event.target === menu) closeMenu();
+  });
+  menuClose.addEventListener("click", () => closeMenu());
+  // Escape closes the native dialog; this runs for every close route so focus
+  // and aria-expanded always return to the button that opened it.
+  menu.addEventListener("close", () => {
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.focus();
+  });
+
+  about.addEventListener("click", () => openDialog(aboutDialog));
+  aboutClose.addEventListener("click", () => closeDialog(aboutDialog));
+  aboutDialog.addEventListener("close", () => about.focus());
+
+  reload.addEventListener("click", () => showReloadConfirmation());
+  reloadCancel.addEventListener("click", () => closeDialog(reloadDialog));
+  reloadConfirm.addEventListener("click", () => {
+    void deleteStoredAndReload();
+  });
+
+  fpsToggle.checked = performanceOverlay;
+  fpsToggle.addEventListener("change", () => {
+    performanceOverlay = fpsToggle.checked;
+    writePerformanceOverlay(performanceOverlay);
+    applyPerformanceOverlay();
+  });
 }
 
-// A browser without every feature cannot import or play: say so before the
-// player spends minutes picking and copying several GB, and touch no stored
-// data at all in that case.
-const missing = missingFeatures(currentEnv());
-if (missing.length > 0) {
-  unsupported.textContent = `Missing browser features: ${missing.join(", ")}`;
-  unsupported.hidden = false;
-  zipInput.disabled = true;
-  play.disabled = true;
-} else {
+function wireFullscreen(): void {
+  fullscreen.hidden = !canFullscreen();
+  updateFullscreenButton();
+  fullscreen.addEventListener("click", () => {
+    enterFullscreen();
+  });
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+}
+
+function wireInput(): void {
   zipInput.addEventListener("change", () => {
     const files = Array.from(zipInput.files ?? []);
     if (files.length === 0) return;
@@ -536,21 +736,29 @@ if (missing.length > 0) {
 
   dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
+    dropZone.classList.add("is-over");
+  });
+  dropZone.addEventListener("dragleave", () => {
+    dropZone.classList.remove("is-over");
   });
   dropZone.addEventListener("drop", (event) => {
     dropZipFiles(event);
+  });
+  dropZone.addEventListener("click", () => {
+    zipInput.click();
+  });
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    zipInput.click();
   });
 
   importCancel.addEventListener("click", () => {
     importAbort?.abort();
   });
 
-  play.addEventListener("click", () => {
-    void playNow();
-  });
-
-  clear.addEventListener("click", () => {
-    void clearAll().catch(fail);
+  retry.addEventListener("click", () => {
+    void startEngine();
   });
 
   // The game plays with the right mouse button: the browser's context menu must
@@ -558,13 +766,6 @@ if (missing.length > 0) {
   canvas.addEventListener("contextmenu", (event) => {
     event.preventDefault();
   });
-
-  // The player asks for fullscreen from the click's own user gesture; the
-  // browser's Esc, or the page's exit, brings the windowed layout back (#91).
-  fullscreen.addEventListener("click", () => {
-    enterFullscreen();
-  });
-  document.addEventListener("fullscreenchange", onFullscreenChange);
 
   // The engine writes its render resolution into the canvas backing size, so a
   // change re-fits the canvas to the new aspect ratio: on the screen in
@@ -574,11 +775,15 @@ if (missing.length > 0) {
     attributeFilter: ["width", "height"],
   });
   window.addEventListener("resize", fitCanvas);
+}
 
-  // Issue #99: the window's focus and the document's visibility decide whether
-  // the game is heard; applyMute() re-reads both, so the order they arrive in
-  // does not matter. Before Play there is no engine object yet: the state is
-  // applied when the module resolves.
+function wireAudio(): void {
+  mute.addEventListener("click", () => {
+    userMuted = !userMuted;
+    writeMuted(userMuted);
+    updateMuteButton();
+    applyMute();
+  });
   window.addEventListener("blur", () => {
     windowFocused = false;
     applyMute();
@@ -587,7 +792,49 @@ if (missing.length > 0) {
     windowFocused = true;
     applyMute();
   });
-  document.addEventListener("visibilitychange", applyMute);
-
-  void refresh().catch(fail);
+  document.addEventListener("visibilitychange", () => {
+    applyMute();
+  });
 }
+
+// ----- boot -----
+
+async function loadStoredAndStart(): Promise<void> {
+  setState("boot");
+  try {
+    storedFiles = await listStored();
+  } catch {
+    storedFiles = [];
+  }
+  showStored(storedFiles);
+  await refreshStorage();
+  if (hasRequired(storedFiles)) {
+    void startEngine();
+  } else {
+    status.textContent = "Awaiting game data";
+    setState("no-assets");
+  }
+}
+
+function boot(): void {
+  userMuted = readMuted();
+  performanceOverlay = readPerformanceOverlay();
+  fpsToggle.checked = performanceOverlay;
+  updateMuteButton();
+  wireFullscreen();
+  wireMenu();
+  wireInput();
+  wireAudio();
+
+  if (missingFeatureNames.length > 0) {
+    unsupported.textContent = `Missing browser features: ${missingFeatureNames.join(", ")}`;
+    unsupported.hidden = false;
+    zipInput.disabled = true;
+    setState("unsupported");
+    return;
+  }
+
+  void loadStoredAndStart().catch(fail);
+}
+
+boot();

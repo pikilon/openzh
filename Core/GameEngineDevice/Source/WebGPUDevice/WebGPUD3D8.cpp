@@ -304,7 +304,7 @@ struct TextureCombinerUniforms
 	float alphaRef;
 	DWORD alphaFunc;
 	DWORD alphaTestEnable;
-	DWORD padding;
+	DWORD opaqueAlpha;
 	DWORD pixelShaderMode;
 	DWORD pixelShaderTextureCount;
 	DWORD shaderPadding0;
@@ -1213,7 +1213,7 @@ WebGPUD3DDevice::DrawBindings WebGPUD3DDevice::bindGroup()
 		static_cast<float>(m_renderStates[D3DRS_ALPHAREF] & 0xff) / 255.0f,
 		m_renderStates[D3DRS_ALPHAFUNC],
 		m_renderStates[D3DRS_ALPHATESTENABLE],
-		0,
+		(pixelShader.mode != 0 && !m_renderStates[D3DRS_ALPHABLENDENABLE]) ? 1u : 0u,
 		pixelShader.mode,
 		pixelShader.textureCount,
 		0,
@@ -2135,7 +2135,7 @@ struct TextureCombiner {
     alpha_ref: f32,
     alpha_func: u32,
     alpha_test_enable: u32,
-    padding: u32,
+    opaque_alpha: u32,
     pixel_shader_mode: u32,
     pixel_shader_texture_count: u32,
     shader_padding0: u32,
@@ -2283,6 +2283,11 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     if (combiner.alpha_test_enable != 0u && !alpha_compare(color.a)) {
         discard;
+    }
+    // GeneralsX @bugfix zhwp 18/10/2026 The terrain pixel shaders leave the blend weight (vertex alpha) in the output
+    // alpha. Without blending that alpha is meaningless in D3D, but here it blacked out the cells with no blend (#95).
+    if (combiner.opaque_alpha != 0u) {
+        color.a = 1.0;
     }
     color = vec4<f32>(mix(combiner.fog_color.rgb, color.rgb, input.fog), color.a);
     return color;

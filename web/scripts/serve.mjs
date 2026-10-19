@@ -144,6 +144,7 @@ const server = createServer((request, response) => {
     notFound(response);
     return;
   }
+  if (pathname === "/") pathname = "/index.html";
   const file = resolveFile(pathname, mounts);
   if (file === null) {
     notFound(response);

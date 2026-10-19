@@ -119,3 +119,8 @@ test("7: the modal text names no EA trademark", async ({ page }) => {
   expect(text).not.toMatch(/Command\s*&\s*Conquer/i);
   expect(text).not.toMatch(/Generals|Zero Hour/i);
 });
+
+test("the support modal says tips support development and the online server", async ({ page }) => {
+  await openDonate(page);
+  await expect(page.locator("#donate-dialog .about-lede")).toContainText("development and the online server");
+});

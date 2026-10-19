@@ -45,6 +45,14 @@
       <header id="topbar">
         <h1 id="title">OpenZH</h1>
         <span id="build-info" title="Development build">dev</span>
+        <span
+          id="offline"
+          class="offline-badge"
+          role="status"
+          title="No internet connection: the game still plays, online games need it back"
+          hidden
+          >Offline</span
+        >
         <div class="topbar-actions" role="group" aria-label="Game controls">
           <button
             id="game-menu"
@@ -533,8 +541,8 @@
       <p class="eyebrow">OpenZH // Support</p>
       <h2 id="donate-title">Support OpenZH</h2>
       <p class="dialog-copy about-lede">
-        OpenZH is free and stays free. A tip is optional, unlocks nothing and only helps
-        cover the time and the hosting behind the port.
+        OpenZH is free and stays free. A tip is optional, unlocks nothing and supports the
+        port's development and the online server that multiplayer games run through.
       </p>
       <p class="dialog-copy">
         Have a suggestion, a bug report or a feature idea? Send it in the PayPal message

@@ -108,6 +108,8 @@ test("1: the top bar holds only the title and five icon buttons", async ({ page 
       const parent = node.parentElement;
       // An SVG <title> is accessibility metadata, never rendered text.
       if (parent !== null && parent.closest("svg") !== null) continue;
+      // Hidden status text (the Offline badge while online) is not shown.
+      if (parent !== null && parent.closest("[hidden]") !== null) continue;
       parts.push((node.textContent ?? "").trim());
     }
     return parts;

@@ -1036,6 +1036,18 @@ function wireMenu(): void {
   });
 }
 
+// The top bar says when the browser is offline: the game still plays from its
+// stored files, but invites and online games need the connection back.
+function wireOffline(): void {
+  const badge = byId<HTMLElement>("offline");
+  const update = () => {
+    badge.hidden = navigator.onLine;
+  };
+  window.addEventListener("online", update);
+  window.addEventListener("offline", update);
+  update();
+}
+
 function wireFullscreen(): void {
   fullscreen.hidden = !canFullscreen();
   updateFullscreenButton();
@@ -1175,6 +1187,7 @@ function boot(): void {
   wireMenu();
   wireInput();
   wireAudio();
+  wireOffline();
 
   if (missingFeatureNames.length > 0) {
     unsupported.textContent = `Missing browser features: ${missingFeatureNames.join(", ")}`;

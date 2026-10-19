@@ -191,6 +191,23 @@ body {
   user-select: all;
 }
 
+/* Shown only while the browser is offline. */
+.offline-badge {
+  padding: 3px 7px;
+  border: 1px solid var(--danger);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.offline-badge[hidden] {
+  display: none;
+}
+
 /* Narrow screens: under the title, so the buttons keep their room. */
 @media (max-width: 600px) {
   #build-info {

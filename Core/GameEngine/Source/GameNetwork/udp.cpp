@@ -84,9 +84,11 @@ EM_JS(Int, GeneralsXWebLanBind, (UnsignedInt ip, UnsignedShort port), {
 			+ globalThis.location.host + "/GeneralsXLan",
 	];
 	if (relayUrls[1] && relayUrls[0] === relayUrls[1]) relayUrls.pop();
+	// OpenZH: rooms are private; the relay refuses a socket without the invite's room and token.
 	const room = globalThis.generalsXLanRoom;
 	if (room) {
-		relayUrls = relayUrls.map((url) => url + (url.includes("?") ? "&" : "?") + "room=" + encodeURIComponent(room));
+		const query = "room=" + encodeURIComponent(room) + "&token=" + encodeURIComponent(globalThis.generalsXLanToken || "");
+		relayUrls = relayUrls.map((url) => url + (url.includes("?") ? "&" : "?") + query);
 	}
 	const socket = new WebSocket(relayUrls[0]);
 	socket.binaryType = "arraybuffer";
@@ -198,6 +200,19 @@ EM_JS(Int, GeneralsXWebLanRead,
 UnsignedInt GetWebLanVirtualIP()
 {
 	return GeneralsXWebLanVirtualIP();
+}
+
+// OpenZH: what the launcher's invite asks the shell to do (web/src/multiplayer.ts sets
+// generalsXLanAction once the relay has leased this tab its address): 1 host, 2 join.
+EM_JS(Int, GeneralsXWebLanAction, (Int take), {
+	const action = { host: 1, join: 2 }[globalThis.generalsXLanAction] || 0;
+	if (take) globalThis.generalsXLanAction = undefined;
+	return action;
+});
+
+WebLanAction GetWebLanAction(Bool take)
+{
+	return static_cast<WebLanAction>(GeneralsXWebLanAction(take ? 1 : 0));
 }
 #endif
 

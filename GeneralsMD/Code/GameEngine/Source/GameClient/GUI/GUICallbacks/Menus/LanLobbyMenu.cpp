@@ -93,9 +93,36 @@ Bool LANPreferences::loadFromIniFile()
 	return load("Network.ini");
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+// OpenZH: the name the player gave the launcher (web/src/multiplayer.ts), as UTF-32 like wchar_t.
+EM_JS(Int, GeneralsXWebPlayerName, (WideChar *out, Int capacity), {
+	const name = String(globalThis.generalsXPlayerName || "").trim();
+	let length = 0;
+	for (const ch of name) {
+		if (length + 1 >= capacity) break;
+		HEAPU32[(out >>> 2) + length++] = ch.codePointAt(0);
+	}
+	HEAPU32[(out >>> 2) + length] = 0;
+	return length;
+});
+#endif
+
 UnicodeString LANPreferences::getUserName()
 {
 	UnicodeString ret;
+
+#if defined(__EMSCRIPTEN__)
+	{
+		WideChar name[g_lanPlayerNameLength + 1];
+		if (GeneralsXWebPlayerName(name, g_lanPlayerNameLength + 1) > 0)
+		{
+			ret = name;
+			return ret;
+		}
+	}
+#endif
 
 	LANPreferences::const_iterator it = find("UserName");
 	if (it != end())
@@ -335,6 +362,15 @@ GameWindow *listboxGames = nullptr;
 static Bool useFpsLimit;
 static UnicodeString defaultName;
 
+#if defined(__EMSCRIPTEN__)
+// OpenZH: an invite link's lobby is invisible. The host's goes straight to its game's
+// options; a guest's joins the room's game as soon as it is heard (the room is private,
+// so it is the host's) and shows the lobby only if none turns up.
+static WebLanAction autoAction = WEB_LAN_NONE;
+static Int autoActionFrames = 0;
+static const Int AUTO_JOIN_GIVE_UP_FRAMES = 30 * 30;
+#endif
+
 static void playerTooltip(GameWindow *window,
 													WinInstanceData *instData,
 													UnsignedInt mouse)
@@ -537,6 +573,13 @@ void LanLobbyMenuInit( WindowLayout *layout, void *userData )
 	fflush(stderr); */
 	TheLAN->RequestLocations();
 
+#if defined(__EMSCRIPTEN__)
+	autoAction = lanBound ? GetWebLanAction(TRUE) : WEB_LAN_NONE;
+	autoActionFrames = 0;
+	if (autoAction != WEB_LAN_NONE)
+		parentLanLobby->winHide(TRUE);
+#endif
+
 	/*
 	UnicodeString unicodeChat;
 
@@ -678,6 +721,38 @@ void LanLobbyMenuUpdate( WindowLayout * layout, void *userData)
 
 	if (TheShell->isAnimFinished() && !LANbuttonPushed && TheLAN)
 		TheLAN->update();
+
+#if defined(__EMSCRIPTEN__)
+	if (TheShell->isAnimFinished() && !LANbuttonPushed && !LANisShuttingDown && TheLAN)
+	{
+		if (autoAction == WEB_LAN_NONE && GetWebLanAction(FALSE) != WEB_LAN_NONE)
+		{
+			// A new invite while the lobby is open: its sockets belong to the old room.
+			// Back to the main menu, which opens the lobby again for the new one.
+			TheWindowManager->winSendSystemMsg(buttonBack->winGetParent(), GBM_SELECTED,
+																				 (WindowMsgData)buttonBack, buttonBackID);
+		}
+		else if (autoAction == WEB_LAN_HOST)
+		{
+			autoAction = WEB_LAN_NONE;
+			TheLAN->RequestGameCreate(L"", FALSE);
+		}
+		else if (autoAction == WEB_LAN_JOIN)
+		{
+			if (LANGameInfo *game = TheLAN->LookupGameByListOffset(0))
+			{
+				autoAction = WEB_LAN_NONE;
+				TheLAN->RequestGameJoin(game);
+			}
+			else if (++autoActionFrames > AUTO_JOIN_GIVE_UP_FRAMES)
+			{
+				autoAction = WEB_LAN_NONE;
+				parentLanLobby->winHide(FALSE);
+				GadgetListBoxAddEntryText(listboxChatWindow, TheGameText->fetch("LAN:ErrorNoGameSelected"), chatSystemColor, -1, 0);
+			}
+		}
+	}
+#endif
 
 	if (LANSocketErrorDetected == TRUE) {
 		LANSocketErrorDetected = FALSE;

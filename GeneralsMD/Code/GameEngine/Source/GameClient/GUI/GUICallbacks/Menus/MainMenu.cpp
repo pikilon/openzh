@@ -76,6 +76,7 @@
 #endif
 
 #include "GameNetwork/DownloadManager.h"
+#include "GameNetwork/udp.h"
 
 #include "GameClient/InGameUI.h"
 
@@ -1013,6 +1014,15 @@ void MainMenuUpdate( WindowLayout *layout, void *userData )
 
 	if(dontAllowTransitions && TheTransitionHandler->isFinished())
 		dontAllowTransitions = FALSE;
+
+#if defined(__EMSCRIPTEN__)
+	// OpenZH: an invite from the launcher opens the LAN lobby, which hosts or joins by itself.
+	if (!justEntered && !dontAllowTransitions && !buttonPushed && parentMainMenu
+		&& TheShell->isAnimFinished() && GetWebLanAction(FALSE) != WEB_LAN_NONE)
+	{
+		TheWindowManager->winSendSystemMsg(parentMainMenu, GBM_SELECTED, (WindowMsgData)buttonNetwork, networkID);
+	}
+#endif
 
 	if(showLogo && dontAllowTransitions == FALSE)
 	{

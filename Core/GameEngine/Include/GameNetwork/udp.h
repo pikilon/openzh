@@ -120,6 +120,10 @@ class UDP
 
 #if defined(__EMSCRIPTEN__)
 UnsignedInt GetWebLanVirtualIP();
+
+enum WebLanAction { WEB_LAN_NONE = 0, WEB_LAN_HOST = 1, WEB_LAN_JOIN = 2 };
+/// The launcher's pending invite action; `take` clears it.
+WebLanAction GetWebLanAction(Bool take);
 #endif
 
 #ifdef DEBUG_LOGGING

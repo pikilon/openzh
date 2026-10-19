@@ -29,6 +29,16 @@ type AccessHandle = {
 
 const handles: AccessHandle[] = [];
 
+// A page that is going away (a reload, a Retry) may still be releasing the
+// same files, so a lock conflict is retried for a short while before failing.
+const OPEN_RETRY_MS = 150;
+const OPEN_RETRY_LIMIT_MS = 3000;
+
+function isLockConflict(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name;
+  return name === "NoModificationAllowedError" || name === "InvalidStateError";
+}
+
 async function openFile(kind: GameKind, name: string): Promise<AccessHandle> {
   const root = await navigator.storage.getDirectory();
   const parent = await root.getDirectoryHandle("zhwp").then((d) => d.getDirectoryHandle(kind));
@@ -36,7 +46,15 @@ async function openFile(kind: GameKind, name: string): Promise<AccessHandle> {
   const create = (file as FileSystemFileHandle & {
     createSyncAccessHandle(): Promise<AccessHandle>;
   }).createSyncAccessHandle;
-  return create.call(file);
+  const deadline = performance.now() + OPEN_RETRY_LIMIT_MS;
+  for (;;) {
+    try {
+      return await create.call(file);
+    } catch (error) {
+      if (!isLockConflict(error) || performance.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, OPEN_RETRY_MS));
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -51,10 +69,12 @@ async function main(): Promise<void> {
       try {
         handles.push(await openFile(file.kind, file.name));
       } catch (error) {
-        // A file that cannot be opened leaves no handle: requests for its
-        // index are answered with an error.
-        handles.push(undefined as unknown as AccessHandle);
+        // The start fails as a whole: release what was opened so a Retry (or
+        // another tab) can open the same files, and serve nothing.
+        for (const handle of handles) handle?.close();
+        handles.length = 0;
         postMessage({ error: String(error) });
+        return;
       }
     }
     postMessage({ ready: true });

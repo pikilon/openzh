@@ -441,8 +441,41 @@ function showStarting(): void {
   fullscreen.hidden = !canFullscreen();
 }
 
-function reportEngineError(message: unknown, record: (line: string) => void): void {
+// The stored archives can be open in one page only. A second OpenZH tab or an
+// installed-app window holding them makes the start fail with this name.
+const FILES_IN_USE =
+  "The game files are in use by another OpenZH tab or window. Close it, then press Retry.";
+
+function describeEngineFailure(message: unknown): string {
   const text = String(message ?? "").trim() || "unknown error";
+  return text.includes("NoModificationAllowedError") ? FILES_IN_USE : text;
+}
+
+// Held for the life of the page once the engine starts (the browser drops it
+// when the page goes away), so a second tab learns at once that the game is
+// already running elsewhere instead of failing on the file locks.
+let engineLockHeld = false;
+
+function acquireEngineLock(): Promise<boolean> {
+  const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+  if (engineLockHeld || locks === undefined) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    locks
+      .request("openzh-engine", { ifAvailable: true }, (lock) => {
+        if (lock === null) {
+          resolve(false);
+          return undefined;
+        }
+        engineLockHeld = true;
+        resolve(true);
+        return new Promise<void>(() => undefined);
+      })
+      .catch(() => resolve(true));
+  });
+}
+
+function reportEngineError(message: unknown, record: (line: string) => void): void {
+  const text = describeEngineFailure(message);
   engineFailed = true;
   engineModule = null;
   touch.setPlaying(false);
@@ -506,6 +539,7 @@ async function startEngine(): Promise<void> {
   };
 
   try {
+    if (!(await acquireEngineLock())) throw new Error(FILES_IN_USE);
     const moduleUrl = engineModuleUrl();
     const module = (await import(moduleUrl)) as { default?: unknown };
     if (typeof module.default !== "function") {

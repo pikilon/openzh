@@ -74,7 +74,13 @@ export class FileBridge {
       },
       [],
     );
-    await ready;
+    try {
+      await ready;
+    } catch (error) {
+      // The worker has released its handles; it must not linger either.
+      worker.terminate();
+      throw error;
+    }
     return new FileBridge(worker, shared, files, readTimeoutMs);
   }
 

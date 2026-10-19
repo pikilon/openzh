@@ -189,3 +189,93 @@ test("6: a visible but unfocused page is muted, and a focus while hidden keeps i
   expect(afterFocus.slice(callsAfterBlur).every((value) => value === 1)).toBe(true);
   expect(await lastMuteCall(page)).toBe(1);
 });
+
+// Issue #186: the focus flag is seeded once, so a navigation from the address
+// bar can miss the only `focus` event. These tests make `document.hasFocus()`
+// lie independently of the synthetic events, which is exactly what the browser
+// does when the address bar holds focus during load.
+type FocusProbe = Window &
+  typeof globalThis & {
+    __focusStub?: boolean;
+    __setFocusStub?: (focused: boolean) => void;
+  };
+
+// Installs a controllable document.hasFocus() before any page script runs.
+// The page under test is opened normally afterwards.
+async function stubDocumentFocus(page: Page, initially: boolean): Promise<void> {
+  await page.addInitScript((focused: boolean) => {
+    const probe = window as unknown as FocusProbe;
+    probe.__focusStub = focused;
+    probe.__setFocusStub = (next: boolean) => {
+      probe.__focusStub = next;
+    };
+    Object.defineProperty(document, "hasFocus", {
+      configurable: true,
+      value: () => (window as unknown as FocusProbe).__focusStub === true,
+    });
+  }, initially);
+}
+
+test("7: a visible page that missed the focus event unmutes when the engine is ready", async ({
+  page,
+}, info) => {
+  await stubDocumentFocus(page, false);
+  await page.setViewportSize(VIEWPORT);
+  await openLauncher(page, MUTE_FAKE);
+
+  // The address bar releases focus; no `focus` event reaches the page.
+  await page.evaluate(() => (window as unknown as FocusProbe).__setFocusStub?.(true));
+  await importInstall(page, info.outputPath());
+  await waitForMuteEngine(page);
+
+  await waitForLastMuteCall(page, 0);
+});
+
+test("8: a pointerdown recovers a missed focus event, and a really unfocused page stays muted", async ({
+  page,
+}, info) => {
+  await stubDocumentFocus(page, false);
+  await page.setViewportSize(VIEWPORT);
+  await openLauncher(page, MUTE_FAKE);
+  await importInstall(page, info.outputPath());
+  await waitForMuteEngine(page);
+  await waitForLastMuteCall(page, 1);
+
+  // Still unfocused: touching the page must not unmute it.
+  await page.evaluate(() => {
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  });
+  // The next task boundary is enough for a wrong unmute to be recorded.
+  await nextFrame(page);
+  expect(await lastMuteCall(page)).toBe(1);
+
+  // Now the document reports focus without a `focus` event: the first
+  // interaction refreshes the flag.
+  await page.evaluate(() => {
+    (window as unknown as FocusProbe).__setFocusStub?.(true);
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  });
+  await waitForLastMuteCall(page, 0);
+});
+
+test("9: a hidden page with document focus is still muted", async ({ page }, info) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    Object.defineProperty(document, "hasFocus", {
+      configurable: true,
+      value: () => true,
+    });
+  });
+  await page.setViewportSize(VIEWPORT);
+  await openLauncher(page, MUTE_FAKE);
+  await importInstall(page, info.outputPath());
+  await waitForMuteEngine(page);
+
+  await expect
+    .poll(() => firstMuteCall(page), { timeout: WAIT, message: "the engine's first value" })
+    .toBe(1);
+  expect(await lastMuteCall(page)).toBe(1);
+});

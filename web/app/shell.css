@@ -349,6 +349,161 @@ body {
   background: var(--ink);
 }
 
+/* ----- touch controls (docs/specs/touch-controls.md) ----- */
+
+#canvas {
+  touch-action: none;
+}
+
+.touch-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--accent-soft);
+  font-family: var(--font-condensed);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, rgba(20, 54, 92, 0.9), rgba(5, 16, 32, 0.94));
+  border: 1px solid var(--line);
+  clip-path: polygon(
+    9px 0,
+    100% 0,
+    100% calc(100% - 9px),
+    calc(100% - 9px) 100%,
+    0 100%,
+    0 9px
+  );
+  cursor: pointer;
+  touch-action: none;
+}
+
+.touch-toggle:hover {
+  color: #fff;
+  border-color: rgba(143, 216, 255, 0.85);
+  box-shadow: 0 0 16px rgba(46, 168, 255, 0.35);
+}
+
+.touch-toggle[aria-pressed="true"] {
+  color: #020a14;
+  background: linear-gradient(180deg, #8fd8ff, #2ea8ff);
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 20px rgba(46, 168, 255, 0.5);
+}
+
+.touch-controls {
+  position: absolute;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 12px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.touch-controls > * {
+  pointer-events: auto;
+}
+
+.touch-locks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.touch-lock {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 56px;
+  height: 54px;
+  margin: 0;
+  padding: 0 8px;
+  color: var(--accent-soft);
+  font-family: var(--font-condensed);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, rgba(20, 54, 92, 0.88), rgba(5, 16, 32, 0.94));
+  border: 1px solid var(--line);
+  clip-path: polygon(
+    8px 0,
+    100% 0,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    0 100%,
+    0 8px
+  );
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.touch-lock[aria-pressed="true"] {
+  color: #020a14;
+  background: linear-gradient(180deg, #8fd8ff, #2ea8ff);
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
+}
+
+.touch-joystick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(46, 168, 255, 0.2), transparent 62%),
+    rgba(4, 16, 32, 0.72);
+  border: 1px solid rgba(143, 216, 255, 0.5);
+  box-shadow:
+    inset 0 0 24px rgba(46, 168, 255, 0.16),
+    0 0 18px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+}
+
+.touch-joystick::before {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border: 1px dashed rgba(76, 177, 255, 0.28);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.touch-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #d8f2ff, #2ea8ff 62%, #0c4f8f);
+  border: 1px solid rgba(216, 242, 255, 0.9);
+  box-shadow:
+    0 0 16px rgba(46, 168, 255, 0.65),
+    inset 0 1px 2px rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+  transform: translate(0px, 0px);
+}
+
 /* ----- loader ----- */
 
 .loader-panel {
@@ -697,6 +852,16 @@ dialog::backdrop {
   color: var(--text);
 }
 
+#saves-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+#saves-status {
+  margin: 10px 0 0;
+  color: var(--accent-soft);
+}
+
 .menu-storage {
   margin: 0 0 12px;
 }
@@ -897,6 +1062,40 @@ dialog::backdrop {
   color: var(--muted);
 }
 
+.about-lede {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.about-sections {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.about-sections h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-condensed);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.about-sections p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+#about-dialog {
+  width: min(620px, calc(100vw - 32px));
+}
+
 .about-grid {
   display: grid;
   grid-template-columns: 90px 1fr;
@@ -918,11 +1117,19 @@ dialog::backdrop {
 }
 
 .about-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
   margin: 12px 0 18px;
 }
 
 .about-source a {
   color: var(--accent-soft);
+}
+
+#donate-tips {
+  margin: 18px 0 6px;
 }
 
 .dialog-actions {
@@ -934,6 +1141,41 @@ dialog::backdrop {
 }
 
 /* ----- responsive ----- */
+
+@media (max-width: 420px) {
+  .touch-lock {
+    min-width: 52px;
+    height: 52px;
+    padding: 0 6px;
+  }
+
+  .touch-joystick {
+    width: 108px;
+    height: 108px;
+  }
+
+  .touch-knob {
+    width: 38px;
+    height: 38px;
+    margin: -19px 0 0 -19px;
+  }
+}
+
+/* Keep the bottom-right of the game (the minimap) free on a landscape phone:
+   the controls stay left of a 180 px strip, and the joystick is still the
+   rightmost control of the group. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .touch-controls {
+    right: 180px;
+    justify-content: flex-start;
+    gap: 18px;
+  }
+
+  .touch-toggle {
+    top: 6px;
+    right: 6px;
+  }
+}
 
 @media (max-width: 700px) {
   #topbar {

@@ -62,6 +62,7 @@
 #include "GameLogic/VictoryConditions.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
+#include "GameClient/View.h"
 #include "GameClient/MapUtil.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NetworkInterface.h"
@@ -264,6 +265,30 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetAudioMuted(Int muted)
 	else
 		TheAudio->unmuteAudio(AudioManager::MuteAudioReason_WindowFocus);
 	return TRUE;
+}
+
+// GeneralsX @feature 19/10/2026 Issue #187: analog camera pan for the touch joystick. The arrow
+// keys only expose on/off directions, so this applies the same per-frame offset the keyboard
+// scroll uses (LookAtXlat's SCROLL_AMT and keyboard factor), scaled by a vector in [-1, 1].
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
+{
+	if (TheTacticalView == nullptr || TheGlobalData == nullptr)
+		return FALSE;
+	if (x > 1.0f) x = 1.0f;
+	else if (x < -1.0f) x = -1.0f;
+	if (y > 1.0f) y = 1.0f;
+	else if (y < -1.0f) y = -1.0f;
+	if (x == 0.0f && y == 0.0f)
+		return TRUE;
+
+	const Real SCROLL_AMT = 200.0f;
+	const Real fpsRatio = TheFramePacer != nullptr ? TheFramePacer->getBaseOverUpdateFpsRatio() : 1.0f;
+	Coord2D offset;
+	offset.x = x * TheGlobalData->m_horizontalScrollSpeedFactor * fpsRatio * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+	offset.y = y * TheGlobalData->m_verticalScrollSpeedFactor * fpsRatio * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
+	if (TheInGameUI != nullptr)
+		TheInGameUI->setScrollAmount(offset);
+	return TheTacticalView->userScrollBy(&offset);
 }
 
 // GeneralsX @feature Codex 06/08/2026 Pause when the player leaves the game surface. Esc cannot

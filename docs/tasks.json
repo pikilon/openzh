@@ -1447,6 +1447,169 @@
         "web/scripts/make-game-zip.mjs"
       ],
       "summary": "make-game-zip can store speech and audio WAV entries as raw MP3 (engine decodes by content), encoded with ffmpeg."
+    },
+    {
+      "issue": 186,
+      "title": "Launcher starts muted on first load when the focus event is missed",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/186-initial-focus-mute.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/launcher-mute.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-mute.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/main.ts"
+      ],
+      "summary": "Refresh the event-tracked focus flag from document.hasFocus() when the engine starts and on the first interaction, so a missed startup focus event no longer leaves the first game muted."
+    },
+    {
+      "issue": 187,
+      "title": "Touch controls: overlay, locks and joystick for touch play",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/187-touch-controls.md",
+      "depends_on": [],
+      "check": "scripts/build-webgpu.sh && cd web && npx playwright test tests/touch-controls.spec.ts",
+      "test_paths": [
+        "web/tests/touch-controls.spec.ts",
+        "web/tests/harness/touch/"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/shell.css",
+        "web/src/prefs.ts",
+        "web/src/touch.ts",
+        "web/src/main.ts",
+        "GeneralsMD/Code/GameEngineDevice/Source/SDL3GameEngine.cpp"
+      ],
+      "summary": "Touch toggle and overlay inside #screen, Left/Right/Multi latches, 120 px joystick, synthetic SDL pointer/keyboard input and an analog GeneralsXPanCamera export; desktop unchanged."
+    },
+    {
+      "issue": 188,
+      "title": "Launcher: installable web app with icons and a link preview",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/188-pwa-thumbnail.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/launcher-pwa.spec.ts tests/package.spec.ts tests/launcher-favicon.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-pwa.spec.ts",
+        "web/tests/package.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/manifest.webmanifest",
+        "web/app/icons/",
+        "web/app/screenshots/",
+        "web/app/og.png",
+        "web/app/index.html",
+        "web/scripts/serve.mjs"
+      ],
+      "summary": "Manifest with 192/512/maskable icons and a wide screenshot, Apple touch icon, theme colour and Open Graph/Twitter card with a 1200x630 og.png; assets stay relative so /app/ and the published root both work."
+    },
+    {
+      "issue": 189,
+      "title": "Saved games survive changing the game-data ZIPs",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/189-saves-survive-zips.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/saves.spec.ts",
+      "test_paths": [
+        "web/tests/saves.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/saves.ts"
+      ],
+      "summary": "Regression test seeds IDBFS saves and proves import replacement and clearStored touch only OPFS; saves.ts reads the database without the engine."
+    },
+    {
+      "issue": 190,
+      "title": "Launcher: export saved games as a ZIP from the top menu",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "m",
+      "local_model_ok": false,
+      "brief": "docs/briefs/190-export-saves.md",
+      "depends_on": [
+        189
+      ],
+      "check": "cd web && npx playwright test tests/zip-write.spec.ts tests/saves.spec.ts",
+      "test_paths": [
+        "web/tests/zip-write.spec.ts",
+        "web/tests/saves.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/src/zip-write.ts",
+        "web/src/saves.ts",
+        "web/src/main.ts",
+        "web/app/index.html",
+        "web/app/shell.css"
+      ],
+      "summary": "A stored-only ZIP writer, a Saved games menu section with a count, and a download of openzh-saves-YYYY-MM-DD.zip after flushing the engine's IDBFS."
+    },
+    {
+      "issue": 191,
+      "title": "Launcher: About explains the project",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/191-about.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/launcher-about.spec.ts tests/launcher-menu.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-about.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/shell.css"
+      ],
+      "summary": "About now explains the browser port, the GPL source release, local-only files, the port's scope, independence, and links the issue tracker; all old ids stay."
+    },
+    {
+      "issue": 192,
+      "title": "Launcher: donation button in the top bar and a donation modal",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": false,
+      "brief": "docs/briefs/192-donate.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/launcher-donate.spec.ts tests/launcher-shell.spec.ts tests/launcher-menu.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-donate.spec.ts",
+        "web/tests/launcher-shell.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/shell.css",
+        "web/src/main.ts"
+      ],
+      "summary": "#donate is the fourth top-bar icon button and opens a modal with the three PayPal tips, the Red Line suggestion-in-the-message convention and the issue tracker."
     }
   ]
 }

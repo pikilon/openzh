@@ -96,6 +96,13 @@ test("1: a fake engine folder produces the package tree and exits 0", ({}, info)
 
   for (const rel of [
     "app/index.html",
+    "app/manifest.webmanifest",
+    "app/og.png",
+    "app/icons/icon-192.png",
+    "app/icons/icon-512.png",
+    "app/icons/icon-maskable-512.png",
+    "app/icons/apple-touch-icon.png",
+    "app/screenshots/launcher-wide.png",
     "dist/main.js",
     "engine/GeneralsXZH.js",
     "engine/GeneralsXZH.wasm",

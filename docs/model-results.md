@@ -122,3 +122,13 @@ verifying each attempt. Used to decide which models do which work well.
 | 2026-10-19 | #180 | code | deepseek-flash (dsh) | ok | ~1.9 min | 41 pass; real game: 8579 wav to 48 kbps MP3, 700 MB saved vs the originals; lite-mp3 1.48 GB; engine real-data specs pass (call 89) |
 
 Before D-05 the lead agent wrote all tests, so there are no test-writing rows yet.
+
+| 2026-10-19 | #186 | tests+code | deepseek-flash (dsh) | ok | ~4 min | new tests 7-8 fail on HEAD, test 9 passes; 9/9 after refreshing the focus flag at engine start and on first interaction |
+| 2026-10-19 | #188 | tests+code | deepseek-flash (dsh) | ok | ~25 min | 5 PWA tests plus the package contract pass; first run caught icon-512 at 1024 px, fixed to 512 |
+| 2026-10-19 | #191 | tests+code | deepseek-flash (dsh) | ok | ~6 min | 7 About tests and the #159 menu tests pass; no trademark in the new text |
+| 2026-10-19 | #192 | tests+code | deepseek-flash (dsh) | ok | ~8 min | 7 donation tests and the updated top-bar contract pass; menu support row unchanged |
+| 2026-10-19 | #189 | tests+code | deepseek-flash (dsh) | ok | ~5 min | seeded IDBFS saves keep bytes and timestamps through two install replacements and clearStored |
+| 2026-10-19 | #190 | tests+code | deepseek-flash (dsh) | ok | ~10 min | 3 zip-writer tests and the menu download pass; exported ZIP round-trips through openZip |
+| 2026-10-19 | #187 | tests+code | deepseek-flash (dsh) | ok | ~35 min | 15 touch tests pass in Brave; engine build exit 0 with GeneralsXPanCamera present in GeneralsXZH.js; full synthetic suite 377 pass, 18 skipped |
+
+| 2026-10-19 | #187/#188/#189/#190/#191/#192 | verify | deepseek-flash (dsh) | ok | ~3 min | full synthetic suite 377 pass, 18 skipped; real data lite-mp3: main menu, WebGPU (#184 attachments), audio, fonts, textures and 1080p resolution pass; main menu screenshot drawn, no black canvas |

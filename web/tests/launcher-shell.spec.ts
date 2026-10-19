@@ -51,7 +51,7 @@ async function factoryCalls(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as ShellWindow).__factoryCalls ?? 0);
 }
 
-test("1: the top bar holds only the title and three icon buttons", async ({ page }) => {
+test("1: the top bar holds only the title and four icon buttons", async ({ page }) => {
   await openShell(page);
   const topbar = page.locator("#topbar");
 
@@ -63,7 +63,7 @@ test("1: the top bar holds only the title and three icon buttons", async ({ page
   await expect(page.locator("#title")).toHaveText("OpenZH");
 
   // Three icon-only buttons, each with an inline SVG and both labels.
-  for (const id of ["fullscreen", "mute", "menu-button"]) {
+  for (const id of ["donate", "fullscreen", "mute", "menu-button"]) {
     const button = page.locator(`#${id}`);
     await expect(button).toBeVisible();
     expect(await button.locator("svg").count()).toBeGreaterThanOrEqual(1);
@@ -92,7 +92,7 @@ test("1: the top bar holds only the title and three icon buttons", async ({ page
       })
       .map((item) => item.id),
   );
-  expect(visibleControls.sort()).toEqual(["fullscreen", "menu-button", "mute"]);
+  expect(visibleControls.sort()).toEqual(["donate", "fullscreen", "menu-button", "mute"]);
 
   const strayText = await topbar.evaluate((element) => {
     const title = document.getElementById("title");
@@ -113,9 +113,9 @@ test("1: the top bar holds only the title and three icon buttons", async ({ page
 
   // Title first, then the buttons in contract order.
   const order = await topbar.evaluate((element) =>
-    [...element.querySelectorAll("#title, #fullscreen, #mute, #menu-button")].map((item) => item.id),
+    [...element.querySelectorAll("#title, #donate, #fullscreen, #mute, #menu-button")].map((item) => item.id),
   );
-  expect(order).toEqual(["title", "fullscreen", "mute", "menu-button"]);
+  expect(order).toEqual(["title", "donate", "fullscreen", "mute", "menu-button"]);
 });
 
 test("2: with no stored archives the loader is shown and the playing elements are hidden", async ({ page }) => {

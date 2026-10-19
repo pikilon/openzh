@@ -6,7 +6,7 @@
 
 import { REQUIRED } from "./install";
 import { listStored, removeExtra, clearStored, type StoredFile } from "./opfs-store";
-import { prepareEngineOptions } from "./engine";
+import { prepareEngineOptions, saveUserData } from "./engine";
 import { currentEnv, missingFeatures } from "./features";
 import { available, formatBytes } from "./storage";
 import { ImportError, describeImportError } from "./import-error";
@@ -18,6 +18,8 @@ import {
   writePerformanceOverlay,
 } from "./prefs";
 import { byId, closeDialog, openDialog } from "./shell";
+import { listSavedGames, savedGamesZip } from "./saves";
+import { createTouchControls } from "./touch";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -36,6 +38,8 @@ type PageState =
 type EngineModule = {
   _GeneralsXSetAudioMuted?: (muted: number) => unknown;
   _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
+  _GeneralsXPanCamera?: (x: number, y: number) => unknown;
+  FS?: { syncfs?: (populate: boolean, callback: (error: unknown | null) => void) => void };
 };
 
 const status = byId<HTMLElement>("status");
@@ -74,6 +78,12 @@ const fpsToggle = byId<HTMLInputElement>("fps-toggle");
 const about = byId<HTMLButtonElement>("about");
 const aboutDialog = byId<HTMLDialogElement>("about-dialog");
 const aboutClose = byId<HTMLButtonElement>("about-close");
+const exportSaves = byId<HTMLButtonElement>("export-saves");
+const savesSummary = byId<HTMLElement>("saves-summary");
+const savesStatus = byId<HTMLElement>("saves-status");
+const donate = byId<HTMLButtonElement>("donate");
+const donateDialog = byId<HTMLDialogElement>("donate-dialog");
+const donateClose = byId<HTMLButtonElement>("donate-close");
 
 // Set once an import asks for persisting storage and the browser denies it
 // (issue #129): the storage line then says the browser may clear it.
@@ -87,6 +97,20 @@ let engineModule: EngineModule | null = null;
 let storedFiles: StoredFile[] = [];
 let importAbort: AbortController | null = null;
 let importing = false;
+
+// The touch overlay (#187) reads the engine lazily: it is created before the
+// first start and must not call a null engine.
+const touch = createTouchControls({
+  canvas,
+  overlay: byId<HTMLElement>("touch-controls"),
+  toggle: byId<HTMLButtonElement>("touch-toggle"),
+  left: byId<HTMLButtonElement>("touch-left"),
+  right: byId<HTMLButtonElement>("touch-right"),
+  multi: byId<HTMLButtonElement>("touch-multi"),
+  joystick: byId<HTMLElement>("touch-joystick"),
+  knob: byId<HTMLElement>("touch-knob"),
+  engine: () => engineModule,
+});
 
 // The player's own choices (persisted by src/prefs.ts).
 let userMuted = readMuted();
@@ -255,6 +279,14 @@ async function refresh(): Promise<void> {
 
 // ----- preferences: mute and the performance overlay -----
 
+// The event-tracked flag can miss the one `focus` event of a navigation
+// started from the address bar (issue #186). The live query is used only to
+// turn the flag back on: a synthetic `blur` in the tests, or a really
+// unfocused window, must keep it off.
+function refreshFocusFromDocument(): void {
+  if (document.hasFocus()) windowFocused = true;
+}
+
 function audibleMuted(): boolean {
   return userMuted || document.visibilityState !== "visible" || !windowFocused;
 }
@@ -398,6 +430,7 @@ function enterFullscreen(): void {
 }
 
 function showStarting(): void {
+  touch.setPlaying(false);
   loader.hidden = true;
   loading.hidden = false;
   errorPanel.hidden = true;
@@ -412,6 +445,7 @@ function reportEngineError(message: unknown, record: (line: string) => void): vo
   const text = String(message ?? "").trim() || "unknown error";
   engineFailed = true;
   engineModule = null;
+  touch.setPlaying(false);
   setState("error");
   status.textContent = `Engine failed: ${text}`;
   engineError.textContent = text;
@@ -494,6 +528,7 @@ async function startEngine(): Promise<void> {
     if (engineFailed) return;
 
     engineModule = engine ?? null;
+    touch.setPlaying(true);
     setState("playing");
     loading.hidden = true;
     loader.hidden = true;
@@ -503,6 +538,9 @@ async function startEngine(): Promise<void> {
     fullscreen.disabled = false;
     fitWindowedCanvas();
     canvas.focus();
+    // A navigation from the address bar may have missed the window's focus
+    // event, so the flag is refreshed once the engine exists (issue #186).
+    refreshFocusFromDocument();
     // Applied as soon as the engine object exists; the player may have changed
     // either choice while the archives were still loading.
     applyMute();
@@ -652,6 +690,7 @@ function dropZipFiles(event: DragEvent): void {
 function openMenu(): void {
   openDialog(menu);
   menuButton.setAttribute("aria-expanded", "true");
+  void refreshSavedGames();
 }
 
 function closeMenu(): void {
@@ -665,6 +704,85 @@ function showReloadConfirmation(): void {
     `This permanently deletes the ${count} stored ${noun}. ` +
     "The game data must be selected from the ZIP files again.";
   openDialog(reloadDialog);
+}
+
+// ----- saved games -----
+
+let savedGameCount = 0;
+
+// The engine flushes IDBFS every ten seconds. A save made just before the
+// export would otherwise be missing, so flush when the engine has a mounted FS
+// (a fake engine in the tests has none; there is nothing to flush there).
+async function flushUserData(): Promise<void> {
+  const engine = engineModule;
+  if (engine === null || engine.FS === undefined || typeof engine.FS.syncfs !== "function") {
+    return;
+  }
+  try {
+    await saveUserData(engine);
+  } catch {
+    // The export reads whatever IndexedDB has; a failed flush is not fatal.
+  }
+}
+
+async function readSavedGames(): Promise<Awaited<ReturnType<typeof listSavedGames>>> {
+  await flushUserData();
+  return listSavedGames();
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  // The browser has taken the blob by the next task; releasing it later keeps
+  // the download from seeing a revoked URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function refreshSavedGames(): Promise<void> {
+  exportSaves.disabled = true;
+  savesSummary.textContent = "Saved games: checking…";
+  savesStatus.hidden = true;
+  try {
+    const games = await readSavedGames();
+    savedGameCount = games.length;
+    savesSummary.textContent =
+      games.length === 0 ? "Saved games: none" : `Saved games: ${games.length}`;
+  } catch {
+    savedGameCount = 0;
+    savesSummary.textContent = "Saved games: unavailable";
+  }
+  exportSaves.disabled = savedGameCount === 0;
+}
+
+async function exportSavedGames(): Promise<void> {
+  exportSaves.disabled = true;
+  savesStatus.hidden = false;
+  savesStatus.textContent = "Preparing the ZIP…";
+  try {
+    const archive = await savedGamesZip(flushUserData);
+    if (archive === null) {
+      savedGameCount = 0;
+      savesSummary.textContent = "Saved games: none";
+      savesStatus.textContent = "No saved games to export.";
+      return;
+    }
+    savedGameCount = archive.count;
+    savesSummary.textContent = `Saved games: ${archive.count}`;
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(archive.blob, `openzh-saves-${stamp}.zip`);
+    savesStatus.textContent = `Exported ${archive.count} saved game${archive.count === 1 ? "" : "s"}.`;
+  } catch {
+    savesStatus.textContent = "Could not export the saved games.";
+  } finally {
+    exportSaves.disabled = savedGameCount === 0;
+  }
 }
 
 async function deleteStoredAndReload(): Promise<void> {
@@ -704,10 +822,21 @@ function wireMenu(): void {
   aboutClose.addEventListener("click", () => closeDialog(aboutDialog));
   aboutDialog.addEventListener("close", () => about.focus());
 
+  donate.addEventListener("click", () => openDialog(donateDialog));
+  donateClose.addEventListener("click", () => closeDialog(donateDialog));
+  donateDialog.addEventListener("close", () => donate.focus());
+  donateDialog.addEventListener("click", (event) => {
+    if (event.target === donateDialog) closeDialog(donateDialog);
+  });
+
   reload.addEventListener("click", () => showReloadConfirmation());
   reloadCancel.addEventListener("click", () => closeDialog(reloadDialog));
   reloadConfirm.addEventListener("click", () => {
     void deleteStoredAndReload();
+  });
+
+  exportSaves.addEventListener("click", () => {
+    void exportSavedGames();
   });
 
   fpsToggle.checked = performanceOverlay;
@@ -784,6 +913,15 @@ function wireAudio(): void {
     updateMuteButton();
     applyMute();
   });
+  // A missed focus event also recovers on the first interaction, but only
+  // when the document really reports focus (issue #186).
+  const refreshOnInteraction = () => {
+    if (windowFocused || !document.hasFocus()) return;
+    windowFocused = true;
+    applyMute();
+  };
+  window.addEventListener("pointerdown", refreshOnInteraction, true);
+  window.addEventListener("keydown", refreshOnInteraction, true);
   window.addEventListener("blur", () => {
     windowFocused = false;
     applyMute();

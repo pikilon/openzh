@@ -14,6 +14,7 @@ const TYPES = new Map([
   [".mjs", "text/javascript; charset=utf-8"],
   [".wasm", "application/wasm"],
   [".json", "application/json"],
+  [".webmanifest", "application/manifest+json; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".png", "image/png"],
 ]);

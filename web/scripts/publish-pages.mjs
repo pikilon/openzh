@@ -4,45 +4,23 @@
 //   node scripts/publish-pages.mjs [--engine <dir>] [--domain <host>] [--no-push]
 //
 // Builds the package (scripts/package.mjs), then adds what GitHub Pages needs:
-// the launcher at the site root, a service worker that sets the cross-origin isolation headers Pages cannot
-// set itself (threads and SharedArrayBuffer need them), its registration in
+// the launcher at the site root, a service worker (scripts/lib/pages-sw.mjs) that sets the cross-origin
+// isolation headers Pages cannot set itself and keeps the site for use without internet, its registration in
 // the launcher, CNAME and .nojekyll. It force-pushes the result as a single
 // commit to gh-pages of the `origin` remote. --no-push stops before the push
 // and prints the folder. It copies no game data: package.mjs runs the guard.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { offlineFiles, serviceWorker } from "./lib/pages-sw.mjs";
 
 const WEB_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GUARD = fileURLToPath(new URL("../../scripts/check-no-ea-assets.sh", import.meta.url));
 const DEFAULT_DOMAIN = "openzh.pikilon.com";
 
-const SERVICE_WORKER = `// Adds the cross-origin isolation headers GitHub Pages cannot set.
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
-self.addEventListener("fetch", (event) => {
-  const request = event.request;
-  if (request.cache === "only-if-cached" && request.mode !== "same-origin") return;
-  event.respondWith(
-    // Pages caches for 10 minutes; revalidate so a new publish is never mixed with old files.
-    fetch(request, { cache: "no-cache" }).then((response) => {
-      if (response.status === 0) return response;
-      const headers = new Headers(response.headers);
-      headers.set("Cross-Origin-Opener-Policy", "same-origin");
-      headers.set("Cross-Origin-Embedder-Policy", "require-corp");
-      headers.set("Cross-Origin-Resource-Policy", "same-origin");
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
-    }),
-  );
-});
-`;
 
 const REGISTRATION = `    <script>
       if (!window.crossOriginIsolated && "serviceWorker" in navigator) {
@@ -97,7 +75,14 @@ rmSync(join(out, "app"), { recursive: true });
 const html = readFileSync(launcher, "utf8");
 if (!html.includes(MODULE_TAG)) fail(`launcher has no "${MODULE_TAG.trim()}" to register before`);
 writeFileSync(launcher, html.replace(MODULE_TAG, REGISTRATION + MODULE_TAG));
-writeFileSync(join(out, "coi-sw.js"), SERVICE_WORKER);
+const files = (function walk(dir) {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? walk(path) : ["/" + relative(out, path).split(sep).join("/")];
+  });
+})(out);
+const version = capture("git", ["rev-parse", "--short=9", "HEAD"], { cwd: WEB_ROOT });
+writeFileSync(join(out, "coi-sw.js"), serviceWorker(version, offlineFiles(files)));
 writeFileSync(join(out, "CNAME"), `${values.domain}\n`);
 writeFileSync(join(out, ".nojekyll"), "");
 

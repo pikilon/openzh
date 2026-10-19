@@ -60,6 +60,7 @@
 #include "GameNetwork/IPEnumeration.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/LANGameInfo.h"
+#include "GameNetwork/udp.h"
 
 Bool LANisShuttingDown = false;
 Bool LANbuttonPushed = false;
@@ -115,6 +116,13 @@ UnicodeString LANPreferences::getUserName()
 		ret.format(L"Instance%.2d", rts::ClientInstance::getInstanceId());
 		return ret;
 	}
+
+#if defined(__EMSCRIPTEN__)
+	// OpenZH: every browser's machine name is "emscripten", and the lobby refuses duplicate names.
+	// The last byte of the tab's virtual LAN address tells players apart.
+	ret.format(L"Player%u", GetWebLanVirtualIP() & 0xFF);
+	return ret;
+#endif
 
 	// Use machine name as default user name.
 	IPEnumeration IPs;

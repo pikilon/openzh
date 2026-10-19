@@ -24,3 +24,11 @@ through `ZHWP_GAME_ZIPS` (the ZIPs built by `web/scripts/make-game-zip.mjs
 `CLAUDE.local.md`) is only the input of that script, not an import path. Never
 copy the ZIPs or any game file into the repository, its build output, CI or
 artifacts.
+
+## Live Site
+
+https://openzh.pikilon.com/ serves the launcher and the engine build from the
+`gh-pages` branch (GitHub Pages; Cloudflare is not used). It is not rebuilt by
+CI: after merging a change that affects the launcher, the wrapper or the
+engine, run `npm run publish:pages` from `web/` (engine built first). It
+force-pushes a single commit to `gh-pages`, so never edit that branch by hand.

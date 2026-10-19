@@ -124,6 +124,9 @@ UnsignedInt GetWebLanVirtualIP();
 enum WebLanAction { WEB_LAN_NONE = 0, WEB_LAN_HOST = 1, WEB_LAN_JOIN = 2 };
 /// The launcher's pending invite action; `take` clears it.
 WebLanAction GetWebLanAction(Bool take);
+/// Tells the launcher about the shell: "open" (the main menu's Multiplayer
+/// button), "no-game" (a guest found no game in the room).
+void NotifyWebLan(const char *event);
 #endif
 
 #ifdef DEBUG_LOGGING

@@ -363,12 +363,14 @@ static Bool useFpsLimit;
 static UnicodeString defaultName;
 
 #if defined(__EMSCRIPTEN__)
-// OpenZH: an invite link's lobby is invisible. The host's goes straight to its game's
-// options; a guest's joins the room's game as soon as it is heard (the room is private,
-// so it is the host's) and shows the lobby only if none turns up.
-static WebLanAction autoAction = WEB_LAN_NONE;
-static Int autoActionFrames = 0;
-static const Int AUTO_JOIN_GIVE_UP_FRAMES = 30 * 30;
+// OpenZH: the lobby is never shown. The launcher's invite opens it to host (straight to
+// the game's options) or to join the room's game as soon as it is heard (the room is
+// private, so it is the host's). Without an invite, or once a guest gives up, or coming
+// back from a game or its options, it goes back to the main menu.
+enum AutoStep { AUTO_LEAVE, AUTO_HOST, AUTO_FIND, AUTO_WAIT };
+static AutoStep autoStep = AUTO_LEAVE;
+static Int autoStepFrames = 0;
+static const Int AUTO_GIVE_UP_FRAMES = 30 * 30;
 #endif
 
 static void playerTooltip(GameWindow *window,
@@ -574,10 +576,14 @@ void LanLobbyMenuInit( WindowLayout *layout, void *userData )
 	TheLAN->RequestLocations();
 
 #if defined(__EMSCRIPTEN__)
-	autoAction = lanBound ? GetWebLanAction(TRUE) : WEB_LAN_NONE;
-	autoActionFrames = 0;
-	if (autoAction != WEB_LAN_NONE)
-		parentLanLobby->winHide(TRUE);
+	switch (lanBound ? GetWebLanAction(TRUE) : WEB_LAN_NONE)
+	{
+		case WEB_LAN_HOST: autoStep = AUTO_HOST; break;
+		case WEB_LAN_JOIN: autoStep = AUTO_FIND; break;
+		default: autoStep = AUTO_LEAVE; break;
+	}
+	autoStepFrames = 0;
+	parentLanLobby->winHide(TRUE);
 #endif
 
 	/*
@@ -708,7 +714,10 @@ void LanLobbyMenuUpdate( WindowLayout * layout, void *userData)
 	{
 		if(initialGadgetDelay == 1)
 		{
+#if !defined(__EMSCRIPTEN__)
+			// OpenZH: the lobby is never shown, so its fade-in never runs.
 			TheTransitionHandler->setGroup("LanLobbyFade");
+#endif
 			initialGadgetDelay = 2;
 			justEntered = FALSE;
 		}
@@ -723,33 +732,45 @@ void LanLobbyMenuUpdate( WindowLayout * layout, void *userData)
 		TheLAN->update();
 
 #if defined(__EMSCRIPTEN__)
-	if (TheShell->isAnimFinished() && !LANbuttonPushed && !LANisShuttingDown && TheLAN)
+	// The lobby keeps updating under the game's options: only act while it is the top screen.
+	if (TheShell->top() == layout)
+		parentLanLobby->winHide(TRUE);
+	if (TheShell->top() == layout && TheShell->isAnimFinished() && !LANbuttonPushed && !LANisShuttingDown && TheLAN)
 	{
-		if (autoAction == WEB_LAN_NONE && GetWebLanAction(FALSE) != WEB_LAN_NONE)
+		switch (autoStep)
 		{
-			// A new invite while the lobby is open: its sockets belong to the old room.
-			// Back to the main menu, which opens the lobby again for the new one.
-			TheWindowManager->winSendSystemMsg(buttonBack->winGetParent(), GBM_SELECTED,
-																				 (WindowMsgData)buttonBack, buttonBackID);
-		}
-		else if (autoAction == WEB_LAN_HOST)
-		{
-			autoAction = WEB_LAN_NONE;
-			TheLAN->RequestGameCreate(L"", FALSE);
-		}
-		else if (autoAction == WEB_LAN_JOIN)
-		{
-			if (LANGameInfo *game = TheLAN->LookupGameByListOffset(0))
-			{
-				autoAction = WEB_LAN_NONE;
-				TheLAN->RequestGameJoin(game);
-			}
-			else if (++autoActionFrames > AUTO_JOIN_GIVE_UP_FRAMES)
-			{
-				autoAction = WEB_LAN_NONE;
-				parentLanLobby->winHide(FALSE);
-				GadgetListBoxAddEntryText(listboxChatWindow, TheGameText->fetch("LAN:ErrorNoGameSelected"), chatSystemColor, -1, 0);
-			}
+			case AUTO_LEAVE:
+				// Nothing to do here: back to the main menu, which opens the lobby again for a
+				// new invite (its sockets then join the new room).
+				TheWindowManager->winSendSystemMsg(buttonBack->winGetParent(), GBM_SELECTED,
+																					 (WindowMsgData)buttonBack, buttonBackID);
+				break;
+			case AUTO_HOST:
+				TheLAN->RequestGameCreate(L"", FALSE);
+				autoStep = AUTO_WAIT;
+				autoStepFrames = 0;
+				break;
+			case AUTO_FIND:
+				if (LANGameInfo *game = TheLAN->LookupGameByListOffset(0))
+				{
+					TheLAN->RequestGameJoin(game);
+					autoStep = AUTO_WAIT;
+					autoStepFrames = 0;
+				}
+				else if (++autoStepFrames > AUTO_GIVE_UP_FRAMES)
+				{
+					NotifyWebLan("no-game");
+					autoStep = AUTO_LEAVE;
+				}
+				break;
+			case AUTO_WAIT:
+				// Still here: the game's options never opened (a full or started game).
+				if (++autoStepFrames > AUTO_GIVE_UP_FRAMES)
+				{
+					NotifyWebLan("no-game");
+					autoStep = AUTO_LEAVE;
+				}
+				break;
 		}
 	}
 #endif

@@ -1551,6 +1551,11 @@ WindowMsgHandledType MainMenuSystem( GameWindow *window, UnsignedInt msg,
 			{
 				if(dontAllowTransitions)
 					break;
+#if defined(__EMSCRIPTEN__)
+				// OpenZH: multiplayer is the launcher's invite dialog; Online and Network are not offered.
+				NotifyWebLan("open");
+				break;
+#endif
 				dontAllowTransitions = TRUE;
 				//buttonPushed = TRUE;
 				buttonPushed = FALSE;

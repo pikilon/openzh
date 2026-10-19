@@ -214,6 +214,16 @@ WebLanAction GetWebLanAction(Bool take)
 {
 	return static_cast<WebLanAction>(GeneralsXWebLanAction(take ? 1 : 0));
 }
+
+// OpenZH: the launcher owns the multiplayer screens (web/src/multiplayer-ui.ts).
+EM_JS(void, GeneralsXWebLanNotify, (const char *event), {
+	globalThis.generalsXLanNotify?.(UTF8ToString(event));
+});
+
+void NotifyWebLan(const char *event)
+{
+	GeneralsXWebLanNotify(event);
+}
 #endif
 
 

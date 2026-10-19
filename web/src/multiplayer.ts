@@ -10,6 +10,7 @@
 //   generalsXPlayerName    the lobby name, instead of Player<n>
 //   generalsXLanAction     "host" or "join": the shell opens the LAN lobby and
 //                          creates or joins the game; the engine clears it
+// and calls generalsXLanNotify("open" | "no-game") (src/multiplayer-ui.ts).
 //
 // `?relay=<wss url>` makes the host's invite use another relay.
 
@@ -87,6 +88,12 @@ export function readInvite(hash: string): Invite | null {
   } catch {
     return null;
   }
+}
+
+/** The invite in a pasted or scanned link (anything ending in `#j=...`). */
+export function inviteFromText(text: string): Invite | null {
+  const match = /#j=[A-Za-z0-9_-]+/.exec(text.trim());
+  return match === null ? null : readInvite(match[0]);
 }
 
 /** The relay a host's invite uses on this page. */

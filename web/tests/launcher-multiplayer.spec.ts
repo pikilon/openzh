@@ -124,3 +124,53 @@ test("a broken link is ignored", async ({ page }) => {
   await expect(page.locator("body")).toHaveAttribute("data-state", "no-assets");
   await expect(page.locator("#mp-dialog")).toBeHidden();
 });
+
+test("the engine's Multiplayer button opens the dialog, which joins from a pasted link", async ({ page }) => {
+  await mockRelay(page, { ip: 3 });
+  await page.goto(SHELL);
+  await page.evaluate(() => (globalThis as { generalsXLanNotify?: (e: string) => void }).generalsXLanNotify?.("open"));
+  await expect(page.locator("#mp-dialog")).toBeVisible();
+  await expect(page.locator("#mp-join")).toBeVisible();
+  await expect(page.locator("#mp-go")).toHaveText("Create game");
+
+  await page.locator("#mp-name").fill("Bea");
+  await page.locator("#mp-paste").fill("https://example.com/whatever");
+  await page.locator("#mp-join-go").click();
+  await expect(page.locator("#mp-status")).toContainText("not an OpenZH invite");
+
+  const payload = Buffer.from(JSON.stringify({ v: 1, t: "relay", u: RELAY, r: "sala2", k: "0123456789abcdef", h: "Ana" })).toString("base64url");
+  await page.locator("#mp-paste").fill(`  https://openzh.pikilon.com/#j=${payload} `);
+  await page.locator("#mp-paste").press("Enter");
+  await expect(page.locator("#mp-dialog")).toBeHidden();
+  expect(await globals(page)).toMatchObject({ room: "sala2", ip: 0x0a000003, name: "Bea", action: "join" });
+});
+
+test("in a room the dialog plays again or leaves it", async ({ page }) => {
+  await mockRelay(page);
+  await page.goto(`${SHELL}?relay=${encodeURIComponent(RELAY)}`);
+  await page.locator("#mp-button").click();
+  await page.locator("#mp-name").fill("Ana");
+  await page.locator("#mp-go").click();
+  await expect(page.locator("#mp-go")).toHaveText("Play again");
+  await expect(page.locator("#mp-join")).toBeHidden();
+  const room = (await globals(page)).room;
+
+  // The engine took the action, the game ended; the same room again.
+  await page.evaluate(() => ((globalThis as { generalsXLanAction?: string }).generalsXLanAction = undefined));
+  await page.locator("#mp-go").click();
+  await expect(page.locator("#mp-dialog")).toBeHidden();
+  expect(await globals(page)).toMatchObject({ room, ip: 0x0a000005, action: "host" });
+
+  await page.locator("#mp-button").click();
+  await page.locator("#mp-leave").click();
+  await expect(page.locator("#mp-go")).toHaveText("Create game");
+  await expect(page.locator("#mp-copy-link")).toBeHidden();
+  expect((await globals(page)).action).toBeUndefined();
+});
+
+test("a guest who finds no game is told so", async ({ page }) => {
+  await page.goto(SHELL);
+  await page.evaluate(() => (globalThis as { generalsXLanNotify?: (e: string) => void }).generalsXLanNotify?.("no-game"));
+  await expect(page.locator("#mp-dialog")).toBeVisible();
+  await expect(page.locator("#mp-status")).toContainText("No game is open in this room");
+});

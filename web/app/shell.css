@@ -1209,6 +1209,30 @@ dialog::backdrop {
   font-size: 11px;
 }
 
+.mp-join {
+  display: grid;
+  gap: 10px;
+}
+
+.mp-join-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mp-video {
+  width: 100%;
+  max-height: 260px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  object-fit: cover;
+}
+
+.mp-video[hidden] {
+  display: none;
+}
+
 #mp-status.mp-error {
   color: var(--danger);
 }

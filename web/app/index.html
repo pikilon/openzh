@@ -525,6 +525,23 @@
         <span>Your name</span>
         <input id="mp-name" type="text" maxlength="12" autocomplete="nickname" spellcheck="false" />
       </label>
+      <div id="mp-join" class="mp-join" hidden>
+        <label class="mp-field" for="mp-paste">
+          <span>Join with a link</span>
+          <input
+            id="mp-paste"
+            type="url"
+            placeholder="Paste the invite link"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <div class="mp-join-actions">
+          <button id="mp-scan" class="btn" type="button">Scan QR code</button>
+          <button id="mp-join-go" class="btn" type="button">Join</button>
+        </div>
+        <video id="mp-video" class="mp-video" muted playsinline hidden></video>
+      </div>
       <div id="mp-invite" class="mp-invite" hidden>
         <div id="mp-qr" class="mp-qr" role="img" aria-label="Invite QR code"></div>
         <input id="mp-link" class="mp-link" type="text" readonly aria-label="Invite link" />
@@ -532,6 +549,7 @@
       <p id="mp-status" class="dialog-copy" role="status"></p>
       <div class="dialog-actions">
         <button id="mp-close" class="btn" type="button">Close</button>
+        <button id="mp-leave" class="btn" type="button" hidden>Leave</button>
         <button id="mp-copy" class="btn" type="button" hidden>Copy link</button>
         <button id="mp-go" class="btn btn-primary" type="button">Create game</button>
       </div>

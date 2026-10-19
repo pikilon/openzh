@@ -18,6 +18,7 @@ import {
   writePerformanceOverlay,
 } from "./prefs";
 import { byId, closeDialog, openDialog } from "./shell";
+import { DownloadError, checkSource, discardDownloads, downloadZips, parseSources } from "./remote-zips";
 import { listSavedGames, savedGamesZip } from "./saves";
 import { BackupError, exportBackup, importBackup, type BackupKind } from "./user-backup";
 import { resumeUserDataSaves, suspendUserDataSaves } from "./user-data";
@@ -65,6 +66,9 @@ const importCancel = byId<HTMLButtonElement>("import-cancel");
 const importError = byId<HTMLElement>("import-error");
 const zipInput = byId<HTMLInputElement>("zip-input");
 const dropZone = byId<HTMLElement>("drop-zone");
+const linkForm = byId<HTMLFormElement>("link-form");
+const linkInput = byId<HTMLTextAreaElement>("link-input");
+const linkGo = byId<HTMLButtonElement>("link-go");
 const loader = byId<HTMLElement>("loader");
 const loading = byId<HTMLElement>("loading");
 const errorPanel = byId<HTMLElement>("error-panel");
@@ -791,6 +795,69 @@ async function importZipFiles(files: readonly File[]): Promise<void> {
   }
 }
 
+function showDownloadError(source: string, reason: string): void {
+  const message = document.createElement("p");
+  message.textContent = `${source.length > 70 ? `${source.slice(0, 67)}…` : source} ${reason}.`;
+  const hint = document.createElement("p");
+  hint.textContent = "Check the link and try again, or select the ZIP files from this computer.";
+  importError.replaceChildren(message, hint);
+  importError.setAttribute("data-code", "download");
+  importError.hidden = false;
+}
+
+// ZIPs from links (https or magnet): downloaded to scratch storage, then imported like picked files.
+async function importFromLinks(text: string): Promise<void> {
+  const sources = parseSources(text);
+  if (sources.length === 0) return;
+  for (const source of sources) {
+    const problem = checkSource(source);
+    if (problem !== null) {
+      hideImportError();
+      status.textContent = "Import failed";
+      showDownloadError(source, problem);
+      return;
+    }
+  }
+  const controller = beginZipImport();
+  linkGo.disabled = true;
+  status.textContent = "Downloading";
+  const started = performance.now();
+  let files: File[];
+  try {
+    files = await downloadZips(sources, {
+      signal: controller.signal,
+      onProgress: (state) => {
+        showProgress(state.receivedBytes, Math.max(state.totalBytes, state.receivedBytes, 1));
+        const seconds = Math.max((performance.now() - started) / 1000, 0.001);
+        importDetail.textContent =
+          `${megabytes(state.receivedBytes)} MB of ${state.totalBytes > 0 ? megabytes(state.totalBytes) : "?"} MB · ` +
+          `${megabytes(state.receivedBytes / seconds)} MB/s` +
+          (state.detail === undefined ? "" : ` · ${state.detail}`);
+        importCurrent.hidden = false;
+        importCurrent.textContent = state.source.slice(0, 80);
+      },
+    });
+  } catch (error) {
+    endZipImport();
+    linkGo.disabled = false;
+    if ((error as DOMException).name === "AbortError") {
+      status.textContent = "Cancelled";
+    } else {
+      status.textContent = "Import failed";
+      showDownloadError(error instanceof DownloadError ? error.source : sources[0], (error as Error).message);
+    }
+    setState("no-assets");
+    return;
+  }
+  endZipImport();
+  try {
+    await importZipFiles(files);
+  } finally {
+    linkGo.disabled = false;
+    await discardDownloads();
+  }
+}
+
 // A dropped file counts as a ZIP by its extension alone, case-insensitive.
 function droppedZips(files: FileList | null): File[] {
   return Array.from(files ?? []).filter((file) => file.name.toLowerCase().endsWith(".zip"));
@@ -1107,6 +1174,11 @@ function keepKeysInDialogs(): void {
 
 function wireInput(): void {
   keepKeysInDialogs();
+  linkForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (importing) return;
+    void importFromLinks(linkInput.value).catch(fail);
+  });
   zipInput.addEventListener("change", () => {
     const files = Array.from(zipInput.files ?? []);
     if (files.length === 0) return;

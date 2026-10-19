@@ -8,7 +8,7 @@
     "test": "playwright test",
     "test:smoke": "playwright test tests/smoke.spec.ts",
     "replay": "node scripts/run-replay.mjs",
-    "build": "esbuild src/test-api.ts src/bridge-worker.ts src/engine.ts src/main.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning",
+    "build": "esbuild src/test-api.ts src/bridge-worker.ts src/engine.ts src/main.ts src/torrent-client.ts --bundle --format=esm --target=es2022 --outdir=dist --log-level=warning",
     "package": "npm run build && node scripts/package.mjs",
     "publish:pages": "node scripts/publish-pages.mjs",
     "bench": "playwright test --config playwright.bench.config.ts"
@@ -19,7 +19,11 @@
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {
+    "buffer": "6.0.3",
+    "events": "3.3.0",
+    "idb-chunk-store": "1.0.1",
     "jsqr": "1.4.0",
-    "qrcode-generator": "1.4.4"
+    "qrcode-generator": "1.4.4",
+    "webtorrent": "2.8.4"
   }
 }

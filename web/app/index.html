@@ -237,6 +237,18 @@
             <span class="drop-hint">or use the picker above</span>
           </div>
 
+          <form id="link-form" class="link-form">
+            <label for="link-input" class="link-label">Or download them from links</label>
+            <textarea
+              id="link-input"
+              rows="2"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="https://…/game.zip or magnet:?xt=…  (one per line)"
+            ></textarea>
+            <button id="link-go" class="btn" type="submit">Download and import</button>
+          </form>
+
           <progress id="import-progress" max="100" value="0" hidden></progress>
           <p id="import-detail" class="mono" hidden></p>
           <p id="import-current" class="mono import-current" hidden></p>

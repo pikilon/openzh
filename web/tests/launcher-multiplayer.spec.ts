@@ -43,6 +43,7 @@ function globals(page: Page) {
       ip: g.generalsXLanVirtualIP,
       name: g.generalsXPlayerName,
       action: g.generalsXLanAction,
+      connect: typeof g.generalsXLanConnect,
     };
   });
 }
@@ -72,7 +73,9 @@ test("the host creates a private game and gets its link, QR code and copy button
   expect(invite.r).toMatch(/^[a-z0-9]{16}$/);
   expect(invite.k).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
 
-  expect(relay.urls).toEqual([`${RELAY}?room=${invite.r}&token=${invite.k}`]);
+  // The address lease and the direct links' signalling (src/mesh.ts), both in the room.
+  await expect.poll(() => relay.urls.length).toBe(2);
+  expect(new Set(relay.urls)).toEqual(new Set([`${RELAY}?room=${invite.r}&token=${invite.k}`]));
   expect(await globals(page)).toEqual({
     relay: RELAY,
     room: invite.r,
@@ -80,6 +83,7 @@ test("the host creates a private game and gets its link, QR code and copy button
     ip: 0x0a000005,
     name: "Ana",
     action: "host",
+    connect: "function",
   });
 
   await page.locator("#mp-close").click();

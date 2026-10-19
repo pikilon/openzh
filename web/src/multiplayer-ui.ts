@@ -11,6 +11,7 @@ import { byId, closeDialog, openDialog } from "./shell";
 import { scanQr } from "./qr-scan";
 import { createLanDialog } from "./lan-ui";
 import { offerFromText } from "./lan";
+import { Mesh, stunFor } from "./mesh";
 import {
   Lease,
   applyInvite,
@@ -21,7 +22,9 @@ import {
   newInvite,
   readInvite,
   readPlayerName,
+  directLinks,
   relayConnect,
+  roomUrl,
   writePlayerName,
   type Invite,
   type LanGlobals,
@@ -32,6 +35,7 @@ type Mode = "host" | "join";
 interface Session {
   invite: Invite;
   lease: Lease;
+  mesh: Mesh | null;
   link: string;
   action: Mode;
 }
@@ -146,8 +150,12 @@ export function createMultiplayer(): void {
     try {
       const ip = await lease.open();
       session?.lease.close();
-      session = { invite: target, lease, link: inviteLink(target, window.location.origin), action: mode };
-      applyInvite(target, ip, name, mode);
+      session?.mesh?.close();
+      const mesh = directLinks(window.location) ? new Mesh(roomUrl(target), ip, stunFor(target.relay)) : null;
+      mesh?.start();
+      (globalThis as { generalsXLanMesh?: Mesh | null }).generalsXLanMesh = mesh;
+      session = { invite: target, lease, mesh, link: inviteLink(target, window.location.origin), action: mode };
+      applyInvite(target, ip, name, mode, mesh?.connect);
       writePlayerName(name);
       pendingJoin = null;
       paste.value = "";
@@ -183,7 +191,7 @@ export function createMultiplayer(): void {
   function primary(): void {
     if (session) {
       // The same room again: the lease still holds this tab's address.
-      applyInvite(session.invite, session.lease.ip, cleanName(nameInput.value) || readPlayerName(), session.action);
+      applyInvite(session.invite, session.lease.ip, cleanName(nameInput.value) || readPlayerName(), session.action, session.mesh?.connect);
       setStatus(session.action === "host" ? "The game's options open from the main menu." : "Joining from the main menu.");
       closeDialog(dialog);
       return;
@@ -196,8 +204,10 @@ export function createMultiplayer(): void {
 
   function leaveRoom(): void {
     session?.lease.close();
+    session?.mesh?.close();
     session = null;
     (globalThis as LanGlobals).generalsXLanAction = undefined;
+    (globalThis as LanGlobals).generalsXLanConnect = undefined;
     copyTop.hidden = true;
     if (window.location.hash !== "") history.replaceState(null, "", window.location.pathname + window.location.search);
     setStatus("You left the room.");

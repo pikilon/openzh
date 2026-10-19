@@ -6,7 +6,8 @@
 // The engine reads these globals (Core/.../GameNetwork/udp.cpp,
 // LanLobbyMenu.cpp, MainMenu.cpp):
 //   generalsXLanRelay, generalsXLanRoom, generalsXLanToken  where its LAN sockets go
-//   generalsXLanConnect    on a network without internet, the sockets' transport (src/lan.ts)
+//   generalsXLanConnect    the sockets' transport: direct links with the relay as
+//                          fallback (src/mesh.ts), or without internet src/lan.ts
 //   generalsXLanVirtualIP  this tab's address in the room, leased from the relay
 //   generalsXPlayerName    the lobby name, instead of Player<n>
 //   generalsXLanAction     "host" or "join": the shell opens the LAN lobby and
@@ -100,6 +101,11 @@ export function inviteFromText(text: string): Invite | null {
   return match === null ? null : readInvite(match[0]);
 }
 
+/** Direct links between players, unless `?p2p=0` keeps everything on the relay. */
+export function directLinks(location: Pick<Location, "search">): boolean {
+  return new URLSearchParams(location.search).get("p2p") !== "0";
+}
+
 /** The relay a host's invite uses on this page. */
 export function hostRelay(location: Pick<Location, "search">): string {
   return new URLSearchParams(location.search).get("relay") || ONLINE_RELAY;
@@ -126,7 +132,8 @@ export function writePlayerName(name: string): void {
   }
 }
 
-function roomUrl(invite: Invite): string {
+/** The WebSocket URL of the invite's room. */
+export function roomUrl(invite: Invite): string {
   const separator = invite.relay.includes("?") ? "&" : "?";
   return `${invite.relay}${separator}room=${encodeURIComponent(invite.room)}&token=${encodeURIComponent(invite.token)}`;
 }
@@ -202,9 +209,19 @@ export class Lease {
   }
 }
 
-/** Points the engine at the invite's room as `ip`, and asks it to host or join. */
-export function applyInvite(invite: Invite, ip: number, name: string, action: "host" | "join", target: LanGlobals = globalThis as LanGlobals): void {
-  target.generalsXLanConnect = undefined;
+/**
+ * Points the engine at the invite's room as `ip`, and asks it to host or join.
+ * `connect` is the direct-link mesh's (src/mesh.ts); without it every datagram uses the relay.
+ */
+export function applyInvite(
+  invite: Invite,
+  ip: number,
+  name: string,
+  action: "host" | "join",
+  connect?: Connect,
+  target: LanGlobals = globalThis as LanGlobals,
+): void {
+  target.generalsXLanConnect = connect;
   target.generalsXLanRelay = invite.relay;
   target.generalsXLanRoom = invite.room;
   target.generalsXLanToken = invite.token;

@@ -1233,6 +1233,21 @@ dialog::backdrop {
   display: none;
 }
 
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-soft);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.lan-start {
+  margin-top: 18px;
+}
+
+#lan-status.mp-error,
 #mp-status.mp-error {
   color: var(--danger);
 }

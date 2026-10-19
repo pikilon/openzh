@@ -547,11 +547,52 @@
         <input id="mp-link" class="mp-link" type="text" readonly aria-label="Invite link" />
       </div>
       <p id="mp-status" class="dialog-copy" role="status"></p>
+      <p id="mp-lan-row" class="dialog-copy">
+        No internet?
+        <button id="mp-lan" class="link-btn" type="button">Play on this network</button>
+      </p>
       <div class="dialog-actions">
         <button id="mp-close" class="btn" type="button">Close</button>
         <button id="mp-leave" class="btn" type="button" hidden>Leave</button>
         <button id="mp-copy" class="btn" type="button" hidden>Copy link</button>
         <button id="mp-go" class="btn btn-primary" type="button">Create game</button>
+      </div>
+    </dialog>
+
+    <dialog id="lan-dialog" class="panel dialog-panel" aria-labelledby="lan-title">
+      <p class="eyebrow">OpenZH // Local network</p>
+      <h2 id="lan-title">Play on this network</h2>
+      <p id="lan-lede" class="dialog-copy about-lede"></p>
+      <label id="lan-name-row" class="mp-field" for="lan-name">
+        <span>Your name</span>
+        <input id="lan-name" type="text" maxlength="12" autocomplete="nickname" spellcheck="false" />
+      </label>
+      <div id="lan-start" class="mp-join-actions lan-start">
+        <button id="lan-join" class="btn" type="button">Join a game</button>
+        <button id="lan-host" class="btn btn-primary" type="button">Host a game</button>
+      </div>
+      <div id="lan-code" class="mp-invite" hidden>
+        <div id="lan-qr" class="mp-qr" role="img" aria-label="Connection QR code"></div>
+        <input id="lan-code-text" class="mp-link" type="text" readonly aria-label="Connection code" />
+        <button id="lan-copy" class="btn" type="button">Copy code</button>
+      </div>
+      <div id="lan-read" class="mp-join" hidden>
+        <label class="mp-field" for="lan-paste">
+          <span id="lan-read-label">The other player's code</span>
+          <input id="lan-paste" type="text" placeholder="Paste the code" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="mp-join-actions">
+          <button id="lan-scan" class="btn" type="button">Scan QR code</button>
+          <button id="lan-read-go" class="btn" type="button">Connect</button>
+        </div>
+        <video id="lan-video" class="mp-video" muted playsinline hidden></video>
+      </div>
+      <p id="lan-status" class="dialog-copy" role="status"></p>
+      <div class="dialog-actions">
+        <button id="lan-close" class="btn" type="button">Close</button>
+        <button id="lan-leave" class="btn" type="button" hidden>Leave</button>
+        <button id="lan-again" class="btn" type="button" hidden>Play again</button>
+        <button id="lan-add" class="btn btn-primary" type="button" hidden>Add a player</button>
       </div>
     </dialog>
 

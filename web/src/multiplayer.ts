@@ -6,6 +6,7 @@
 // The engine reads these globals (Core/.../GameNetwork/udp.cpp,
 // LanLobbyMenu.cpp, MainMenu.cpp):
 //   generalsXLanRelay, generalsXLanRoom, generalsXLanToken  where its LAN sockets go
+//   generalsXLanConnect    on a network without internet, the sockets' transport (src/lan.ts)
 //   generalsXLanVirtualIP  this tab's address in the room, leased from the relay
 //   generalsXPlayerName    the lobby name, instead of Player<n>
 //   generalsXLanAction     "host" or "join": the shell opens the LAN lobby and
@@ -13,6 +14,8 @@
 // and calls generalsXLanNotify("open" | "no-game") (src/multiplayer-ui.ts).
 //
 // `?relay=<wss url>` makes the host's invite use another relay.
+
+import type { Connect, LanSocket } from "./lan";
 
 /** The online relay. */
 export const ONLINE_RELAY = "wss://server-openzh.pikilon.com/GeneralsXLan";
@@ -26,6 +29,7 @@ export interface Invite {
 }
 
 export interface LanGlobals {
+  generalsXLanConnect?: Connect;
   generalsXLanRelay?: string;
   generalsXLanRoom?: string;
   generalsXLanToken?: string;
@@ -127,22 +131,31 @@ function roomUrl(invite: Invite): string {
   return `${invite.relay}${separator}room=${encodeURIComponent(invite.room)}&token=${encodeURIComponent(invite.token)}`;
 }
 
+/** Sockets to the invite's room on its relay. */
+export function relayConnect(invite: Invite): Connect {
+  return () => new WebSocket(roomUrl(invite));
+}
+
 /**
  * The tab's address in the room. The relay keeps it while this socket is
- * open (server/src/relay.rs, port 0); a dropped socket asks for the same one
- * again, so the engine's sockets keep a valid address.
+ * open (server/src/relay.rs, port 0; src/lan.ts on a network without
+ * internet); a dropped relay socket asks for the same one again, so the
+ * engine's sockets keep a valid address.
  */
 export class Lease {
   ip = 0;
-  private socket: WebSocket | null = null;
+  private socket: LanSocket | null = null;
   private closed = false;
 
-  constructor(private readonly invite: Invite) {}
+  constructor(
+    private readonly connect: Connect,
+    private readonly reconnect = true,
+  ) {}
 
   /** Resolves with the leased address, rejects when the relay refuses the room. */
   open(timeoutMs = 10_000): Promise<number> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(roomUrl(this.invite));
+      const socket = this.connect();
       socket.binaryType = "arraybuffer";
       this.socket = socket;
       let settled = false;
@@ -162,7 +175,7 @@ export class Lease {
         socket.send(frame.buffer);
       });
       socket.addEventListener("message", (event) => {
-        const view = new DataView(event.data as ArrayBuffer);
+        const view = new DataView((event as MessageEvent).data as ArrayBuffer);
         if (settled || view.byteLength !== 7 || view.getUint8(0) !== 1) return;
         settled = true;
         clearTimeout(timer);
@@ -174,7 +187,7 @@ export class Lease {
           fail(new Error("the game server refused the room (the link may be wrong or the game over)"));
           return;
         }
-        if (this.closed || this.socket !== socket) return;
+        if (this.closed || !this.reconnect || this.socket !== socket) return;
         // Keep the address: reconnect with it while the page lives.
         setTimeout(() => {
           if (!this.closed) this.open().catch(() => undefined);
@@ -191,9 +204,21 @@ export class Lease {
 
 /** Points the engine at the invite's room as `ip`, and asks it to host or join. */
 export function applyInvite(invite: Invite, ip: number, name: string, action: "host" | "join", target: LanGlobals = globalThis as LanGlobals): void {
+  target.generalsXLanConnect = undefined;
   target.generalsXLanRelay = invite.relay;
   target.generalsXLanRoom = invite.room;
   target.generalsXLanToken = invite.token;
+  target.generalsXLanVirtualIP = ip >>> 0;
+  target.generalsXPlayerName = name;
+  target.generalsXLanAction = action;
+}
+
+/** Points the engine at a network game without internet (src/lan.ts) as `ip`. */
+export function applyLan(connect: Connect, ip: number, name: string, action: "host" | "join", target: LanGlobals = globalThis as LanGlobals): void {
+  target.generalsXLanConnect = connect;
+  target.generalsXLanRelay = "webrtc:";
+  target.generalsXLanRoom = undefined;
+  target.generalsXLanToken = undefined;
   target.generalsXLanVirtualIP = ip >>> 0;
   target.generalsXPlayerName = name;
   target.generalsXLanAction = action;

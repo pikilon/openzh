@@ -90,7 +90,10 @@ EM_JS(Int, GeneralsXWebLanBind, (UnsignedInt ip, UnsignedShort port), {
 		const query = "room=" + encodeURIComponent(room) + "&token=" + encodeURIComponent(globalThis.generalsXLanToken || "");
 		relayUrls = relayUrls.map((url) => url + (url.includes("?") ? "&" : "?") + query);
 	}
-	const socket = new WebSocket(relayUrls[0]);
+	// OpenZH: on a network without internet the launcher's own transport (WebRTC to the host's
+	// tab, web/src/lan.ts) stands in for the relay's WebSocket, with the same frames.
+	const connect = globalThis.generalsXLanConnect || ((url) => new WebSocket(url));
+	const socket = connect(relayUrls[0]);
 	socket.binaryType = "arraybuffer";
 	const state = { socket, virtualIP, port, incoming: [], outgoing: [], incomingBytes: 0 };
 	sockets.set(port, state);

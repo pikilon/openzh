@@ -9,6 +9,8 @@
 import qrcode from "qrcode-generator";
 import { byId, closeDialog, openDialog } from "./shell";
 import { scanQr } from "./qr-scan";
+import { createLanDialog } from "./lan-ui";
+import { offerFromText } from "./lan";
 import {
   Lease,
   applyInvite,
@@ -19,6 +21,7 @@ import {
   newInvite,
   readInvite,
   readPlayerName,
+  relayConnect,
   writePlayerName,
   type Invite,
   type LanGlobals,
@@ -55,6 +58,9 @@ export function createMultiplayer(): void {
   const leave = byId<HTMLButtonElement>("mp-leave");
   const copy = byId<HTMLButtonElement>("mp-copy");
   const go = byId<HTMLButtonElement>("mp-go");
+
+  const lanButton = byId<HTMLButtonElement>("mp-lan");
+  const lan = createLanDialog();
 
   let session: Session | null = null;
   let pendingJoin: Invite | null = readInvite(window.location.hash);
@@ -136,7 +142,7 @@ export function createMultiplayer(): void {
     stopScan();
     setStatus(mode === "host" ? "Creating the game…" : "Connecting to the game…");
     const target = invite ?? newInvite(hostRelay(window.location), name);
-    const lease = new Lease(target);
+    const lease = new Lease(relayConnect(target));
     try {
       const ip = await lease.open();
       session?.lease.close();
@@ -257,15 +263,26 @@ export function createMultiplayer(): void {
   (globalThis as Notify).generalsXLanNotify = (event: string) => {
     if (event === "open") {
       setStatus("");
-      show();
+      if (lan.active()) lan.show();
+      else show();
     } else if (event === "no-game") {
       setStatus("No game is open in this room: the host may have closed it or started it already.", true);
       show();
     }
   };
 
+  lanButton.addEventListener("click", () => {
+    closeDialog(dialog);
+    lan.show();
+  });
+
   // A link opened later in this tab (pasted over the address) is a new invite.
   window.addEventListener("hashchange", () => {
+    const offer = offerFromText(window.location.hash);
+    if (offer !== null) {
+      lan.joinOffer(offer);
+      return;
+    }
     const invite = readInvite(window.location.hash);
     if (invite === null) return;
     pendingJoin = invite;
@@ -284,5 +301,7 @@ export function createMultiplayer(): void {
     }
   }
 
-  beginJoin();
+  const offer = offerFromText(window.location.hash);
+  if (offer !== null) lan.joinOffer(offer);
+  else beginJoin();
 }

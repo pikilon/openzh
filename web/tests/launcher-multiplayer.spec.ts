@@ -178,3 +178,22 @@ test("a guest who finds no game is told so", async ({ page }) => {
   await expect(page.locator("#mp-dialog")).toBeVisible();
   await expect(page.locator("#mp-status")).toContainText("No game is open in this room");
 });
+
+test("typing, deleting and pasting reach the dialog while the engine holds the keyboard", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(SHELL);
+  // What SDL does with the engine running: every key on the window is cancelled.
+  await page.evaluate(() => {
+    for (const type of ["keydown", "keyup", "keypress"]) window.addEventListener(type, (event) => event.preventDefault());
+  });
+  await page.locator("#mp-button").click();
+  const name = page.locator("#mp-name");
+  await name.click();
+  await page.keyboard.type("Anaa");
+  await page.keyboard.press("Backspace");
+  await expect(name).toHaveValue("Ana");
+  await page.evaluate(() => navigator.clipboard.writeText("https://openzh.pikilon.com/#j=abc"));
+  await page.locator("#mp-paste").click();
+  await page.keyboard.press("ControlOrMeta+V");
+  await expect(page.locator("#mp-paste")).toHaveValue("https://openzh.pikilon.com/#j=abc");
+});

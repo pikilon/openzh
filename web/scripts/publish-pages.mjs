@@ -23,8 +23,12 @@ const DEFAULT_DOMAIN = "openzh.pikilon.com";
 
 
 const REGISTRATION = `    <script>
-      if (!window.crossOriginIsolated && "serviceWorker" in navigator) {
+      // Registered on every load, so an older worker (one that stored nothing) is replaced
+      // while online; the page reloads only to become cross-origin isolated.
+      if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("/coi-sw.js").then((registration) => {
+          registration.update().catch(() => undefined);
+          if (window.crossOriginIsolated) return;
           if (registration.active && !navigator.serviceWorker.controller) location.reload();
           else navigator.serviceWorker.addEventListener("controllerchange", () => location.reload());
         });

@@ -68,6 +68,11 @@ test("the published site loads and starts its engine without a network", async (
     )
     .toEqual(expect.arrayContaining(["/", "/dist/main.js", "/dist/bridge-worker.js", "/engine/GeneralsXZH.js", "/engine/GeneralsXZH.wasm", "/shell.css"]));
 
+  // The menu says so before the player goes offline.
+  await page.locator("#menu-button").click();
+  await expect(page.locator("#menu-offline")).toHaveText(/ready, the game opens offline/);
+  await page.keyboard.press("Escape");
+
   await context.setOffline(true);
   await page.goto(`${origin}/?relay=ws://nowhere.test/x#l=abc`);
   await expect(page.locator("#topbar")).toBeVisible();

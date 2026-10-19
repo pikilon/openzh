@@ -814,10 +814,29 @@ function dropZipFiles(event: DragEvent): void {
 
 // ----- menu and dialogs -----
 
+// Whether the published site's service worker (scripts/lib/pages-sw.mjs) has
+// stored everything the game needs, so the page opens without internet.
+async function refreshOffline(): Promise<void> {
+  const line = byId<HTMLElement>("menu-offline");
+  let ready = false;
+  try {
+    const name = (await caches.keys()).find((key) => key.startsWith("openzh-"));
+    if (name !== undefined && navigator.serviceWorker?.controller) {
+      const cache = await caches.open(name);
+      const needed = ["/", "/dist/main.js", "/dist/engine.js", "/dist/bridge-worker.js", "/engine/GeneralsXZH.js", "/engine/GeneralsXZH.wasm"];
+      ready = (await Promise.all(needed.map((path) => cache.match(path)))).every((response) => response !== undefined);
+    }
+  } catch {
+    // No Cache Storage (an insecure page): not available offline.
+  }
+  line.textContent = ready ? "Without internet: ready, the game opens offline" : "Without internet: not ready yet (stay online until it is)";
+}
+
 function openMenu(): void {
   openDialog(menu);
   menuButton.setAttribute("aria-expanded", "true");
   void refreshSavedGames();
+  void refreshOffline();
 }
 
 function closeMenu(): void {
@@ -1057,7 +1076,19 @@ function wireFullscreen(): void {
   document.addEventListener("fullscreenchange", onFullscreenChange);
 }
 
+// The engine (SDL) listens for keys on the whole window and cancels them, so
+// typing, deleting, copying and pasting would never reach the launcher's
+// dialogs. Keys pressed inside a dialog stop there, before the window.
+function keepKeysInDialogs(): void {
+  for (const dialog of document.querySelectorAll("dialog")) {
+    for (const type of ["keydown", "keyup", "keypress"]) {
+      dialog.addEventListener(type, (event) => event.stopPropagation());
+    }
+  }
+}
+
 function wireInput(): void {
+  keepKeysInDialogs();
   zipInput.addEventListener("change", () => {
     const files = Array.from(zipInput.files ?? []);
     if (files.length === 0) return;

@@ -33,6 +33,7 @@ const SILENCE_LIMIT: Duration = Duration::from_secs(75);
 #[derive(Deserialize)]
 struct RelayQuery {
     room: Option<String>,
+    token: Option<String>,
 }
 
 /// The whole HTTP surface. `static_dir` serves the game for a LAN party.
@@ -59,14 +60,21 @@ fn header_layer(name: &'static str, value: &'static str) -> SetResponseHeaderLay
 }
 
 async fn upgrade(ws: WebSocketUpgrade, Query(query): Query<RelayQuery>, State(relay): State<Arc<Relay>>) -> Response {
+    // Rooms are private: only an invite link's room and token get in.
     let Some(room) = relay::room_name(query.room.as_deref()) else {
         return (StatusCode::BAD_REQUEST, "room: up to 32 letters, digits, - or _").into_response();
     };
+    let Some(token) = relay::room_token(query.token.as_deref()) else {
+        return (StatusCode::BAD_REQUEST, "token: 16 to 64 letters, digits, - or _").into_response();
+    };
+    if !relay.admits(&room, &token) {
+        return (StatusCode::FORBIDDEN, "wrong token for this room").into_response();
+    }
     ws.max_message_size(HEADER_LEN + MAX_PAYLOAD)
-        .on_upgrade(move |socket| connection(socket, relay, room))
+        .on_upgrade(move |socket| connection(socket, relay, room, token))
 }
 
-async fn connection(socket: WebSocket, relay: Arc<Relay>, room: String) {
+async fn connection(socket: WebSocket, relay: Arc<Relay>, room: String, token: String) {
     let (mut sink, mut stream) = socket.split();
 
     let first = tokio::time::timeout(REGISTRATION_TIMEOUT, stream.next()).await;
@@ -74,7 +82,7 @@ async fn connection(socket: WebSocket, relay: Arc<Relay>, room: String) {
     let Some(address) = relay::parse_registration(&first) else { return };
 
     let (tx, mut rx) = mpsc::channel(relay.limits.queue);
-    let member = match relay.join(&room, address, tx) {
+    let member = match relay.join(&room, &token, address, tx) {
         Ok(member) => member,
         Err(error) => {
             tracing::warn!(room, ?error, "join refused");
@@ -82,7 +90,12 @@ async fn connection(socket: WebSocket, relay: Arc<Relay>, room: String) {
             return;
         }
     };
+    let address = member.address;
     tracing::debug!(room, ip = %relay::ip_text(address.0), port = address.1, "joined");
+    if address.1 == relay::LEASE_PORT && sink.send(Message::Binary(relay::registration(address))).await.is_err() {
+        relay.leave(&member);
+        return;
+    }
 
     let writer = async {
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);

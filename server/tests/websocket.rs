@@ -26,8 +26,10 @@ async fn server() -> (String, Arc<Relay>) {
     (format!("ws://{addr}{RELAY_PATH}"), relay)
 }
 
+const TOKEN: &str = "Tok3n-for_the-test";
+
 async fn client(url: &str, room: &str, ip: u32, port: u16) -> Client {
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{url}?room={room}")).await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("{url}?room={room}&token={TOKEN}")).await.unwrap();
     ws.send(Message::binary(frame(REGISTER, ip, port, b""))).await.unwrap();
     ws
 }
@@ -73,10 +75,45 @@ async fn lobby_broadcast_then_direct_reply() {
     let _ = stranger.close(None).await;
 }
 
+fn refused_with(result: Result<impl std::fmt::Debug, tokio_tungstenite::tungstenite::Error>, status: u16) {
+    match result {
+        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => assert_eq!(response.status().as_u16(), status),
+        other => panic!("expected HTTP {status}, got {other:?}"),
+    }
+}
+
 #[tokio::test]
-async fn bad_room_is_refused() {
+async fn rooms_need_a_room_and_a_token() {
     let (url, _) = server().await;
-    assert!(tokio_tungstenite::connect_async(format!("{url}?room=a%2Fb")).await.is_err());
+    let connect = |query: String| tokio_tungstenite::connect_async(format!("{url}{query}"));
+    refused_with(connect(String::new()).await, 400);
+    refused_with(connect(format!("?token={TOKEN}")).await, 400);
+    refused_with(connect("?room=r".to_owned()).await, 400);
+    refused_with(connect("?room=r&token=short".to_owned()).await, 400);
+    refused_with(connect(format!("?room=a%2Fb&token={TOKEN}")).await, 400);
+}
+
+#[tokio::test]
+async fn a_room_keeps_its_token() {
+    let (url, relay) = server().await;
+    let _host = client(&url, "sala", 0x0A00_0001, 8086).await;
+    settle(&relay, 1).await;
+    let wrong = tokio_tungstenite::connect_async(format!("{url}?room=sala&token=another-token-here")).await;
+    refused_with(wrong, 403);
+    // Once empty the room is gone, and the next host picks the token again.
+    drop(_host);
+    settle(&relay, 0).await;
+    assert!(tokio_tungstenite::connect_async(format!("{url}?room=sala&token=another-token-here")).await.is_ok());
+}
+
+#[tokio::test]
+async fn leases_answer_with_distinct_addresses() {
+    let (url, relay) = server().await;
+    let mut first = client(&url, "sala", 0x0A00_0007, 0).await;
+    assert_eq!(next_binary(&mut first).await, frame(REGISTER, 0x0A00_0007, 0, b""));
+    let mut second = client(&url, "sala", 0x0A00_0007, 0).await;
+    assert_eq!(next_binary(&mut second).await, frame(REGISTER, 0x0A00_0001, 0, b""));
+    settle(&relay, 2).await;
 }
 
 #[tokio::test]

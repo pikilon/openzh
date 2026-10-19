@@ -13,10 +13,11 @@ One binary, two uses:
 | LAN party, no internet needed | `openzh-server --static web/out` on one PC. That PC opens `http://localhost:8766`; the others open `https://<its IP>:8765` and accept the self-signed certificate once. |
 | Online | Runs on the VPS behind Traefik as `server-openzh.pikilon.com` (`--no-tls`). The site at `openzh.pikilon.com` uses it by default. |
 
-The page picks the relay and room from its URL (`web/src/multiplayer.ts`):
-`?room=<name>` joins a private room (up to 32 letters, digits, `-`, `_`);
-without it the player is in the relay's open room `lan`.
-`?relay=wss://host/GeneralsXLan` points the page at another relay.
+Rooms are private. The WebSocket URL must carry `?room=<name>&token=<secret>`
+(room: up to 32 letters, digits, `-`, `_`; token: 16 to 64 of those): the
+first socket of a room sets its token, any other token is refused with 403,
+and a missing room or token with 400. The page gets both from an invite link
+(`web/src/multiplayer.ts`): the host's launcher makes a random room and token.
 
 ## Protocol
 
@@ -24,7 +25,13 @@ Integers are big-endian. The first frame of a socket registers it:
 `[1][virtual ip u32][port u16]`. Datagrams are `[2][ip u32][port u16][payload]`:
 from the client the address is the destination, from the server the source.
 `255.255.255.255` or any `x.x.x.255` reaches every other socket of the room
-bound to that port. A socket that falls 8192 frames behind is closed rather
+bound to that port.
+
+Port 0 is a lease on the page's virtual address, taken before the engine opens
+any socket: `[1][wanted ip or 0][0]` is answered with `[1][ip][0]`, the wanted
+address when no socket of the room holds it, else the lowest free one in
+`10.0.0.1`-`10.0.0.254`. The address stays the page's while that socket is
+open, so two players of a room never share one. A socket that falls 8192 frames behind is closed rather
 than silently losing frames, which would stall the lockstep.
 
 `GET /health` answers `ok`; `GET /stats` gives rooms, sockets, packets and bytes.

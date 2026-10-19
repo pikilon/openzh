@@ -1,0 +1,21 @@
+# Docker Compose project `openzh` on the VPS (/docker/openzh). Traefik, its
+# own project on the same VPS, terminates TLS and routes the subdomain here.
+services:
+  server:
+    image: openzh-server:latest
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.openzh.rule=Host(`server-openzh.pikilon.com`)
+      - traefik.http.routers.openzh.entrypoints=websecure
+      - traefik.http.routers.openzh.tls.certresolver=letsencrypt
+      - traefik.http.services.openzh.loadbalancer.server.port=8080
+    mem_limit: 128m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"

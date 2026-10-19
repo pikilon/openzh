@@ -1006,11 +1006,15 @@ bool WebGPUD3DDevice::hasDepthTarget() const
 	const bool customColorTarget = m_renderTarget && m_renderTarget != m_backBuffer;
 	const UINT colorWidth = customColorTarget ? m_renderTarget->width() : m_parameters.BackBufferWidth;
 	const UINT colorHeight = customColorTarget ? m_renderTarget->height() : m_parameters.BackBufferHeight;
+	// GeneralsX @bugfix zhwp 19/10/2026 #184 Colour and depth attachments of a pass must share a sample count: the swap-chain depth is multisampled, every other depth texture is single-sampled.
+	const bool depthIsSwapChain = m_depthTarget && m_depthTarget == m_depthSurface;
+	const uint32_t depthSamples = depthIsSwapChain && m_parameters.MultiSampleType == D3DMULTISAMPLE_4_SAMPLES ? 4 : 1;
 	if (m_depthTarget && m_depthTarget->isDepthSurface() &&
-		m_depthTarget->width() == colorWidth && m_depthTarget->height() == colorHeight) {
+		m_depthTarget->width() == colorWidth && m_depthTarget->height() == colorHeight &&
+		depthSamples == renderSampleCount()) {
 		return true;
 	}
-	return !customColorTarget && (!m_depthTarget || m_depthTarget == m_depthSurface);
+	return !customColorTarget && !m_depthTarget;
 }
 
 WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)

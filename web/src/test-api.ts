@@ -7,3 +7,5 @@ export { formatBytes, bytesNeeded, available } from "./storage";
 export { FileBridge } from "./bridge";
 export { openZip, entryStream } from "./zip";
 export { importZips } from "./zip-import";
+export { listSavedGames, savedGamesZip, SAVE_DIR, USER_DATA_DB_NAME } from "./saves";
+export { buildZip } from "./zip-write";

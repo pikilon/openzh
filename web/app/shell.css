@@ -697,6 +697,16 @@ dialog::backdrop {
   color: var(--text);
 }
 
+#saves-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+#saves-status {
+  margin: 10px 0 0;
+  color: var(--accent-soft);
+}
+
 .menu-storage {
   margin: 0 0 12px;
 }

@@ -255,6 +255,14 @@ async function refresh(): Promise<void> {
 
 // ----- preferences: mute and the performance overlay -----
 
+// The event-tracked flag can miss the one `focus` event of a navigation
+// started from the address bar (issue #186). The live query is used only to
+// turn the flag back on: a synthetic `blur` in the tests, or a really
+// unfocused window, must keep it off.
+function refreshFocusFromDocument(): void {
+  if (document.hasFocus()) windowFocused = true;
+}
+
 function audibleMuted(): boolean {
   return userMuted || document.visibilityState !== "visible" || !windowFocused;
 }
@@ -503,6 +511,9 @@ async function startEngine(): Promise<void> {
     fullscreen.disabled = false;
     fitWindowedCanvas();
     canvas.focus();
+    // A navigation from the address bar may have missed the window's focus
+    // event, so the flag is refreshed once the engine exists (issue #186).
+    refreshFocusFromDocument();
     // Applied as soon as the engine object exists; the player may have changed
     // either choice while the archives were still loading.
     applyMute();
@@ -784,6 +795,15 @@ function wireAudio(): void {
     updateMuteButton();
     applyMute();
   });
+  // A missed focus event also recovers on the first interaction, but only
+  // when the document really reports focus (issue #186).
+  const refreshOnInteraction = () => {
+    if (windowFocused || !document.hasFocus()) return;
+    windowFocused = true;
+    applyMute();
+  };
+  window.addEventListener("pointerdown", refreshOnInteraction, true);
+  window.addEventListener("keydown", refreshOnInteraction, true);
   window.addEventListener("blur", () => {
     windowFocused = false;
     applyMute();

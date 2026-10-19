@@ -299,8 +299,49 @@ function audibleMuted(): boolean {
   return userMuted || document.visibilityState !== "visible" || !windowFocused;
 }
 
+// Browsers only start audio after a user gesture (autoplay policy), and the
+// game starts by itself, so until the first click, tap or key the sound is
+// blocked even when the player has not muted it. The engine's own resume runs
+// inside that gesture through applyMute.
+let soundAllowed = (() => {
+  const activation = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+  return activation === undefined || activation.hasBeenActive;
+})();
+
+function soundBlocked(): boolean {
+  return !soundAllowed && !userMuted;
+}
+
+// The engine suspends its audio contexts while a map loads and resumes them
+// afterwards; a resume the browser refused (no gesture yet) left the game
+// silent. Inside a gesture every context is resumed again.
+function resumeEngineAudio(): void {
+  const devices = (window as Window & { miniaudio?: { devices?: ({ webaudio?: AudioContext } | null)[] } })
+    .miniaudio?.devices;
+  for (const device of devices ?? []) {
+    const context = device?.webaudio;
+    if (context !== undefined && context.state === "suspended") {
+      void context.resume().catch(() => undefined);
+    }
+  }
+}
+
+function allowSound(): void {
+  resumeEngineAudio();
+  if (soundAllowed) return;
+  soundAllowed = true;
+  updateMuteButton();
+  applyMute();
+}
+
 function updateMuteButton(): void {
-  const label = userMuted ? "Unmute game audio" : "Mute game audio";
+  const blocked = soundBlocked();
+  const label = blocked
+    ? "Sound is blocked by the browser: press to turn it on"
+    : userMuted
+      ? "Unmute game audio"
+      : "Mute game audio";
+  mute.toggleAttribute("data-blocked", blocked);
   mute.setAttribute("aria-pressed", userMuted ? "true" : "false");
   mute.setAttribute("aria-label", label);
   mute.title = label;
@@ -1053,6 +1094,13 @@ function wireInput(): void {
 
 function wireAudio(): void {
   mute.addEventListener("click", () => {
+    // The first press only asks the browser for sound; it never mutes.
+    if (soundBlocked()) {
+      allowSound();
+      return;
+    }
+    soundAllowed = true;
+    resumeEngineAudio();
     userMuted = !userMuted;
     writeMuted(userMuted);
     updateMuteButton();
@@ -1066,6 +1114,15 @@ function wireAudio(): void {
     applyMute();
   };
   window.addEventListener("pointerdown", refreshOnInteraction, true);
+  // Any other gesture also allows sound. The volume button handles its own
+  // press, so its first click is not turned into a mute.
+  const allowOnGesture = (event: Event) => {
+    if (event.target instanceof Node && mute.contains(event.target)) return;
+    allowSound();
+  };
+  for (const type of ["pointerup", "keydown", "touchend"]) {
+    window.addEventListener(type, allowOnGesture, true);
+  }
   window.addEventListener("keydown", refreshOnInteraction, true);
   window.addEventListener("blur", () => {
     windowFocused = false;

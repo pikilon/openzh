@@ -251,9 +251,33 @@ test("11: confirming #reload-confirm clears the archives and reloads to the load
   await expect(page.locator("#canvas")).toBeHidden();
 });
 
+// The game starts without a gesture, so the browser blocks sound and the
+// first #mute press only turns it on (owner, 2026-10-19). A click on the title
+// is the player's first gesture in the tests that exercise muting itself.
+async function allowSound(page: Page): Promise<void> {
+  await page.locator("#title").click();
+  await expect(page.locator("#mute")).not.toHaveAttribute("data-blocked", "");
+}
+
+test("14: with sound still blocked, the first #mute press turns sound on and never mutes", async ({ page }, info) => {
+  await startPlaying(page, info.outputPath(), MUTE_FAKE);
+  await waitForMuteEngine(page);
+  const mute = page.locator("#mute");
+  await expect(mute).toHaveAttribute("data-blocked", "");
+  await expect(mute).toHaveAttribute("aria-label", /blocked by the browser/);
+
+  await mute.click();
+  await waitForLastMuteCall(page, 0);
+  await expect(mute).not.toHaveAttribute("data-blocked", "");
+  await expect(mute).toHaveAttribute("aria-pressed", "false");
+  await expect(mute).toHaveAttribute("aria-label", "Mute game audio");
+  expect(await storedMuted(page)).not.toBe("1");
+});
+
 test("14: #mute toggles the engine and persists the choice", async ({ page }, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
+  await allowSound(page);
   const mute = page.locator("#mute");
   await expect(mute).toHaveAttribute("aria-pressed", "false");
 
@@ -271,6 +295,7 @@ test("14: #mute toggles the engine and persists the choice", async ({ page }, in
 test("14: after a reload the stored mute is pressed and the engine's first value is 1", async ({ page }, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
+  await allowSound(page);
   await expect(page.locator("#mute")).toHaveAttribute("aria-pressed", "false");
 
   await page.locator("#mute").click();
@@ -293,6 +318,7 @@ test("15: blur and focus mute and unmute the engine, and stay muted when the use
 }, info) => {
   await startPlaying(page, info.outputPath(), MUTE_FAKE);
   await waitForMuteEngine(page);
+  await allowSound(page);
 
   // User unmuted, page focused: losing focus mutes and getting it back unmutes.
   let calls = await muteCalls(page);

@@ -251,8 +251,18 @@ body {
   display: none;
 }
 
-#mute[aria-pressed="false"] .mute-x {
+#mute[aria-pressed="false"]:not([data-blocked]) .mute-x {
   display: none;
+}
+
+/* The browser has not allowed sound yet (no gesture since the page loaded):
+   the button shows the muted icon and its first press turns the sound on. */
+#mute[data-blocked] .mute-wave {
+  display: none;
+}
+
+#mute[data-blocked] {
+  color: var(--warn, #ffb347);
 }
 
 /* ----- cut-corner panels ----- */

@@ -19,6 +19,7 @@ import {
 } from "./prefs";
 import { byId, closeDialog, openDialog } from "./shell";
 import { listSavedGames, savedGamesZip } from "./saves";
+import { createTouchControls } from "./touch";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -37,6 +38,7 @@ type PageState =
 type EngineModule = {
   _GeneralsXSetAudioMuted?: (muted: number) => unknown;
   _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
+  _GeneralsXPanCamera?: (x: number, y: number) => unknown;
   FS?: { syncfs?: (populate: boolean, callback: (error: unknown | null) => void) => void };
 };
 
@@ -95,6 +97,20 @@ let engineModule: EngineModule | null = null;
 let storedFiles: StoredFile[] = [];
 let importAbort: AbortController | null = null;
 let importing = false;
+
+// The touch overlay (#187) reads the engine lazily: it is created before the
+// first start and must not call a null engine.
+const touch = createTouchControls({
+  canvas,
+  overlay: byId<HTMLElement>("touch-controls"),
+  toggle: byId<HTMLButtonElement>("touch-toggle"),
+  left: byId<HTMLButtonElement>("touch-left"),
+  right: byId<HTMLButtonElement>("touch-right"),
+  multi: byId<HTMLButtonElement>("touch-multi"),
+  joystick: byId<HTMLElement>("touch-joystick"),
+  knob: byId<HTMLElement>("touch-knob"),
+  engine: () => engineModule,
+});
 
 // The player's own choices (persisted by src/prefs.ts).
 let userMuted = readMuted();
@@ -414,6 +430,7 @@ function enterFullscreen(): void {
 }
 
 function showStarting(): void {
+  touch.setPlaying(false);
   loader.hidden = true;
   loading.hidden = false;
   errorPanel.hidden = true;
@@ -428,6 +445,7 @@ function reportEngineError(message: unknown, record: (line: string) => void): vo
   const text = String(message ?? "").trim() || "unknown error";
   engineFailed = true;
   engineModule = null;
+  touch.setPlaying(false);
   setState("error");
   status.textContent = `Engine failed: ${text}`;
   engineError.textContent = text;
@@ -510,6 +528,7 @@ async function startEngine(): Promise<void> {
     if (engineFailed) return;
 
     engineModule = engine ?? null;
+    touch.setPlaying(true);
     setState("playing");
     loading.hidden = true;
     loader.hidden = true;

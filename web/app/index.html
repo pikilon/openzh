@@ -46,6 +46,23 @@
         <h1 id="title">OpenZH</h1>
         <div class="topbar-actions" role="group" aria-label="Game controls">
           <button
+            id="donate"
+            class="icon-btn"
+            type="button"
+            aria-label="Support OpenZH"
+            title="Support OpenZH"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path
+                d="M12 20.1 4.7 13a4.9 4.9 0 0 1 6.9-6.9l.4.4.4-.4a4.9 4.9 0 0 1 6.9 6.9Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button
             id="fullscreen"
             class="icon-btn"
             type="button"
@@ -280,7 +297,38 @@
 
     <dialog id="about-dialog" class="panel dialog-panel" aria-labelledby="about-title">
       <p class="eyebrow">OpenZH // About</p>
-      <h2 id="about-title">About</h2>
+      <h2 id="about-title">About OpenZH</h2>
+      <p class="dialog-copy about-lede">
+        OpenZH is a browser port of the 2003 real-time strategy game engine. The engine
+        is compiled from its GPL-3.0 source release to WebAssembly and draws through
+        WebGPU, so a match needs no install and no plugin.
+      </p>
+
+      <div class="about-sections">
+        <section>
+          <h3>Your files stay yours</h3>
+          <p>
+            You select the game data ZIP files once. They are kept in this browser's private
+            storage and are never uploaded, copied to a server or included in this project.
+          </p>
+        </section>
+        <section>
+          <h3>A port in progress</h3>
+          <p>
+            Skirmish against the computer and the campaign are the first goals, and both
+            still have rough edges. The issue tracker is where the known problems and the
+            work in progress live.
+          </p>
+        </section>
+        <section>
+          <h3>Independent and unofficial</h3>
+          <p>
+            OpenZH is an unofficial fan project, not affiliated with or endorsed by
+            Electronic Arts. The game data belongs to its owners; you supply your own copy.
+          </p>
+        </section>
+      </div>
+
       <dl class="about-grid">
         <dt>Name</dt>
         <dd id="about-name">OpenZH</dd>
@@ -288,6 +336,8 @@
         <dd id="about-version">0.1.0</dd>
         <dt>License</dt>
         <dd id="about-license">GPL-3.0-or-later</dd>
+        <dt>Engine</dt>
+        <dd>WebAssembly + WebGPU</dd>
       </dl>
       <p id="about-disclaimer" class="dialog-copy">
         OpenZH is an unofficial project. The player supplies the game files; they stay on
@@ -301,9 +351,69 @@
           rel="noopener noreferrer"
           >Source code on GitHub</a
         >
+        <span aria-hidden="true"> · </span>
+        <a
+          id="about-issues"
+          href="https://github.com/pikilon/openzh/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Report a problem or suggest an idea</a
+        >
       </p>
       <div class="dialog-actions">
         <button id="about-close" class="btn btn-primary" type="button">Close</button>
+      </div>
+    </dialog>
+
+    <dialog id="donate-dialog" class="panel dialog-panel" aria-labelledby="donate-title">
+      <p class="eyebrow">OpenZH // Support</p>
+      <h2 id="donate-title">Support OpenZH</h2>
+      <p class="dialog-copy about-lede">
+        OpenZH is free and stays free. A tip is optional, unlocks nothing and only helps
+        cover the time and the hosting behind the port.
+      </p>
+      <p class="dialog-copy">
+        Have a suggestion, a bug report or a feature idea? Send it in the PayPal message
+        when you tip, together with the page and the version if you can. You can also open
+        an issue and keep the conversation public.
+      </p>
+      <div id="donate-tips" class="tip-row">
+        <a
+          id="donate-tip-1"
+          class="btn tip-btn"
+          href="https://paypal.me/pikilongeorgia/1"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Tip €1</a
+        >
+        <a
+          id="donate-tip-2"
+          class="btn tip-btn"
+          href="https://paypal.me/pikilongeorgia/2"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Tip €2</a
+        >
+        <a
+          id="donate-tip-5"
+          class="btn tip-btn"
+          href="https://paypal.me/pikilongeorgia/5"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Tip €5</a
+        >
+      </div>
+      <p class="about-source">
+        <a
+          id="donate-issues"
+          href="https://github.com/pikilon/openzh/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Open an issue on GitHub</a
+        >
+      </p>
+      <div class="dialog-actions">
+        <button id="donate-close" class="btn btn-primary" type="button">Close</button>
       </div>
     </dialog>
 

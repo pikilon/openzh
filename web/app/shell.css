@@ -897,6 +897,40 @@ dialog::backdrop {
   color: var(--muted);
 }
 
+.about-lede {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.about-sections {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.about-sections h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-condensed);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.about-sections p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+#about-dialog {
+  width: min(620px, calc(100vw - 32px));
+}
+
 .about-grid {
   display: grid;
   grid-template-columns: 90px 1fr;
@@ -918,11 +952,19 @@ dialog::backdrop {
 }
 
 .about-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
   margin: 12px 0 18px;
 }
 
 .about-source a {
   color: var(--accent-soft);
+}
+
+#donate-tips {
+  margin: 18px 0 6px;
 }
 
 .dialog-actions {

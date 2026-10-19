@@ -74,6 +74,9 @@ const fpsToggle = byId<HTMLInputElement>("fps-toggle");
 const about = byId<HTMLButtonElement>("about");
 const aboutDialog = byId<HTMLDialogElement>("about-dialog");
 const aboutClose = byId<HTMLButtonElement>("about-close");
+const donate = byId<HTMLButtonElement>("donate");
+const donateDialog = byId<HTMLDialogElement>("donate-dialog");
+const donateClose = byId<HTMLButtonElement>("donate-close");
 
 // Set once an import asks for persisting storage and the browser denies it
 // (issue #129): the storage line then says the browser may clear it.
@@ -714,6 +717,13 @@ function wireMenu(): void {
   about.addEventListener("click", () => openDialog(aboutDialog));
   aboutClose.addEventListener("click", () => closeDialog(aboutDialog));
   aboutDialog.addEventListener("close", () => about.focus());
+
+  donate.addEventListener("click", () => openDialog(donateDialog));
+  donateClose.addEventListener("click", () => closeDialog(donateDialog));
+  donateDialog.addEventListener("close", () => donate.focus());
+  donateDialog.addEventListener("click", (event) => {
+    if (event.target === donateDialog) closeDialog(donateDialog);
+  });
 
   reload.addEventListener("click", () => showReloadConfirmation());
   reloadCancel.addEventListener("click", () => closeDialog(reloadDialog));

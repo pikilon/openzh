@@ -1,23 +1,19 @@
-//! OpenZH multiplayer server: the WebSocket relay that stands in for UDP,
-//! and, for LAN parties, the game's own files.
+//! OpenZH multiplayer server: the WebSocket relay that stands in for UDP.
 
 pub mod relay;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::mpsc;
-use tower_http::services::ServeDir;
-use tower_http::set_header::SetResponseHeaderLayer;
 
 use relay::{HEADER_LEN, MAX_PAYLOAD, Relay};
 
@@ -36,27 +32,13 @@ struct RelayQuery {
     token: Option<String>,
 }
 
-/// The whole HTTP surface. `static_dir` serves the game for a LAN party.
-pub fn app(relay: Arc<Relay>, static_dir: Option<PathBuf>) -> Router {
-    let router = Router::new()
+/// The whole HTTP surface.
+pub fn app(relay: Arc<Relay>) -> Router {
+    Router::new()
         .route(RELAY_PATH, get(upgrade))
         .route("/health", get(|| async { "ok" }))
         .route("/stats", get(|State(relay): State<Arc<Relay>>| async move { axum::Json(relay.stats()) }))
-        .with_state(relay);
-    let router = match static_dir {
-        Some(dir) => router.fallback_service(ServeDir::new(dir).append_index_html_on_directories(true)),
-        None => router,
-    };
-    // The engine needs cross-origin isolation (threads, SharedArrayBuffer); same headers as web/scripts/serve.mjs.
-    router
-        .layer(header_layer("cross-origin-opener-policy", "same-origin"))
-        .layer(header_layer("cross-origin-embedder-policy", "require-corp"))
-        .layer(header_layer("cross-origin-resource-policy", "cross-origin"))
-        .layer(SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static("no-cache")))
-}
-
-fn header_layer(name: &'static str, value: &'static str) -> SetResponseHeaderLayer<HeaderValue> {
-    SetResponseHeaderLayer::overriding(HeaderName::from_static(name), HeaderValue::from_static(value))
+        .with_state(relay)
 }
 
 async fn upgrade(ws: WebSocketUpgrade, Query(query): Query<RelayQuery>, State(relay): State<Arc<Relay>>) -> Response {

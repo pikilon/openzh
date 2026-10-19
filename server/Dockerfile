@@ -10,4 +10,4 @@ FROM scratch
 COPY --from=build /src/target/release/openzh-server /openzh-server
 USER 65534
 EXPOSE 8080
-ENTRYPOINT ["/openzh-server", "--no-tls", "--http", "0.0.0.0:8080"]
+ENTRYPOINT ["/openzh-server", "--http", "0.0.0.0:8080"]

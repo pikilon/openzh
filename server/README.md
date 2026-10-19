@@ -6,12 +6,10 @@ sends each datagram as a WebSocket frame, and this server forwards it to the
 right tab. Each **room** is one virtual LAN: the game's own Network (LAN)
 lobby, chat and matches work unchanged inside it.
 
-One binary, two uses:
-
-| Use | How |
-| --- | --- |
-| LAN party, no internet needed | `openzh-server --static web/out` on one PC. That PC opens `http://localhost:8766`; the others open `https://<its IP>:8765` and accept the self-signed certificate once. |
-| Online | Runs on the VPS behind Traefik as `server-openzh.pikilon.com` (`--no-tls`). The site at `openzh.pikilon.com` uses it by default. |
+It runs on the VPS behind Traefik as `server-openzh.pikilon.com`; the site at
+`openzh.pikilon.com` uses it for online games. Games on a network without
+internet need no server: the host's tab is the relay and the others connect
+to it over WebRTC (`web/src/lan.ts`).
 
 Rooms are private. The WebSocket URL must carry `?room=<name>&token=<secret>`
 (room: up to 32 letters, digits, `-`, `_`; token: 16 to 64 of those): the

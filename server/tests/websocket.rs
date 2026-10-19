@@ -22,7 +22,7 @@ async fn server() -> (String, Arc<Relay>) {
     let relay = Arc::new(Relay::new(Limits::default()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(axum::serve(listener, app(relay.clone(), None)).into_future());
+    tokio::spawn(axum::serve(listener, app(relay.clone())).into_future());
     (format!("ws://{addr}{RELAY_PATH}"), relay)
 }
 
@@ -117,7 +117,7 @@ async fn leases_answer_with_distinct_addresses() {
 }
 
 #[tokio::test]
-async fn health_and_cross_origin_isolation_headers() {
+async fn health() {
     let (url, _) = server().await;
     let addr = url.trim_start_matches("ws://").split('/').next().unwrap().to_owned();
     let mut stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
@@ -126,6 +126,5 @@ async fn health_and_cross_origin_isolation_headers() {
     let mut response = String::new();
     stream.read_to_string(&mut response).await.unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("cross-origin-embedder-policy: require-corp"));
     assert!(response.ends_with("ok"));
 }

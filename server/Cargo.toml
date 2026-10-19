@@ -3,20 +3,16 @@ name = "openzh-server"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "OpenZH multiplayer relay: a virtual LAN per room over WebSocket, for the internet and for offline LAN parties"
+description = "OpenZH multiplayer relay: a private virtual LAN per room over WebSocket"
 
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net"] }
-tower-http = { version = "0.6", features = ["fs", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

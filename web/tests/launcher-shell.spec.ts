@@ -73,6 +73,7 @@ test("1: the top bar holds only the title and four icon buttons", async ({ page 
   expect(await page.locator("#topbar img").count()).toBe(0);
 
   // Nothing else is visible in the top bar: no other control and no text
+  // (#game-menu and #touch-toggle only appear while the game is playing)
   // outside #title (the labels of the icon buttons live in aria-label/title).
   const visibleControls = await topbar.evaluate((element) =>
     [

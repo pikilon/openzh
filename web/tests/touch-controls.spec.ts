@@ -112,7 +112,7 @@ async function activeId(page: Page): Promise<string | null> {
 }
 
 test.describe("touch device", () => {
-  test.use({ hasTouch: true, viewport: { width: 375, height: 812 } });
+  test.use({ hasTouch: true, viewport: { width: 812, height: 375 } });
 
   test("1: the toggle appears only while playing, and the overlay defaults on", async ({
     page,

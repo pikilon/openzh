@@ -62,8 +62,12 @@ native builds.
 ### 4.1 Toggle button
 
 * A button, `#touch-toggle`, labelled "Touch" (i18n key `touch.toggle`), shown
-  in the playing view in a top-right corner of the game area. Not shown in
-  the launcher view before Play.
+  as an icon button in the top bar while the game plays (owner, 2026-10-19:
+  the overlay over the game holds only the touch controls). Not shown in the
+  launcher view before Play. Next to it, `#game-menu` sends Escape to the
+  engine to open the in-game menu. The app is landscape only: the manifest
+  asks for it, fullscreen locks it, and a touch screen in portrait shows a
+  rotate notice.
 * Pressing it shows or hides the overlay (section 4.2). Its pressed state is
   visible (`aria-pressed`).
 * Default: off on a device without touch (`matchMedia("(pointer: coarse)")`
@@ -165,7 +169,7 @@ becomes a drag, not a right click.
 
 ## 7. Acceptance criteria
 
-1. The toggle button is visible in the playing view on a 375 x 812 viewport with touch emulation, and is not visible in the launcher before Play.
+1. The toggle button is visible in the playing view on an 812 x 375 viewport with touch emulation, and is not visible in the launcher before Play.
 2. Pressing the toggle shows the overlay; pressing it again hides the overlay and clears the locks and any joystick push.
 3. The overlay lies inside `#screen`, and stays visible and usable after `requestFullscreen` on `#screen`.
 4. The overlay's controls are in left to right order: Left lock, Right lock, Multi lock, joystick; the joystick is the rightmost control.

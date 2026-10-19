@@ -82,6 +82,7 @@ const exportSaves = byId<HTMLButtonElement>("export-saves");
 const savesSummary = byId<HTMLElement>("saves-summary");
 const savesStatus = byId<HTMLElement>("saves-status");
 const donate = byId<HTMLButtonElement>("donate");
+const gameMenu = byId<HTMLButtonElement>("game-menu");
 const donateDialog = byId<HTMLDialogElement>("donate-dialog");
 const donateClose = byId<HTMLButtonElement>("donate-close");
 
@@ -412,6 +413,42 @@ function onFullscreenChange(): void {
   window.requestAnimationFrame(fitFullscreenCanvas);
 }
 
+// The game is played in landscape. The browser only allows the lock in
+// fullscreen or in the installed app; elsewhere the request is refused quietly
+// (the manifest also asks for landscape).
+function lockLandscape(): void {
+  const orientation = screen.orientation as ScreenOrientation & {
+    lock?: (orientation: string) => Promise<void>;
+  };
+  if (orientation === undefined || typeof orientation.lock !== "function") return;
+  try {
+    void orientation.lock("landscape").catch(() => undefined);
+  } catch {
+    // Some browsers throw synchronously instead of rejecting.
+  }
+}
+
+// Opens the in-game menu the way the Esc key does. A real Esc can be eaten
+// by the browser (it leaves pointer lock or fullscreen first), so the top bar
+// button sends the key straight to the engine, which listens on window.
+function openGameMenu(): void {
+  if (pageState !== "playing") return;
+  canvas.focus();
+  for (const type of ["keydown", "keyup"] as const) {
+    canvas.dispatchEvent(
+      new KeyboardEvent(type, {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        which: 27,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      }),
+    );
+  }
+}
+
 function enterFullscreen(): void {
   if (!canFullscreen()) return;
   const requested = screen.requestFullscreen();
@@ -419,6 +456,7 @@ function enterFullscreen(): void {
     () => {
       if (engineFailed) leaveFullscreen();
       else {
+        lockLandscape();
         fitFullscreenCanvas();
         canvas.focus();
       }
@@ -431,6 +469,7 @@ function enterFullscreen(): void {
 
 function showStarting(): void {
   touch.setPlaying(false);
+  gameMenu.hidden = true;
   loader.hidden = true;
   loading.hidden = false;
   errorPanel.hidden = true;
@@ -479,6 +518,7 @@ function reportEngineError(message: unknown, record: (line: string) => void): vo
   engineFailed = true;
   engineModule = null;
   touch.setPlaying(false);
+  gameMenu.hidden = true;
   setState("error");
   status.textContent = `Engine failed: ${text}`;
   engineError.textContent = text;
@@ -563,6 +603,8 @@ async function startEngine(): Promise<void> {
 
     engineModule = engine ?? null;
     touch.setPlaying(true);
+    gameMenu.hidden = false;
+    lockLandscape();
     setState("playing");
     loading.hidden = true;
     loader.hidden = true;
@@ -857,6 +899,7 @@ function wireMenu(): void {
   aboutDialog.addEventListener("close", () => about.focus());
 
   donate.addEventListener("click", () => openDialog(donateDialog));
+  gameMenu.addEventListener("click", () => openGameMenu());
   donateClose.addEventListener("click", () => closeDialog(donateDialog));
   donateDialog.addEventListener("close", () => donate.focus());
   donateDialog.addEventListener("click", (event) => {

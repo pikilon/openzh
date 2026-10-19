@@ -355,48 +355,11 @@ body {
   touch-action: none;
 }
 
-.touch-toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 40px;
-  margin: 0;
-  padding: 0 12px;
-  color: var(--accent-soft);
-  font-family: var(--font-condensed);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  background: linear-gradient(180deg, rgba(20, 54, 92, 0.9), rgba(5, 16, 32, 0.94));
-  border: 1px solid var(--line);
-  clip-path: polygon(
-    9px 0,
-    100% 0,
-    100% calc(100% - 9px),
-    calc(100% - 9px) 100%,
-    0 100%,
-    0 9px
-  );
-  cursor: pointer;
-  touch-action: none;
-}
-
-.touch-toggle:hover {
-  color: #fff;
-  border-color: rgba(143, 216, 255, 0.85);
-  box-shadow: 0 0 16px rgba(46, 168, 255, 0.35);
-}
-
-.touch-toggle[aria-pressed="true"] {
+.icon-btn[aria-pressed="true"] {
   color: #020a14;
   background: linear-gradient(180deg, #8fd8ff, #2ea8ff);
   border-color: var(--accent-soft);
-  box-shadow: 0 0 20px rgba(46, 168, 255, 0.5);
+  box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
 }
 
 .touch-controls {
@@ -1170,11 +1133,6 @@ dialog::backdrop {
     justify-content: flex-start;
     gap: 18px;
   }
-
-  .touch-toggle {
-    top: 6px;
-    right: 6px;
-  }
 }
 
 @media (max-width: 700px) {
@@ -1221,5 +1179,28 @@ dialog::backdrop {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* The game is played in landscape (the manifest and the fullscreen lock ask for
+   it). Where the browser cannot lock the orientation, a touch screen held in
+   portrait shows a rotate notice over the game instead of a squeezed view. */
+@media (orientation: portrait) and (pointer: coarse) {
+  body[data-state="playing"] #screen::after {
+    content: "Rotate your device to landscape";
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--accent-soft);
+    font-family: var(--font-condensed);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-align: center;
+    text-transform: uppercase;
+    background: rgba(2, 6, 13, 0.94);
   }
 }

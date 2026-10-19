@@ -22,6 +22,7 @@ import { listSavedGames, savedGamesZip } from "./saves";
 import { BackupError, exportBackup, importBackup, type BackupKind } from "./user-backup";
 import { resumeUserDataSaves, suspendUserDataSaves } from "./user-data";
 import { createTouchControls } from "./touch";
+import { configureMultiplayer } from "./multiplayer";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -628,6 +629,7 @@ async function startEngine(): Promise<void> {
 
   try {
     if (!(await acquireEngineLock())) throw new Error(FILES_IN_USE);
+    configureMultiplayer();
     const moduleUrl = engineModuleUrl();
     const module = (await import(moduleUrl)) as { default?: unknown };
     if (typeof module.default !== "function") {

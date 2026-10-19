@@ -76,12 +76,18 @@ EM_JS(Int, GeneralsXWebLanBind, (UnsignedInt ip, UnsignedShort port), {
 	// 8766 plain-http convenience) and each runs its own relay — following location.host would
 	// split players across relays and their games would never see each other. Pin the TLS relay;
 	// if that socket cannot connect (no cert exception yet), fall back to the page's own origin.
-	const relayUrls = [
+	// OpenZH: the launcher (web/src/multiplayer.ts) may name another relay, such as the online one,
+	// and a room: each room of a relay is a separate virtual LAN.
+	let relayUrls = globalThis.generalsXLanRelay ? [globalThis.generalsXLanRelay] : [
 		"wss://" + globalThis.location.hostname + ":8765/GeneralsXLan",
 		(globalThis.location.protocol === "https:" ? "wss://" : "ws://")
 			+ globalThis.location.host + "/GeneralsXLan",
 	];
-	if (relayUrls[0] === relayUrls[1]) relayUrls.pop();
+	if (relayUrls[1] && relayUrls[0] === relayUrls[1]) relayUrls.pop();
+	const room = globalThis.generalsXLanRoom;
+	if (room) {
+		relayUrls = relayUrls.map((url) => url + (url.includes("?") ? "&" : "?") + "room=" + encodeURIComponent(room));
+	}
 	const socket = new WebSocket(relayUrls[0]);
 	socket.binaryType = "arraybuffer";
 	const state = { socket, virtualIP, port, incoming: [], outgoing: [], incomingBytes: 0 };

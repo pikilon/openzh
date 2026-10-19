@@ -1129,6 +1129,10 @@ void W3DDisplay::init()
 				TheWritableGlobalData->m_textureFilteringMode = WW3D::Get_Texture_Filter();
 				WW3D::Set_Anisotropy_Level(TheWritableGlobalData->m_textureAnisotropyLevel);
 				TheWritableGlobalData->m_textureAnisotropyLevel = WW3D::Get_Anisotropy_Level();
+#if defined(__EMSCRIPTEN__)
+				fprintf(stderr, "GENERALSX_GRAPHICS_DEVICE aa=%d filter=%d anisotropy=%d\n",
+					(Int)TheGlobalData->m_antiAliasLevel, (Int)TheGlobalData->m_textureFilteringMode, (Int)TheGlobalData->m_textureAnisotropyLevel);
+#endif
 			}
 
 			++attempt;

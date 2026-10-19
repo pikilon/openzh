@@ -63,7 +63,21 @@ function syncToIDB(module: any): Promise<void> {
   });
 }
 
+// An imported backup was written straight to IndexedDB; the running engine's
+// older copy must never be flushed over it before the page reloads.
+let suspended = false;
+
+export function suspendUserDataSaves(): void {
+  suspended = true;
+}
+
+// A failed import hands saving back to the running engine.
+export function resumeUserDataSaves(): void {
+  suspended = false;
+}
+
 function save(module: any): Promise<void> {
+  if (suspended) return Promise.resolve();
   if (pending === null) {
     pending = syncToIDB(module).finally(() => {
       pending = null;

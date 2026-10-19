@@ -29,7 +29,7 @@ export interface SavedGame {
 }
 
 interface IdbFileEntry {
-  timestamp?: number;
+  timestamp?: number | Date;
   mode?: number;
   contents?: Uint8Array | ArrayBuffer;
 }
@@ -120,7 +120,13 @@ export async function listSavedGames(): Promise<SavedGame[]> {
             games.push({
               path,
               data: copyContents(entry.contents),
-              timestamp: typeof entry.timestamp === "number" ? entry.timestamp : 0,
+              // Emscripten stores a Date; the seeded tests use a number.
+              timestamp:
+                entry.timestamp instanceof Date
+                  ? entry.timestamp.getTime()
+                  : typeof entry.timestamp === "number"
+                    ? entry.timestamp
+                    : 0,
             });
           }
         }

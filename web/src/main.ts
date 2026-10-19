@@ -19,6 +19,8 @@ import {
 } from "./prefs";
 import { byId, closeDialog, openDialog } from "./shell";
 import { listSavedGames, savedGamesZip } from "./saves";
+import { BackupError, exportBackup, importBackup, type BackupKind } from "./user-backup";
+import { resumeUserDataSaves, suspendUserDataSaves } from "./user-data";
 import { createTouchControls } from "./touch";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
@@ -81,6 +83,11 @@ const aboutClose = byId<HTMLButtonElement>("about-close");
 const exportSaves = byId<HTMLButtonElement>("export-saves");
 const savesSummary = byId<HTMLElement>("saves-summary");
 const savesStatus = byId<HTMLElement>("saves-status");
+const exportSettings = byId<HTMLButtonElement>("export-settings");
+const exportEverything = byId<HTMLButtonElement>("export-everything");
+const importSettings = byId<HTMLButtonElement>("import-settings");
+const importSettingsInput = byId<HTMLInputElement>("import-settings-input");
+const settingsStatus = byId<HTMLElement>("settings-status");
 const donate = byId<HTMLButtonElement>("donate");
 const gameMenu = byId<HTMLButtonElement>("game-menu");
 const donateDialog = byId<HTMLDialogElement>("donate-dialog");
@@ -861,6 +868,54 @@ async function exportSavedGames(): Promise<void> {
   }
 }
 
+// ----- settings backup -----
+
+function setSettingsBusy(busy: boolean): void {
+  exportSettings.disabled = busy;
+  exportEverything.disabled = busy;
+  importSettings.disabled = busy;
+}
+
+function showSettingsStatus(text: string): void {
+  settingsStatus.hidden = false;
+  settingsStatus.textContent = text;
+}
+
+async function exportUserBackup(kind: BackupKind): Promise<void> {
+  setSettingsBusy(true);
+  showSettingsStatus("Preparing the ZIP…");
+  try {
+    const { blob, files } = await exportBackup(kind, flushUserData);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `openzh-${kind}-${stamp}.zip`);
+    showSettingsStatus(`Exported ${files} file${files === 1 ? "" : "s"}.`);
+  } catch {
+    showSettingsStatus("Could not export the settings.");
+  } finally {
+    setSettingsBusy(false);
+  }
+}
+
+async function importUserBackup(file: File): Promise<void> {
+  if (pageState === "playing" && !window.confirm("Importing restarts the game. Unsaved progress is lost. Continue?")) {
+    return;
+  }
+  setSettingsBusy(true);
+  showSettingsStatus("Importing…");
+  try {
+    // The running engine must not write its older files over the import.
+    suspendUserDataSaves();
+    const { files } = await importBackup(file);
+    showSettingsStatus(`Imported ${files} file${files === 1 ? "" : "s"}. Restarting…`);
+    releaseStoredArchives();
+    window.location.reload();
+  } catch (error) {
+    resumeUserDataSaves();
+    showSettingsStatus(error instanceof BackupError ? error.message : "Could not import this backup.");
+    setSettingsBusy(false);
+  }
+}
+
 async function deleteStoredAndReload(): Promise<void> {
   reloadConfirm.disabled = true;
   reloadCancel.disabled = true;
@@ -914,6 +969,19 @@ function wireMenu(): void {
 
   exportSaves.addEventListener("click", () => {
     void exportSavedGames();
+  });
+
+  exportSettings.addEventListener("click", () => {
+    void exportUserBackup("settings");
+  });
+  exportEverything.addEventListener("click", () => {
+    void exportUserBackup("everything");
+  });
+  importSettings.addEventListener("click", () => importSettingsInput.click());
+  importSettingsInput.addEventListener("change", () => {
+    const file = importSettingsInput.files?.[0];
+    importSettingsInput.value = "";
+    if (file !== undefined) void importUserBackup(file);
   });
 
   fpsToggle.checked = performanceOverlay;

@@ -327,6 +327,19 @@
           <p id="saves-status" class="mono" role="status" hidden></p>
           <p class="hint">A copy of the engine's saves from this browser, as a ZIP.</p>
         </section>
+        <section class="menu-section">
+          <h3>Settings</h3>
+          <button id="export-settings" class="btn" type="button">Export settings (.zip)</button>
+          <button id="export-everything" class="btn" type="button">Export everything (.zip)</button>
+          <button id="import-settings" class="btn" type="button">Import a backup (.zip)</button>
+          <input id="import-settings-input" type="file" accept=".zip,application/zip" hidden />
+          <p id="settings-status" class="mono" role="status" hidden></p>
+          <p class="hint">
+            Settings are the game options (resolution, graphics, audio, controls) and the
+            launcher choices. Everything also includes the saved games. Touch controls stay
+            on this device. Importing restarts the game.
+          </p>
+        </section>
 
         <section class="menu-section">
           <h3>Performance</h3>

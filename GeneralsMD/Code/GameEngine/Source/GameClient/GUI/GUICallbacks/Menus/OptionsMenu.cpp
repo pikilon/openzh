@@ -1178,7 +1178,9 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	}
 
 	// populate anti aliasing modes
-	AsciiString selectedAliasingMode = (*pref)["AntiAliasing"];
+	// GeneralsX @bugfix zhwp 19/10/2026 Read through getAntiAliasing before anything touches the key: operator[] would insert
+	// an empty "AntiAliasing" entry, which then read back as Off and was saved as 0 on accept.
+	Int val = (Int)pref->getAntiAliasing();
 	GadgetComboBoxReset(comboBoxAntiAliasing);
 	AsciiString temp;
 	Int i=0;
@@ -1188,7 +1190,6 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 		str = TheGameText->fetch( temp );
 		index = GadgetComboBoxAddEntry(comboBoxAntiAliasing, str, color);
 	}
-	Int val = atoi(selectedAliasingMode.str());
 	Int pos = 0;
 
 	// TheSuperHackers @info We are converting from human readable value to comboBox entry position

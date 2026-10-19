@@ -130,3 +130,5 @@ Before D-05 the lead agent wrote all tests, so there are no test-writing rows ye
 | 2026-10-19 | #189 | tests+code | deepseek-flash (dsh) | ok | ~5 min | seeded IDBFS saves keep bytes and timestamps through two install replacements and clearStored |
 | 2026-10-19 | #190 | tests+code | deepseek-flash (dsh) | ok | ~10 min | 3 zip-writer tests and the menu download pass; exported ZIP round-trips through openZip |
 | 2026-10-19 | #187 | tests+code | deepseek-flash (dsh) | ok | ~35 min | 15 touch tests pass in Brave; engine build exit 0 with GeneralsXPanCamera present in GeneralsXZH.js; full synthetic suite 377 pass, 18 skipped |
+
+| 2026-10-19 | #187/#188/#189/#190/#191/#192 | verify | deepseek-flash (dsh) | ok | ~3 min | full synthetic suite 377 pass, 18 skipped; real data lite-mp3: main menu, WebGPU (#184 attachments), audio, fonts, textures and 1080p resolution pass; main menu screenshot drawn, no black canvas |

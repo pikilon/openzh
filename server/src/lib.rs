@@ -1,6 +1,7 @@
 //! OpenZH multiplayer server: the WebSocket relay that stands in for UDP.
 
 pub mod relay;
+pub mod stun;
 
 use std::sync::Arc;
 use std::time::Duration;

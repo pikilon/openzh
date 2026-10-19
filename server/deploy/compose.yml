@@ -6,6 +6,9 @@ services:
     restart: unless-stopped
     environment:
       RUST_LOG: info
+    # STUN for direct WebRTC links between players; Traefik only carries the WebSocket relay.
+    ports:
+      - "3478:3478/udp"
     labels:
       - traefik.enable=true
       - traefik.http.routers.openzh.rule=Host(`server-openzh.pikilon.com`)

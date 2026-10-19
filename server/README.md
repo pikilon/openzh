@@ -34,6 +34,14 @@ than silently losing frames, which would stall the lockstep.
 
 `GET /health` answers `ok`; `GET /stats` gives rooms, sockets, packets and bytes.
 
+## STUN
+
+UDP port 3478 answers STUN binding requests (RFC 8489, XOR-MAPPED-ADDRESS
+only), so browsers learn their public address and players link directly over
+WebRTC (`web/src/mesh.ts`) without a third-party STUN server. The relay then
+only carries lobby broadcasts, signalling and the links that could not go
+direct.
+
 ## Build, test, deploy
 
 ```bash

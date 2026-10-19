@@ -9,5 +9,5 @@ RUN cargo build --release --locked
 FROM scratch
 COPY --from=build /src/target/release/openzh-server /openzh-server
 USER 65534
-EXPOSE 8080
+EXPOSE 8080 3478/udp
 ENTRYPOINT ["/openzh-server", "--http", "0.0.0.0:8080"]

@@ -177,7 +177,10 @@ export function createLanDialog(): LanDialog {
       setStatus("The player is connected.");
       render();
     } catch (error) {
-      setStatus(`Could not connect: ${(error as Error).message}.`, true);
+      // An invite takes one answer: after a failed one it needs a fresh code.
+      const reason = (error as Error).message;
+      await addPlayer();
+      setStatus(`Could not connect: ${reason}. A new code is ready: have the player scan it again.`, true);
     }
   }
 

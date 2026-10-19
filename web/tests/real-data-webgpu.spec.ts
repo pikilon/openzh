@@ -170,6 +170,11 @@ test.describe("depth-stencil format on the real engine", () => {
     expect(invalid, `invalid command buffers:\n${invalid.slice(0, 5).join("\n")}`).toEqual([]);
   });
 
+  test("4: no render pass pairs attachments with different sample counts (#184)", () => {
+    const mismatched = [...log, ...browserLog].filter((line) => line.includes("does not match the sample count"));
+    expect(mismatched, `sample count mismatches:\n${mismatched.slice(0, 5).join("\n")}`).toEqual([]);
+  });
+
   test("3: the canvas screenshot has at least 16 distinct colours", () => {
     const colours = distinctColours(screenshot);
     expect(colours, `only ${colours} distinct colours in ${screenshotPath}`).toBeGreaterThanOrEqual(16);

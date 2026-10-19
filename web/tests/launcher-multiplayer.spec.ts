@@ -184,7 +184,10 @@ test("typing, deleting and pasting reach the dialog while the engine holds the k
   await page.goto(SHELL);
   // What SDL does with the engine running: every key on the window is cancelled.
   await page.evaluate(() => {
-    for (const type of ["keydown", "keyup", "keypress"]) window.addEventListener(type, (event) => event.preventDefault());
+    for (const type of ["keydown", "keyup", "keypress"]) {
+      window.addEventListener(type, (event) => event.preventDefault(), true);
+      document.addEventListener(type, (event) => event.preventDefault(), true);
+    }
   });
   await page.locator("#mp-button").click();
   const name = page.locator("#mp-name");

@@ -1076,12 +1076,30 @@ function wireFullscreen(): void {
   document.addEventListener("fullscreenchange", onFullscreenChange);
 }
 
-// The engine (SDL) listens for keys on the whole window and cancels them, so
-// typing, deleting, copying and pasting would never reach the launcher's
-// dialogs. Keys pressed inside a dialog stop there, before the window.
+// The engine (SDL) listens for keys on the window, possibly in the capture
+// phase, and cancels them, so typing, deleting, copying and pasting would never
+// reach the launcher's dialogs. Key listeners that the engine registers on the
+// window or document are wrapped so they skip events that come from a dialog.
 function keepKeysInDialogs(): void {
+  const keyTypes = new Set(["keydown", "keyup", "keypress"]);
+  const inDialog = (event: Event): boolean => {
+    const target = event.target;
+    return target instanceof Element && target.closest("dialog") !== null;
+  };
+  for (const host of [window, document] as EventTarget[]) {
+    const add = host.addEventListener.bind(host);
+    host.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+      if (!keyTypes.has(type) || !listener) return add(type, listener as EventListener, options);
+      const wrapped = (event: Event) => {
+        if (inDialog(event)) return;
+        if (typeof listener === "function") listener.call(host, event);
+        else listener.handleEvent(event);
+      };
+      return add(type, wrapped, options);
+    }) as typeof host.addEventListener;
+  }
   for (const dialog of document.querySelectorAll("dialog")) {
-    for (const type of ["keydown", "keyup", "keypress"]) {
+    for (const type of keyTypes) {
       dialog.addEventListener(type, (event) => event.stopPropagation());
     }
   }

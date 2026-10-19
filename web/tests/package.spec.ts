@@ -115,9 +115,16 @@ test("1: a fake engine folder produces the package tree and exits 0", ({}, info)
   // Only files whose name starts with GeneralsXZH. come from the engine folder.
   expect(readdirSync(join(out, "engine")).sort()).toEqual(["GeneralsXZH.js", "GeneralsXZH.wasm"]);
 
-  // app/ and dist/ are copies of the repository's files.
-  expect(readFileSync(join(out, "app", "index.html"))).toEqual(
-    readFileSync(join(WEB_ROOT, "app", "index.html")),
+  // app/ and dist/ are copies of the repository's files, except that the
+  // launcher's top bar names the build: commit date and short commit.
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: WEB_ROOT, encoding: "utf8" }).stdout.trim();
+  const packaged = readFileSync(join(out, "app", "index.html"), "utf8");
+  const buildInfo = packaged.match(/<span id="build-info" title="Build ([0-9a-f]{40})[^"]*">(\d{4}-\d{2}-\d{2}) · ([0-9a-f]{9})\+?<\/span>/);
+  expect(buildInfo, "filled #build-info").not.toBeNull();
+  expect(buildInfo?.[1]).toBe(commit);
+  expect(buildInfo?.[3]).toBe(commit.slice(0, 9));
+  expect(packaged.replace(buildInfo?.[0] ?? "", '<span id="build-info" title="Development build">dev</span>')).toEqual(
+    readFileSync(join(WEB_ROOT, "app", "index.html"), "utf8"),
   );
   expect(readFileSync(join(out, "dist", "main.js"))).toEqual(
     readFileSync(join(WEB_ROOT, "dist", "main.js")),

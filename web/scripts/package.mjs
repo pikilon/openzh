@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -139,6 +140,20 @@ mkdirSync(join(out, "engine"), { recursive: true });
 for (const entry of readdirSync(engine, { withFileTypes: true })) {
   if (!entry.isFile() || !entry.name.startsWith(ENGINE_PREFIX)) continue;
   copyFileSync(join(engine, entry.name), join(out, "engine", entry.name));
+}
+
+// The top bar shows which build this is: date and commit, "+" when built
+// with uncommitted changes.
+const BUILD_INFO = '<span id="build-info" title="Development build">dev</span>';
+const git = (...args) => spawnSync("git", args, { cwd: WEB_ROOT, encoding: "utf8" }).stdout?.trim() ?? "";
+const commit = git("rev-parse", "HEAD");
+if (commit) {
+  const dirty = git("status", "--porcelain", "--untracked-files=no") !== "" ? "+" : "";
+  const label = `${git("show", "-s", "--format=%cs", "HEAD")} · ${commit.slice(0, 9)}${dirty}`;
+  const outIndex = join(out, "app", "index.html");
+  const page = readFileSync(outIndex, "utf8");
+  if (!page.includes(BUILD_INFO)) fail(`launcher has no ${BUILD_INFO} to fill`);
+  writeFileSync(outIndex, page.replace(BUILD_INFO, `<span id="build-info" title="Build ${commit}${dirty ? " with uncommitted changes" : ""}">${label}</span>`));
 }
 
 writeFileSync(join(out, "index.html"), REDIRECT);

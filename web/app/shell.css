@@ -181,6 +181,26 @@ body {
   transform: rotate(45deg) translateY(-1px);
 }
 
+/* Version and commit of the published build, so a screenshot tells which one it is. */
+#build-info {
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+  user-select: all;
+}
+
+/* Narrow screens: under the title, so the buttons keep their room. */
+@media (max-width: 600px) {
+  #build-info {
+    position: absolute;
+    left: 20px;
+    bottom: 5px;
+    font-size: 9px;
+  }
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;

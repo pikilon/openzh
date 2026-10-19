@@ -74,7 +74,7 @@ test("1: the top bar holds only the title and four icon buttons", async ({ page 
 
   // Nothing else is visible in the top bar: no other control and no text
   // (#game-menu and #touch-toggle only appear while the game is playing)
-  // outside #title (the labels of the icon buttons live in aria-label/title).
+  // outside #title and #build-info (the labels of the icon buttons live in aria-label/title).
   const visibleControls = await topbar.evaluate((element) =>
     [
       ...element.querySelectorAll(
@@ -97,12 +97,14 @@ test("1: the top bar holds only the title and four icon buttons", async ({ page 
 
   const strayText = await topbar.evaluate((element) => {
     const title = document.getElementById("title");
+    const buildInfo = document.getElementById("build-info");
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const parts: string[] = [];
     while (walker.nextNode()) {
       const node = walker.currentNode as Text;
       if ((node.textContent ?? "").trim() === "") continue;
       if (title !== null && title.contains(node)) continue;
+      if (buildInfo !== null && buildInfo.contains(node)) continue;
       const parent = node.parentElement;
       // An SVG <title> is accessibility metadata, never rendered text.
       if (parent !== null && parent.closest("svg") !== null) continue;
@@ -111,6 +113,7 @@ test("1: the top bar holds only the title and four icon buttons", async ({ page 
     return parts;
   });
   expect(strayText).toEqual([]);
+  await expect(page.locator("#build-info")).toBeVisible();
 
   // Title first, then the buttons in contract order.
   const order = await topbar.evaluate((element) =>

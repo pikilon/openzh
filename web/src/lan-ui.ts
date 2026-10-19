@@ -4,7 +4,7 @@
 // answer, the host scans that. Pasting the codes works too.
 
 import qrcode from "qrcode-generator";
-import { byId, closeDialog, openDialog } from "./shell";
+import { byId, closeDialog, closeOnBackdrop, openDialog } from "./shell";
 import { scanQr } from "./qr-scan";
 import { ANSWER_PREFIX, GuestAnswer, HostInvite, LanHub, answerFromText, channelConnect, offerFromText, offerLink, type Connect } from "./lan";
 import { Lease, applyLan, cleanName, readPlayerName, writePlayerName, type LanGlobals } from "./multiplayer";
@@ -283,9 +283,7 @@ export function createLanDialog(): LanDialog {
   });
   leave.addEventListener("click", leaveGame);
   close.addEventListener("click", () => closeDialog(dialog));
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) closeDialog(dialog);
-  });
+  closeOnBackdrop(dialog);
   dialog.addEventListener("close", stopScan);
   copy.addEventListener("click", () => {
     void navigator.clipboard.writeText(codeText.value).then(

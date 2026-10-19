@@ -7,7 +7,7 @@
 // button copies the invite.
 
 import qrcode from "qrcode-generator";
-import { byId, closeDialog, openDialog } from "./shell";
+import { byId, closeDialog, closeOnBackdrop, openDialog } from "./shell";
 import { scanQr } from "./qr-scan";
 import { createLanDialog } from "./lan-ui";
 import { offerFromText } from "./lan";
@@ -226,9 +226,7 @@ export function createMultiplayer(): void {
   });
   close.addEventListener("click", () => closeDialog(dialog));
   leave.addEventListener("click", leaveRoom);
-  dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) closeDialog(dialog);
-  });
+  closeOnBackdrop(dialog);
   dialog.addEventListener("close", stopScan);
   go.addEventListener("click", primary);
   nameInput.addEventListener("keydown", (event) => {

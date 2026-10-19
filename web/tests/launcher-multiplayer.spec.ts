@@ -200,3 +200,18 @@ test("typing, deleting and pasting reach the dialog while the engine holds the k
   await page.keyboard.press("ControlOrMeta+V");
   await expect(page.locator("#mp-paste")).toHaveValue("https://openzh.pikilon.com/#j=abc");
 });
+
+test("releasing the mouse outside the dialog after pressing inside keeps it open", async ({ page }) => {
+  await page.goto(SHELL);
+  await page.locator("#mp-button").click();
+  const dialog = page.locator("#mp-dialog");
+  await expect(dialog).toBeVisible();
+  const name = await page.locator("#mp-name").boundingBox();
+  await page.mouse.move(name!.x + 5, name!.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(3, 3);
+  await page.mouse.up();
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(3, 3);
+  await expect(dialog).toBeHidden();
+});

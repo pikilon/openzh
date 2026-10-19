@@ -666,6 +666,7 @@ private:
 	void releaseUploadFrame(UploadFrame &frame);
 	void createDepthBuffer();
 	uint32_t renderSampleCount() const;
+	WGPUTextureView swapChainDepthView() const;
 	WGPURenderPipeline pipeline(D3DPRIMITIVETYPE type);
 	DrawBindings bindGroup();
 	WGPUSampler sampler(UINT stage);
@@ -717,6 +718,9 @@ private:
 	WGPUTextureView m_whiteView = nullptr;
 	WGPUTexture m_depthTexture = nullptr;
 	WGPUTextureView m_depthView = nullptr;
+	// GeneralsX @bugfix zhwp 19/10/2026 Single-sampled twin of the swap-chain depth for passes that render the scene into a texture while MSAA is on.
+	WGPUTexture m_depthTextureSingle = nullptr;
+	WGPUTextureView m_depthViewSingle = nullptr;
 	WGPUTexture m_multisampleTexture = nullptr;
 	WGPUTextureView m_multisampleView = nullptr;
 	std::unordered_map<uint64_t, WGPURenderPipeline> m_pipelines;
@@ -784,6 +788,14 @@ void WebGPUD3DDevice::createDepthBuffer()
 		wgpuTextureRelease(m_depthTexture);
 		m_depthTexture = nullptr;
 	}
+	if (m_depthViewSingle) {
+		wgpuTextureViewRelease(m_depthViewSingle);
+		m_depthViewSingle = nullptr;
+	}
+	if (m_depthTextureSingle) {
+		wgpuTextureRelease(m_depthTextureSingle);
+		m_depthTextureSingle = nullptr;
+	}
 	const uint32_t sampleCount = m_parameters.MultiSampleType == D3DMULTISAMPLE_4_SAMPLES ? 4 : 1;
 	if (sampleCount > 1) {
 		WGPUTextureDescriptor colorDescriptor = WGPU_TEXTURE_DESCRIPTOR_INIT;
@@ -803,6 +815,11 @@ void WebGPUD3DDevice::createDepthBuffer()
 	descriptor.sampleCount = sampleCount;
 	m_depthTexture = wgpuDeviceCreateTexture(webGPUDevice(), &descriptor);
 	m_depthView = m_depthTexture ? wgpuTextureCreateView(m_depthTexture, nullptr) : nullptr;
+	if (sampleCount > 1) {
+		descriptor.sampleCount = 1;
+		m_depthTextureSingle = wgpuDeviceCreateTexture(webGPUDevice(), &descriptor);
+		m_depthViewSingle = m_depthTextureSingle ? wgpuTextureCreateView(m_depthTextureSingle, nullptr) : nullptr;
+	}
 }
 
 uint32_t WebGPUD3DDevice::renderSampleCount() const
@@ -841,7 +858,7 @@ HRESULT WebGPUD3DDevice::ensurePass(DWORD clearFlags, D3DCOLOR color, float dept
 	const bool depthTarget = hasDepthTarget();
 	WGPUTextureView depthView = nullptr;
 	if (depthTarget) {
-		depthView = m_depthTarget && m_depthTarget != m_depthSurface ? m_depthTarget->renderView() : m_depthView;
+		depthView = m_depthTarget && m_depthTarget != m_depthSurface ? m_depthTarget->renderView() : swapChainDepthView();
 	}
 	if (!colorView || (depthTarget && !depthView)) {
 		return D3DERR_DRIVERINTERNALERROR;
@@ -1007,14 +1024,21 @@ bool WebGPUD3DDevice::hasDepthTarget() const
 	const UINT colorWidth = customColorTarget ? m_renderTarget->width() : m_parameters.BackBufferWidth;
 	const UINT colorHeight = customColorTarget ? m_renderTarget->height() : m_parameters.BackBufferHeight;
 	// GeneralsX @bugfix zhwp 19/10/2026 #184 Colour and depth attachments of a pass must share a sample count: the swap-chain depth is multisampled, every other depth texture is single-sampled.
+	// A scene rendered into a texture with MSAA on uses the swap-chain depth's single-sampled twin (swapChainDepthView), so it keeps its depth test.
 	const bool depthIsSwapChain = m_depthTarget && m_depthTarget == m_depthSurface;
 	const uint32_t depthSamples = depthIsSwapChain && m_parameters.MultiSampleType == D3DMULTISAMPLE_4_SAMPLES ? 4 : 1;
+	const bool samplesMatch = depthSamples == renderSampleCount() || (depthIsSwapChain && m_depthViewSingle);
 	if (m_depthTarget && m_depthTarget->isDepthSurface() &&
 		m_depthTarget->width() == colorWidth && m_depthTarget->height() == colorHeight &&
-		depthSamples == renderSampleCount()) {
+		samplesMatch) {
 		return true;
 	}
 	return !customColorTarget && !m_depthTarget;
+}
+
+WGPUTextureView WebGPUD3DDevice::swapChainDepthView() const
+{
+	return renderSampleCount() == 1 && m_depthViewSingle ? m_depthViewSingle : m_depthView;
 }
 
 WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
@@ -2016,6 +2040,12 @@ WebGPUD3DDevice::~WebGPUD3DDevice()
 	for (const auto &[key, pipelineObject] : m_pipelines) {
 		(void)key;
 		wgpuRenderPipelineRelease(pipelineObject);
+	}
+	if (m_depthViewSingle) {
+		wgpuTextureViewRelease(m_depthViewSingle);
+	}
+	if (m_depthTextureSingle) {
+		wgpuTextureRelease(m_depthTextureSingle);
 	}
 	if (m_depthView) {
 		wgpuTextureViewRelease(m_depthView);

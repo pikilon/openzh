@@ -1331,7 +1331,8 @@ WGPUSampler WebGPUD3DDevice::sampler(UINT stage)
 	descriptor.addressModeW = WGPUAddressMode_Repeat;
 	descriptor.magFilter = anisotropic ? WGPUFilterMode_Linear : filterMode(magFilter);
 	descriptor.minFilter = anisotropic ? WGPUFilterMode_Linear : filterMode(minFilter);
-	descriptor.mipmapFilter = mipFilter == D3DTEXF_LINEAR
+	// WebGPU rejects an anisotropic sampler unless all three filters are linear.
+	descriptor.mipmapFilter = anisotropic || mipFilter == D3DTEXF_LINEAR
 		? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
 	descriptor.lodMinClamp = static_cast<float>(maxMipLevel);
 	descriptor.lodMaxClamp = mipFilter == D3DTEXF_NONE ? static_cast<float>(maxMipLevel) : 32.0f;

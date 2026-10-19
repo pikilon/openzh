@@ -51,7 +51,7 @@ async function factoryCalls(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as ShellWindow).__factoryCalls ?? 0);
 }
 
-test("1: the top bar holds only the title and four icon buttons", async ({ page }) => {
+test("1: the top bar holds only the title and five icon buttons", async ({ page }) => {
   await openShell(page);
   const topbar = page.locator("#topbar");
 
@@ -93,7 +93,7 @@ test("1: the top bar holds only the title and four icon buttons", async ({ page 
       })
       .map((item) => item.id),
   );
-  expect(visibleControls.sort()).toEqual(["donate", "fullscreen", "menu-button", "mute"]);
+  expect(visibleControls.sort()).toEqual(["donate", "fullscreen", "menu-button", "mp-button", "mute"]);
 
   const strayText = await topbar.evaluate((element) => {
     const title = document.getElementById("title");

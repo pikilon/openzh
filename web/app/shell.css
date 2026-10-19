@@ -1133,6 +1133,73 @@ dialog::backdrop {
   margin-top: 18px;
 }
 
+/* ----- multiplayer ----- */
+
+.mp-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+  font-family: var(--font-condensed);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.mp-field input,
+.mp-link {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.mp-field input:focus-visible,
+.mp-link:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+.mp-field input:disabled {
+  color: var(--muted);
+}
+
+.mp-invite {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.mp-qr {
+  width: min(220px, 60vw);
+  line-height: 0;
+  background: #fff;
+}
+
+.mp-qr svg {
+  width: 100%;
+  height: auto;
+}
+
+.mp-link {
+  font-size: 11px;
+}
+
+#mp-status.mp-error {
+  color: var(--danger);
+}
+
+#mp-copy-link.copied {
+  color: var(--ok);
+}
+
 /* ----- responsive ----- */
 
 @media (max-width: 420px) {

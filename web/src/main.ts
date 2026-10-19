@@ -23,6 +23,7 @@ import { BackupError, exportBackup, importBackup, type BackupKind } from "./user
 import { resumeUserDataSaves, suspendUserDataSaves } from "./user-data";
 import { createTouchControls } from "./touch";
 import { configureMultiplayer } from "./multiplayer";
+import { createMultiplayer } from "./multiplayer-ui";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -1183,6 +1184,7 @@ function boot(): void {
     return;
   }
 
+  createMultiplayer();
   void loadStoredAndStart().catch(fail);
 }
 

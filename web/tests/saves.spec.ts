@@ -12,7 +12,8 @@ import { seedInstall } from "./helpers/launcher";
 
 const DB = "/home/web_user/.local/share/GeneralsX";
 const STORE = "FILE_DATA";
-const SAVE_DIR = `${DB}/Save`;
+// The engine keeps Zero Hour data in GeneralsX/GeneralsZH (GlobalData.cpp).
+const SAVE_DIR = `${DB}/GeneralsZH/Save`;
 const WAIT = 30_000;
 
 type Seed = {
@@ -33,17 +34,17 @@ type RawEntry = {
 };
 
 const FILES: Seed[] = [
-  { path: "Save/Test A.SAV", text: "save-one", timestamp: 1_700_000_000_000, mode: 0o100644 },
+  { path: "GeneralsZH/Save/Test A.SAV", text: "save-one", timestamp: 1_700_000_000_000, mode: 0o100644 },
   {
-    path: "Save/campaign/B.sav",
+    path: "GeneralsZH/Save/campaign/B.sav",
     bytes: [0, 1, 2, 255, 10, 13],
     timestamp: 1_700_000_001_000,
     mode: 0o100644,
   },
-  { path: "Save/empty.sav", text: "", timestamp: 1_700_000_002_000, mode: 0o100644 },
-  { path: "Save", timestamp: 1_700_000_003_000, mode: 0o040755, directory: true },
-  { path: "Save/campaign", timestamp: 1_700_000_004_000, mode: 0o040755, directory: true },
-  { path: "Options.ini", text: "not a save", timestamp: 1_700_000_005_000, mode: 0o100644 },
+  { path: "GeneralsZH/Save/empty.sav", text: "", timestamp: 1_700_000_002_000, mode: 0o100644 },
+  { path: "GeneralsZH/Save", timestamp: 1_700_000_003_000, mode: 0o040755, directory: true },
+  { path: "GeneralsZH/Save/campaign", timestamp: 1_700_000_004_000, mode: 0o040755, directory: true },
+  { path: "GeneralsZH/Options.ini", text: "not a save", timestamp: 1_700_000_005_000, mode: 0o100644 },
 ];
 
 async function openHarness(page: Page): Promise<void> {

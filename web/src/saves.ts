@@ -9,7 +9,9 @@
 import { buildZip } from "./zip-write";
 
 export const USER_DATA_DB_NAME = "/home/web_user/.local/share/GeneralsX";
-export const SAVE_DIR = `${USER_DATA_DB_NAME}/Save`;
+// GlobalData::BuildUserDataPathFromRegistry appends GeneralsX/GeneralsZH to
+// XDG data home, and GameState::getSaveDirectory adds Save/.
+export const SAVE_DIR = `${USER_DATA_DB_NAME}/GeneralsZH/Save`;
 export const IDBFS_DB_VERSION = 21;
 export const IDBFS_STORE_NAME = "FILE_DATA";
 

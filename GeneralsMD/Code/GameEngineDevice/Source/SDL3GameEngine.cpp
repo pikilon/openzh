@@ -618,11 +618,26 @@ void SDL3GameEngine::execute(void)
 #if defined(__EMSCRIPTEN__)
 	// GeneralsX @port Codex 04/08/2026 Let Chrome own frame scheduling and keep the engine alive.
 	TheFramePacer->reset();
+#if ZHWP_WEB_JSPI
+	// GeneralsX @performance Claude 20/10/2026 Under JSPI only a promising export (main) can suspend,
+	// and emscripten's main loop calls its callback from JS, so the loop runs here, inside main, and
+	// sleeps until the next tick. Same pacing as EM_TIMING_SETTIMEOUT 16: the tick starts before the frame.
+	while (!getQuitting())
+	{
+		const double tickStart = emscripten_get_now();
+		browserFrame(this);
+		const double untilNextTick = tickStart + 16.0 - emscripten_get_now();
+		emscripten_sleep(untilNextTick > 0.0 ? (unsigned int)untilNextTick : 0);
+	}
+	// Leave the runtime as the cancelled main loop does: no shutdown, nothing destroyed.
+	emscripten_exit_with_live_runtime();
+#else
 	emscripten_set_main_loop_arg(browserFrame, this, 0, true);
 	// GeneralsX @bugfix Codex 06/08/2026 requestAnimationFrame stops in a window that is unfocused or
 	// occluded (macOS marks background windows occluded), which freezes one LAN client while its peer
 	// keeps simulating — the match then starts desynced. setTimeout keeps stepping regardless of focus.
 	emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, 16);
+#endif
 #else
 	GameEngine::execute();
 	fprintf(stderr, "INFO: SDL3GameEngine::execute() - exited main loop\n");

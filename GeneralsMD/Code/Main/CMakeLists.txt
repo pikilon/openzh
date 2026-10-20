@@ -41,7 +41,6 @@ if(SAGE_USE_WEBGPU)
     target_link_libraries(z_generals PRIVATE webgpu_context)
     target_link_options(z_generals PRIVATE
         "LINKER:--error-limit=0"
-        "-sSUPPORT_LONGJMP=emscripten"
         # GeneralsX @feature Codex 06/08/2026 Emit a module only: the page around the game is a TypeScript +
         # Tailwind app in web/, so emscripten must not generate (or own) any HTML.
         "-sMODULARIZE=1"

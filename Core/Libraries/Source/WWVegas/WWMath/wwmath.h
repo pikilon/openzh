@@ -46,7 +46,20 @@
 // Must be outside class WWMath to prevent injecting global symbols into the class.
 #if defined(__has_include) && __has_include("gmath.h")
 #include "gmath.h"
+
 #define USE_DETERMINISTIC_MATH (1)
+
+// GeneralsX @performance Claude 20/10/2026 gm_sqrtf is fdlibm's bit-by-bit square root, correctly rounded, and
+// so is WebAssembly's f32.sqrt: for positive finite input they return the same bits (checked for every such
+// float), so the instruction keeps replays and multiplayer deterministic. Zero, negatives, NaN and infinity keep
+// gm_sqrtf, whose NaN bits the instruction does not promise to match. Lib/Trig.cpp has the same dispatch.
+static inline float gm_sqrtf_fast(float x)
+{
+#if defined(__EMSCRIPTEN__)
+	if (x > 0.0f && x <= FLT_MAX) return __builtin_sqrtf(x);
+#endif
+	return gm_sqrtf(x);
+}
 #endif
 
 /*
@@ -217,9 +230,9 @@ static WWINLINE float ASinTrig(float x)
 // Origin wrappers: replace bare CRT math calls in GameLogic.
 // Each wrapper preserves the exact type (float vs double) of the vanilla CRT call.
 #if USE_DETERMINISTIC_MATH
-	static WWINLINE double		SqrtOrigin(double x) { return (double)gm_sqrtf((float)x); }
-	static WWINLINE float		SqrtOrigin(float x) { return gm_sqrtf(x); }
-	static WWINLINE float		SqrtfOrigin(float x) { return gm_sqrtf(x); }
+	static WWINLINE double		SqrtOrigin(double x) { return (double)gm_sqrtf_fast((float)x); }
+	static WWINLINE float		SqrtOrigin(float x) { return gm_sqrtf_fast(x); }
+	static WWINLINE float		SqrtfOrigin(float x) { return gm_sqrtf_fast(x); }
 	static WWINLINE double		Atan2Origin(double y, double x) { return (double)gm_atan2f((float)y, (float)x); }
 	static WWINLINE float		Atan2Origin(float y, float x) { return gm_atan2f(y, x); }
 	static WWINLINE double		PowOrigin(double x, double y) { return (double)gm_powf((float)x, (float)y); }
@@ -704,7 +717,7 @@ WWINLINE float WWMath::Asin(float val)
 #if defined(USE_DETERMINISTIC_MATH)
 WWINLINE float WWMath::Sqrt(float val)
 {
-	return gm_sqrtf(val);
+	return gm_sqrtf_fast(val);
 }
 #elif defined(_MSC_VER) && defined(_M_IX86)
 WWINLINE float WWMath::Sqrt(float val)
@@ -757,7 +770,7 @@ WWINLINE int WWMath::Float_To_Int_Floor (const float& f)
 #if defined(USE_DETERMINISTIC_MATH)
 WWINLINE float WWMath::Inv_Sqrt(float val)
 {
-	return 1.0f / gm_sqrtf(val);
+	return 1.0f / gm_sqrtf_fast(val);
 }
 #elif defined(_MSC_VER) && defined(_M_IX86)
 WWINLINE float WWMath::Inv_Sqrt(float a)

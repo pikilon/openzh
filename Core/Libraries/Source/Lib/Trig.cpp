@@ -29,6 +29,7 @@
 
 #include <math.h>
 #include <limits.h>
+#include <float.h>
 
 #include "Lib/trig.h"
 
@@ -107,6 +108,11 @@ Real ASin(Real x)
 double Sqrt(double x)
 {
 #ifdef USE_DETERMINISTIC_MATH
+#if defined(__EMSCRIPTEN__)
+	// Same bits as gm_sqrtf for positive finite input (see gm_sqrtf_fast in WWMath/wwmath.h).
+	const float value = (float)x;
+	if (value > 0.0f && value <= FLT_MAX) return (double)__builtin_sqrtf(value);
+#endif
 	return (double)gm_sqrtf((float)x);
 #else
 	return sqrt(x);

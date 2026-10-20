@@ -427,14 +427,19 @@ body {
   pointer-events: auto;
 }
 
-.touch-locks {
+/* The vertical column: game menu, the three latches and the fullscreen exit.
+   The 56 x 54 buttons are the design base; the whole column renders at 70 %
+   of it (owner, 2026-10-20), icons, labels and gaps included. */
+.touch-column {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+  transform: scale(0.7);
+  transform-origin: left bottom;
 }
 
-.touch-lock {
+.touch-button {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -1319,7 +1324,7 @@ dialog::backdrop {
 /* ----- responsive ----- */
 
 @media (max-width: 420px) {
-  .touch-lock {
+  .touch-button {
     min-width: 52px;
     height: 52px;
     padding: 0 6px;

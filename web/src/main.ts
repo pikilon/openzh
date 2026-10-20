@@ -58,6 +58,7 @@ const unsupported = byId<HTMLElement>("unsupported");
 const screen = byId<HTMLElement>("screen");
 const topbar = byId<HTMLElement>("topbar");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
+const touchFullscreenExit = byId<HTMLButtonElement>("touch-fullscreen-exit");
 const mute = byId<HTMLButtonElement>("mute");
 const menuButton = byId<HTMLButtonElement>("menu-button");
 const importDetail = byId<HTMLElement>("import-detail");
@@ -394,6 +395,9 @@ function updateFullscreenButton(): void {
   fullscreen.setAttribute("aria-pressed", active ? "true" : "false");
   fullscreen.setAttribute("aria-label", label);
   fullscreen.title = label;
+  // The touch column only offers the exit, and only while #screen is the
+  // fullscreen element (owner, 2026-10-20).
+  touchFullscreenExit.hidden = !active;
 }
 
 function leaveFullscreen(): void {
@@ -1142,6 +1146,7 @@ function wireFullscreen(): void {
   fullscreen.addEventListener("click", () => {
     enterFullscreen();
   });
+  touchFullscreenExit.addEventListener("click", () => leaveFullscreen());
   document.addEventListener("fullscreenchange", onFullscreenChange);
 }
 

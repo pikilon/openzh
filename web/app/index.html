@@ -55,19 +55,6 @@
         >
         <div class="topbar-actions" role="group" aria-label="Game controls">
           <button
-            id="game-menu"
-            class="icon-btn"
-            type="button"
-            aria-label="Game menu"
-            title="Game menu (Esc)"
-            hidden
-          >
-            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
-              <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
-              <path d="M9 9v6M15 9v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button
             id="touch-toggle"
             class="icon-btn"
             type="button"
@@ -288,24 +275,57 @@
         <div id="screen">
           <canvas id="canvas" width="800" height="600" tabindex="0" aria-label="Game view" hidden></canvas>
           <div id="touch-controls" class="touch-controls" role="group" aria-label="Touch controls" hidden>
-            <div class="touch-locks" role="group" aria-label="Touch locks">
-              <button id="touch-left" class="touch-lock" type="button" aria-pressed="false">
+            <div class="touch-column" role="group" aria-label="Touch controls">
+              <button
+                id="game-menu"
+                class="touch-button"
+                type="button"
+                aria-label="Game menu"
+                title="Game menu (Esc)"
+                hidden
+              >
+                <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
+                  <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+                  <path d="M9 9v6M15 9v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                </svg>
+                <span>Menu</span>
+              </button>
+              <button id="touch-left" class="touch-button touch-lock" type="button" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
                   <rect x="5.5" y="2.5" width="13" height="19" rx="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M5.5 10.5h13M12 2.5v8" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M12 2.5v8H5.5v-1A7 7 0 0 1 12 2.5z" fill="currentColor" />
                 </svg>
                 <span>Left</span>
               </button>
-              <button id="touch-right" class="touch-lock" type="button" aria-pressed="false">
+              <button id="touch-right" class="touch-button touch-lock" type="button" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
                   <rect x="5.5" y="2.5" width="13" height="19" rx="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M5.5 10.5h13M12 2.5v8" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M12 2.5v8h6.5v-1A7 7 0 0 0 12 2.5z" fill="currentColor" />
                 </svg>
                 <span>Right</span>
               </button>
-              <button id="touch-multi" class="touch-lock" type="button" aria-pressed="false">
+              <button id="touch-multi" class="touch-button touch-lock" type="button" aria-pressed="false">
                 <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
                   <rect x="3.5" y="2.5" width="12" height="17" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M3.5 9.5h12M9.5 2.5v7" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M20 15v6M17 18h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
                 </svg>
                 <span>Multi</span>
+              </button>
+              <button
+                id="touch-fullscreen-exit"
+                class="touch-button"
+                type="button"
+                aria-label="Exit fullscreen"
+                title="Exit fullscreen"
+                hidden
+              >
+                <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">
+                  <path
+                    d="M4 9V4.8A.8.8 0 0 1 4.8 4H9M20 9V4.8a.8.8 0 0 0-.8-.8H15M4 15v4.2a.8.8 0 0 0 .8.8H9M20 15v4.2a.8.8 0 0 1-.8.8H15"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span>Exit</span>
               </button>
             </div>
             <div id="touch-joystick-dock" class="touch-joystick-dock">

@@ -158,24 +158,67 @@ test.describe("touch device", () => {
     await page.evaluate(() => document.exitFullscreen());
   });
 
-  test("4: the locks stack in a column on the left and the joystick sits bottom right", async ({ page }, info) => {
+  test("19: the fullscreen exit is hidden windowed, last in fullscreen, and leaves it", async ({
+    page,
+  }, info) => {
+    await startPlaying(page, info.outputPath());
+    await expect(page.locator("#touch-fullscreen-exit")).toBeHidden();
+
+    await page.locator("#fullscreen").click();
+    await expect
+      .poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null), { timeout: WAIT })
+      .toBe("screen");
+    const exit = page.locator("#touch-fullscreen-exit");
+    await expect(exit).toBeVisible();
+    await expect(exit).toHaveAttribute("aria-label", "Exit fullscreen");
+
+    const layout = await page.evaluate(() => {
+      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-fullscreen-exit"];
+      return {
+        innerWidth: window.innerWidth,
+        boxes: ids.map((id) => {
+          const rect = document.getElementById(id)!.getBoundingClientRect();
+          return { id, left: rect.left, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+        }),
+      };
+    });
+    const [gameMenu, left, right, multi, exitBox] = layout.boxes;
+    expect(left.top).toBeGreaterThan(gameMenu.top);
+    expect(right.top).toBeGreaterThan(left.top);
+    expect(multi.top).toBeGreaterThan(right.top);
+    expect(exitBox.top).toBeGreaterThanOrEqual(multi.bottom - 1);
+    expect(exitBox.width).toBeCloseTo(56 * 0.7, 1);
+    expect(exitBox.height).toBeCloseTo(54 * 0.7, 1);
+    expect(exitBox.left).toBeLessThan(layout.innerWidth / 4);
+
+    await exit.click();
+    await expect
+      .poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null), { timeout: WAIT })
+      .toBeNull();
+    await expect(exit).toBeHidden();
+  });
+
+  test("4: the column shrinks to 70 % top to bottom; the joystick sits bottom right", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
 
     const layout = await page.evaluate(() => {
-      const ids = ["touch-left", "touch-right", "touch-multi", "touch-joystick"];
+      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-joystick"];
       const boxes = ids.map((id) => {
         const rect = document.getElementById(id)!.getBoundingClientRect();
         return { id, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
       });
       return { boxes, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     });
-    const [left, right, multi, joystick] = layout.boxes;
+    const [gameMenu, left, right, multi, joystick] = layout.boxes;
+    expect(gameMenu.top).toBeLessThan(left.top);
     expect(right.top).toBeGreaterThanOrEqual(left.bottom - 1);
     expect(multi.top).toBeGreaterThanOrEqual(right.bottom - 1);
-    for (const lock of [left, right, multi]) {
-      expect(lock.width).toBeGreaterThanOrEqual(48);
-      expect(lock.height).toBeGreaterThanOrEqual(48);
-      expect(lock.left).toBeLessThan(layout.innerWidth / 4);
+    // Owner's 2026-10-20 request: the whole 56 x 54 button (icon and label)
+    // renders at 70 % of its size.
+    for (const button of [gameMenu, left, right, multi]) {
+      expect(button.width).toBeCloseTo(56 * 0.7, 1);
+      expect(button.height).toBeCloseTo(54 * 0.7, 1);
+      expect(button.left).toBeLessThan(layout.innerWidth / 4);
     }
     expect(joystick.width).toBeGreaterThanOrEqual(54);
     expect(joystick.width).toBeLessThanOrEqual(58);

@@ -6,6 +6,7 @@
 const MUTED_KEY = "openzh.muted";
 const PERFORMANCE_OVERLAY_KEY = "openzh.performanceOverlay";
 const TOUCH_CONTROLS_KEY = "openzh.touchControls";
+const TOUCH_JOYSTICK_KEY = "openzh.touchJoystick";
 
 function readFlag(key: string, fallback: boolean): boolean {
   try {
@@ -60,4 +61,34 @@ export function readTouchControls(): boolean | null {
 
 export function writeTouchControls(enabled: boolean): void {
   writeFlag(TOUCH_CONTROLS_KEY, enabled);
+}
+
+// Where the player dragged the touch joystick: pixels away from its default
+// spot (negative is left and up), or null when it was never moved.
+export interface JoystickOffset {
+  dx: number;
+  dy: number;
+}
+
+export function readJoystickOffset(): JoystickOffset | null {
+  try {
+    const raw = window.localStorage.getItem(TOUCH_JOYSTICK_KEY);
+    if (raw === null) return null;
+    const value = JSON.parse(raw) as Partial<JoystickOffset>;
+    if (Number.isFinite(value.dx) && Number.isFinite(value.dy)) {
+      return { dx: value.dx as number, dy: value.dy as number };
+    }
+  } catch {
+    // A blocked Storage or a damaged value falls back to the default spot.
+  }
+  return null;
+}
+
+export function writeJoystickOffset(offset: JoystickOffset | null): void {
+  try {
+    if (offset === null) window.localStorage.removeItem(TOUCH_JOYSTICK_KEY);
+    else window.localStorage.setItem(TOUCH_JOYSTICK_KEY, JSON.stringify(offset));
+  } catch {
+    // The spot still applies to this page; only persistence is lost.
+  }
 }

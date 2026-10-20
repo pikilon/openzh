@@ -121,6 +121,8 @@ const touch = createTouchControls({
   left: byId<HTMLButtonElement>("touch-left"),
   right: byId<HTMLButtonElement>("touch-right"),
   multi: byId<HTMLButtonElement>("touch-multi"),
+  dock: byId<HTMLElement>("touch-joystick-dock"),
+  grip: byId<HTMLButtonElement>("touch-joystick-grip"),
   joystick: byId<HTMLElement>("touch-joystick"),
   knob: byId<HTMLElement>("touch-knob"),
   engine: () => engineModule,

@@ -411,9 +411,9 @@ body {
 
 .touch-controls {
   position: absolute;
-  right: 12px;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  left: 12px;
+  right: max(6px, env(safe-area-inset-right));
+  bottom: max(6px, env(safe-area-inset-bottom));
+  left: max(6px, env(safe-area-inset-left));
   z-index: 4;
   display: flex;
   align-items: flex-end;
@@ -429,8 +429,9 @@ body {
 
 .touch-locks {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .touch-lock {
@@ -451,6 +452,7 @@ body {
   text-transform: uppercase;
   background: linear-gradient(180deg, rgba(20, 54, 92, 0.88), rgba(5, 16, 32, 0.94));
   border: 1px solid var(--line);
+  opacity: 0.55;
   clip-path: polygon(
     8px 0,
     100% 0,
@@ -466,49 +468,107 @@ body {
 }
 
 .touch-lock[aria-pressed="true"] {
+  opacity: 0.8;
   color: #020a14;
   background: linear-gradient(180deg, #8fd8ff, #2ea8ff);
   border-color: var(--accent-soft);
   box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
 }
 
+/* The dock holds the joystick and its drag grip. By default it sits clear of the
+   corner, where the right thumb rests; the grip moves it (src/touch.ts). */
+.touch-joystick-dock {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 0 44px 34px 0;
+  touch-action: none;
+}
+
+.touch-grip {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 0 0 -14px;
+  padding: 0;
+  color: var(--accent-soft);
+  background: rgba(5, 16, 32, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  opacity: 0.55;
+  z-index: 2;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.touch-joystick-dock.is-moving .touch-grip {
+  opacity: 1;
+  cursor: grabbing;
+}
+
+/* The joystick element is the 55 px touch area (46 % of the old 120 px base).
+   ::before widens the area the finger can land on without changing the
+   geometry; ::after is the visible ring, which shrinks to the knob at rest. */
 .touch-joystick {
   position: relative;
   flex: 0 0 auto;
-  width: 120px;
-  height: 120px;
+  width: 55px;
+  height: 55px;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(46, 168, 255, 0.2), transparent 62%),
-    rgba(4, 16, 32, 0.72);
-  border: 1px solid rgba(143, 216, 255, 0.5);
-  box-shadow:
-    inset 0 0 24px rgba(46, 168, 255, 0.16),
-    0 0 18px rgba(0, 0, 0, 0.45);
   touch-action: none;
 }
 
 .touch-joystick::before {
   content: "";
   position: absolute;
-  inset: 18px;
-  border: 1px dashed rgba(76, 177, 255, 0.28);
+  inset: -16px;
   border-radius: 50%;
+}
+
+.touch-joystick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(46, 168, 255, 0.2), transparent 62%),
+    rgba(4, 16, 32, 0.72);
+  border: 1px solid rgba(143, 216, 255, 0.5);
+  box-shadow:
+    inset 0 0 10px rgba(46, 168, 255, 0.16),
+    0 0 10px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: scale(0.33);
+  transition:
+    transform 120ms ease-out,
+    opacity 120ms ease-out;
   pointer-events: none;
+}
+
+.touch-joystick.is-active::after {
+  opacity: 0.75;
+  transform: scale(1);
 }
 
 .touch-knob {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 40px;
-  height: 40px;
-  margin: -20px 0 0 -20px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  opacity: 0.7;
   border-radius: 50%;
   background: radial-gradient(circle at 38% 32%, #d8f2ff, #2ea8ff 62%, #0c4f8f);
   border: 1px solid rgba(216, 242, 255, 0.9);
   box-shadow:
-    0 0 16px rgba(46, 168, 255, 0.65),
+    0 0 8px rgba(46, 168, 255, 0.65),
     inset 0 1px 2px rgba(255, 255, 255, 0.6);
   pointer-events: none;
   transform: translate(0px, 0px);
@@ -1263,28 +1323,6 @@ dialog::backdrop {
     min-width: 52px;
     height: 52px;
     padding: 0 6px;
-  }
-
-  .touch-joystick {
-    width: 108px;
-    height: 108px;
-  }
-
-  .touch-knob {
-    width: 38px;
-    height: 38px;
-    margin: -19px 0 0 -19px;
-  }
-}
-
-/* Keep the bottom-right of the game (the minimap) free on a landscape phone:
-   the controls stay left of a 180 px strip, and the joystick is still the
-   rightmost control of the group. */
-@media (max-height: 480px) and (orientation: landscape) {
-  .touch-controls {
-    right: 180px;
-    justify-content: flex-start;
-    gap: 18px;
   }
 }
 

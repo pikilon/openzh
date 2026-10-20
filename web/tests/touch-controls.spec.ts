@@ -158,28 +158,32 @@ test.describe("touch device", () => {
     await page.evaluate(() => document.exitFullscreen());
   });
 
-  test("4: the controls are in order with the joystick rightmost", async ({ page }, info) => {
+  test("4: the locks stack in a column on the left and the joystick sits bottom right", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
 
     const layout = await page.evaluate(() => {
       const ids = ["touch-left", "touch-right", "touch-multi", "touch-joystick"];
-      return ids.map((id) => {
+      const boxes = ids.map((id) => {
         const rect = document.getElementById(id)!.getBoundingClientRect();
-        return { id, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+        return { id, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
       });
+      return { boxes, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     });
-    expect(layout.map((item) => item.id)).toEqual([
-      "touch-left",
-      "touch-right",
-      "touch-multi",
-      "touch-joystick",
-    ]);
-    for (let i = 0; i < 3; i++) {
-      expect(layout[i + 1].left).toBeGreaterThanOrEqual(layout[i].right - 1);
-      expect(layout[i].width).toBeGreaterThanOrEqual(48);
-      expect(layout[i].height).toBeGreaterThanOrEqual(48);
+    const [left, right, multi, joystick] = layout.boxes;
+    expect(right.top).toBeGreaterThanOrEqual(left.bottom - 1);
+    expect(multi.top).toBeGreaterThanOrEqual(right.bottom - 1);
+    for (const lock of [left, right, multi]) {
+      expect(lock.width).toBeGreaterThanOrEqual(48);
+      expect(lock.height).toBeGreaterThanOrEqual(48);
+      expect(lock.left).toBeLessThan(layout.innerWidth / 4);
     }
-    expect(layout[3].right).toBeGreaterThan(layout[2].right);
+    expect(joystick.width).toBeGreaterThanOrEqual(54);
+    expect(joystick.width).toBeLessThanOrEqual(58);
+    // Clear of the corner so the right thumb reaches it, but still on the right-hand bottom.
+    expect(layout.innerWidth - joystick.right).toBeGreaterThanOrEqual(30);
+    expect(layout.innerWidth - joystick.right).toBeLessThanOrEqual(80);
+    expect(layout.innerHeight - joystick.bottom).toBeGreaterThanOrEqual(24);
+    expect(layout.innerHeight - joystick.bottom).toBeLessThanOrEqual(70);
   });
 
   test("5: each lock toggles with aria-pressed and sends no map click", async ({ page }, info) => {
@@ -382,15 +386,71 @@ test.describe("touch device", () => {
     expect(errors).toEqual([]);
   });
 
-  test("14: landscape keeps the bottom-right 180 px free for the minimap", async ({ page }, info) => {
-    await page.setViewportSize({ width: 812, height: 375 });
+  test("16: the grip drags the joystick, the spot is saved and clamped", async ({ page }, info) => {
+    await startPlaying(page, info.outputPath());
+    const spot = () =>
+      page.locator("#touch-joystick").evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left, y: r.top };
+      });
+    const gripTouch = (type: "pointerdown" | "pointermove" | "pointerup", dx: number, dy: number) =>
+      page.evaluate(
+        ({ type, dx, dy }) => {
+          const grip = document.getElementById("touch-joystick-grip")!;
+          const r = grip.getBoundingClientRect();
+          grip.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 31,
+              pointerType: "touch",
+              isPrimary: true,
+              buttons: type === "pointerup" ? 0 : 1,
+              clientX: r.left + r.width / 2 + (type === "pointerdown" ? 0 : dx),
+              clientY: r.top + r.height / 2 + (type === "pointerdown" ? 0 : dy),
+            }),
+          );
+        },
+        { type, dx, dy },
+      );
+
+    const before = await spot();
+    await gripTouch("pointerdown", 0, 0);
+    await gripTouch("pointermove", -200, -60);
+    await gripTouch("pointerup", -200, -60);
+    const moved = await spot();
+    expect(Math.round(before.x - moved.x)).toBe(200);
+    expect(Math.round(before.y - moved.y)).toBe(60);
+    expect(await pointerEvents(page)).toEqual([]);
+
+    await page.reload();
+    await expect(page.locator("body")).toHaveAttribute("data-state", "playing", { timeout: WAIT });
+    const reloaded = await spot();
+    expect(Math.round(reloaded.x)).toBe(Math.round(moved.x));
+    expect(Math.round(reloaded.y)).toBe(Math.round(moved.y));
+
+    // A drag past the screen edge stops at the edge.
+    await gripTouch("pointerdown", 0, 0);
+    await gripTouch("pointermove", 5000, 5000);
+    await gripTouch("pointerup", 5000, 5000);
+    const edge = await page.locator("#touch-joystick-dock").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { right: r.right, bottom: r.bottom, w: window.innerWidth, h: window.innerHeight };
+    });
+    expect(edge.right).toBeLessThanOrEqual(edge.w);
+    expect(edge.bottom).toBeLessThanOrEqual(edge.h);
+  });
+
+  test("14: the joystick ring shrinks to the knob at rest and opens while pushed", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
 
-    const metrics = await page.evaluate(() => {
-      const joystick = document.getElementById("touch-joystick")!.getBoundingClientRect();
-      return { right: joystick.right, innerWidth: window.innerWidth };
-    });
-    expect(metrics.right).toBeLessThanOrEqual(metrics.innerWidth - 180 + 1);
+    const ringOpacity = () =>
+      page.locator("#touch-joystick").evaluate((el) => getComputedStyle(el, "::after").opacity);
+    await expect.poll(ringOpacity).toBe("0");
+    await joystickTouch(page, "pointerdown", 0, 0);
+    await expect.poll(ringOpacity).toBe("0.75");
+    await joystickTouch(page, "pointerup", 0, 0);
+    await expect.poll(ringOpacity).toBe("0");
   });
 });
 

@@ -4,7 +4,7 @@
 // Desktop input is untouched: only pointerType "touch" (and "pen") is captured,
 // and only while the overlay is shown.
 
-import { readTouchControls, writeTouchControls } from "./prefs";
+import { readJoystickOffset, readTouchControls, writeJoystickOffset, writeTouchControls } from "./prefs";
 
 const LONG_PRESS_MS = 500;
 const MOVE_SLOP_PX = 10;
@@ -21,6 +21,8 @@ export interface TouchControlsHost {
   left: HTMLButtonElement;
   right: HTMLButtonElement;
   multi: HTMLButtonElement;
+  dock: HTMLElement;
+  grip: HTMLButtonElement;
   joystick: HTMLElement;
   knob: HTMLElement;
   engine: () => TouchEngine | null;
@@ -45,7 +47,7 @@ function deviceHasTouch(): boolean {
 }
 
 export function createTouchControls(host: TouchControlsHost): TouchControls {
-  const { canvas, overlay, toggle, left, right, multi, joystick, knob } = host;
+  const { canvas, overlay, toggle, left, right, multi, dock, grip, joystick, knob } = host;
 
   const stored = readTouchControls();
   let enabled = stored ?? deviceHasTouch();
@@ -315,6 +317,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    if (show) restoreDock();
     if (!show) {
       clearLocks();
       resetMap(true);
@@ -455,6 +458,75 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   window.addEventListener("blur", () => {
     resetMap(true);
     resetJoystick();
+  });
+
+  // ----- moving the joystick -----
+
+  // The dock sits at a default spot and is shifted by (dx, dy) from there. The
+  // shift is clamped so the dock always stays inside the overlay.
+  let dockDx = 0;
+  let dockDy = 0;
+  let gripPointer: number | null = null;
+  let gripStartX = 0;
+  let gripStartY = 0;
+  let gripBaseDx = 0;
+  let gripBaseDy = 0;
+
+  function applyDock(dx: number, dy: number): void {
+    const area = overlay.getBoundingClientRect();
+    const box = dock.getBoundingClientRect();
+    if (area.width > 0 && area.height > 0 && box.width > 0) {
+      // box already includes the current shift, so work from its default spot.
+      const baseLeft = box.left - dockDx;
+      const baseTop = box.top - dockDy;
+      dx = Math.min(Math.max(dx, area.left - baseLeft), area.right - box.width - baseLeft);
+      dy = Math.min(Math.max(dy, area.top - baseTop), area.bottom - box.height - baseTop);
+    }
+    dockDx = dx;
+    dockDy = dy;
+    dock.style.transform = dx === 0 && dy === 0 ? "" : `translate(${dx}px, ${dy}px)`;
+  }
+
+  grip.addEventListener("pointerdown", (event) => {
+    if (gripPointer !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    gripPointer = event.pointerId;
+    gripStartX = event.clientX;
+    gripStartY = event.clientY;
+    gripBaseDx = dockDx;
+    gripBaseDy = dockDy;
+    dock.classList.add("is-moving");
+    try {
+      grip.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointer.
+    }
+  });
+  grip.addEventListener("pointermove", (event) => {
+    if (gripPointer === null || event.pointerId !== gripPointer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyDock(gripBaseDx + event.clientX - gripStartX, gripBaseDy + event.clientY - gripStartY);
+  });
+  function endGrip(event: PointerEvent): void {
+    if (gripPointer === null || event.pointerId !== gripPointer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    gripPointer = null;
+    dock.classList.remove("is-moving");
+    writeJoystickOffset(dockDx === 0 && dockDy === 0 ? null : { dx: dockDx, dy: dockDy });
+  }
+  grip.addEventListener("pointerup", endGrip);
+  grip.addEventListener("pointercancel", endGrip);
+
+  // A stored spot from a bigger screen is pulled back inside this one.
+  function restoreDock(): void {
+    const stored = readJoystickOffset();
+    applyDock(stored?.dx ?? 0, stored?.dy ?? 0);
+  }
+  window.addEventListener("resize", () => {
+    if (!overlay.hidden) restoreDock();
   });
 
   // ----- public state -----

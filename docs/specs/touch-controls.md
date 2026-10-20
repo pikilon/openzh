@@ -77,16 +77,18 @@ native builds.
 
 ### 4.2 Overlay
 
-* A row of controls anchored to the bottom of the game area, drawn over the
-  canvas, reading left to right: **Left lock**, **Right lock**, **Multi lock**,
-  then the **mini joystick** at the right end. The three lock buttons are
-  at least 48 x 48 CSS px with a text label and an icon, `aria-pressed`
-  reflects the lock.
+* Controls anchored to the bottom of the game area, drawn over the canvas:
+  the **Left lock**, **Right lock** and **Multi lock** stacked in a column at
+  the bottom-left corner, and the **mini joystick** at the very bottom-right
+  corner. The three lock buttons are at least 48 x 48 CSS px with a text label
+  and a mouse icon (the pressed button of the mouse is filled; Multi is a mouse
+  with a plus), `aria-pressed` reflects the lock.
 * The overlay is a DOM element inside `#screen`, the element put in browser
   fullscreen (`web/src/main.ts`). It must sit inside `#screen`, not beside it,
   or it is hidden in fullscreen.
-* The overlay never covers the minimap or the top bar in the playing view on
-  375 x 812 and 812 x 375 (phone portrait and landscape).
+* The overlay never covers the top bar. The joystick sits over the bottom-right
+  corner of the view (owner's choice, 2026-10-20) and is small to stay out of the
+  way.
 * Overlay controls are isolated: `pointerdown`, `pointerup` and `click` stop
   propagation, and `contextmenu` is prevented, so a touch on a control never
   reaches the map. Each control sets `touch-action: none`.
@@ -95,8 +97,10 @@ native builds.
 
 ### 4.3 Mini joystick
 
-* A circle, about 120 CSS px, with a ball (knob, about 40 px) at its centre.
-  Dragging the ball moves it inside the circle; it springs back to the centre
+* A 48 CSS px touch area (the landing zone extends 16 px beyond it) with a
+  16 px ball (knob) at its centre. At rest only the ball is visible: the outer
+  ring is collapsed onto it. While touched the ring opens to the full 48 px.
+  Dragging the ball moves it inside the ring; it springs back to the centre
   on release.
 * Output: a vector `(x, y)` with each axis in [-1, 1] (x right, y down), zero
   inside a dead zone of 0.15 of the radius. It pans the camera at the same
@@ -172,7 +176,7 @@ becomes a drag, not a right click.
 1. The toggle button is visible in the playing view on an 812 x 375 viewport with touch emulation, and is not visible in the launcher before Play.
 2. Pressing the toggle shows the overlay; pressing it again hides the overlay and clears the locks and any joystick push.
 3. The overlay lies inside `#screen`, and stays visible and usable after `requestFullscreen` on `#screen`.
-4. The overlay's controls are in left to right order: Left lock, Right lock, Multi lock, joystick; the joystick is the rightmost control.
+4. The locks are stacked top to bottom (Left, Right, Multi) at the left edge; the joystick is at the bottom-right corner.
 5. A tap on each lock button toggles its `aria-pressed` between true and false and sends no map click.
 6. With no lock on, a tap on a unit in the map selects it (left click), and a 500 ms press without movement issues a right click at that point.
 7. With Left lock on, a one-finger drag over units selects exactly the units inside the box when the finger lifts.

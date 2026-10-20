@@ -58,7 +58,8 @@ const unsupported = byId<HTMLElement>("unsupported");
 const screen = byId<HTMLElement>("screen");
 const topbar = byId<HTMLElement>("topbar");
 const fullscreen = byId<HTMLButtonElement>("fullscreen");
-const touchFullscreenExit = byId<HTMLButtonElement>("touch-fullscreen-exit");
+const touchFullscreen = byId<HTMLButtonElement>("touch-fullscreen");
+const touchFullscreenLabel = touchFullscreen.querySelector<HTMLSpanElement>("span");
 const mute = byId<HTMLButtonElement>("mute");
 const menuButton = byId<HTMLButtonElement>("menu-button");
 const importDetail = byId<HTMLElement>("import-detail");
@@ -395,9 +396,14 @@ function updateFullscreenButton(): void {
   fullscreen.setAttribute("aria-pressed", active ? "true" : "false");
   fullscreen.setAttribute("aria-label", label);
   fullscreen.title = label;
-  // The touch column only offers the exit, and only while #screen is the
-  // fullscreen element (owner, 2026-10-20).
-  touchFullscreenExit.hidden = !active;
+  // In touch play the column owns the action: the same button enters while
+  // windowed and exits in fullscreen (owner, 2026-10-20).
+  touchFullscreen.setAttribute("aria-pressed", active ? "true" : "false");
+  touchFullscreen.setAttribute("aria-label", label);
+  touchFullscreen.title = label;
+  if (touchFullscreenLabel !== null) {
+    touchFullscreenLabel.textContent = active ? "Exit" : "Full";
+  }
 }
 
 function leaveFullscreen(): void {
@@ -1146,7 +1152,10 @@ function wireFullscreen(): void {
   fullscreen.addEventListener("click", () => {
     enterFullscreen();
   });
-  touchFullscreenExit.addEventListener("click", () => leaveFullscreen());
+  touchFullscreen.addEventListener("click", () => {
+    if (document.fullscreenElement === screen) leaveFullscreen();
+    else enterFullscreen();
+  });
   document.addEventListener("fullscreenchange", onFullscreenChange);
 }
 

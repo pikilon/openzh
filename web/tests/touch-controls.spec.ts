@@ -150,7 +150,7 @@ test.describe("touch device", () => {
     await expect(page.locator("#screen #touch-controls")).toHaveCount(1);
     await expect(page.locator("#screen #touch-controls")).toBeVisible();
 
-    await page.locator("#fullscreen").click();
+    await page.locator("#touch-fullscreen").click();
     await expect
       .poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null), { timeout: WAIT })
       .toBe("screen");
@@ -158,22 +158,27 @@ test.describe("touch device", () => {
     await page.evaluate(() => document.exitFullscreen());
   });
 
-  test("19: the fullscreen exit is hidden windowed, last in fullscreen, and leaves it", async ({
-    page,
-  }, info) => {
+  test("19: the column fullscreen toggle enters and leaves fullscreen", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
-    await expect(page.locator("#touch-fullscreen-exit")).toBeHidden();
+    const toggle = page.locator("#touch-fullscreen");
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-label", "Enter fullscreen");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle.locator("span")).toHaveText("Full");
+    // In touch play the column owns the action; the top-bar button is out of
+    // the way while the overlay is shown.
+    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
 
-    await page.locator("#fullscreen").click();
+    await toggle.click();
     await expect
       .poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null), { timeout: WAIT })
       .toBe("screen");
-    const exit = page.locator("#touch-fullscreen-exit");
-    await expect(exit).toBeVisible();
-    await expect(exit).toHaveAttribute("aria-label", "Exit fullscreen");
+    await expect(toggle).toHaveAttribute("aria-label", "Exit fullscreen");
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle.locator("span")).toHaveText("Exit");
 
     const layout = await page.evaluate(() => {
-      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-fullscreen-exit"];
+      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-fullscreen"];
       return {
         innerWidth: window.innerWidth,
         boxes: ids.map((id) => {
@@ -182,40 +187,46 @@ test.describe("touch device", () => {
         }),
       };
     });
-    const [gameMenu, left, right, multi, exitBox] = layout.boxes;
+    const [gameMenu, left, right, multi, fullscreen] = layout.boxes;
     expect(left.top).toBeGreaterThan(gameMenu.top);
     expect(right.top).toBeGreaterThan(left.top);
     expect(multi.top).toBeGreaterThan(right.top);
-    expect(exitBox.top).toBeGreaterThanOrEqual(multi.bottom - 1);
-    expect(exitBox.width).toBeCloseTo(56 * 0.7, 1);
-    expect(exitBox.height).toBeCloseTo(54 * 0.7, 1);
-    expect(exitBox.left).toBeLessThan(layout.innerWidth / 4);
+    expect(fullscreen.top).toBeGreaterThanOrEqual(multi.bottom - 1);
+    expect(fullscreen.width).toBeCloseTo(56 * 0.7, 1);
+    expect(fullscreen.height).toBeCloseTo(54 * 0.7, 1);
+    expect(fullscreen.left).toBeLessThan(layout.innerWidth / 4);
 
-    await exit.click();
+    await toggle.click();
     await expect
       .poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null), { timeout: WAIT })
       .toBeNull();
-    await expect(exit).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-label", "Enter fullscreen");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle.locator("span")).toHaveText("Full");
+    // The overlay is still shown, so the top-bar button stays out of the way.
+    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
   });
 
   test("4: the column shrinks to 70 % top to bottom; the joystick sits bottom right", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
+    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
 
     const layout = await page.evaluate(() => {
-      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-joystick"];
+      const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-fullscreen", "touch-joystick"];
       const boxes = ids.map((id) => {
         const rect = document.getElementById(id)!.getBoundingClientRect();
         return { id, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
       });
       return { boxes, innerWidth: window.innerWidth, innerHeight: window.innerHeight };
     });
-    const [gameMenu, left, right, multi, joystick] = layout.boxes;
+    const [gameMenu, left, right, multi, fullscreen, joystick] = layout.boxes;
     expect(gameMenu.top).toBeLessThan(left.top);
     expect(right.top).toBeGreaterThanOrEqual(left.bottom - 1);
     expect(multi.top).toBeGreaterThanOrEqual(right.bottom - 1);
+    expect(fullscreen.top).toBeGreaterThanOrEqual(multi.bottom - 1);
     // Owner's 2026-10-20 request: the whole 56 x 54 button (icon and label)
     // renders at 70 % of its size.
-    for (const button of [gameMenu, left, right, multi]) {
+    for (const button of [gameMenu, left, right, multi, fullscreen]) {
       expect(button.width).toBeCloseTo(56 * 0.7, 1);
       expect(button.height).toBeCloseTo(54 * 0.7, 1);
       expect(button.left).toBeLessThan(layout.innerWidth / 4);

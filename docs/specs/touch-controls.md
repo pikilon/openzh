@@ -91,9 +91,10 @@ native builds.
   icon, and the fullscreen toggle the four-corner icon.
 * `#touch-fullscreen` is the last column control: windowed it reads "Enter
   fullscreen" and enters; while `#screen` is the fullscreen element it reads
-  "Exit fullscreen" and leaves. While the touch overlay is shown, the top-bar
-  `#fullscreen` is not displayed; it returns when the overlay is hidden, which
-  is the only fullscreen control a desktop session uses.
+  "Exit fullscreen" and leaves. The top-bar `#fullscreen` stays visible too
+  while the overlay is shown, so switching touch controls never hides or moves
+  the fullscreen action (owner's follow-up, 2026-10-20): the column adds a
+  thumb-reachable duplicate and both controls follow `fullscreenchange`.
 * The overlay is a DOM element inside `#screen`, the element put in browser
   fullscreen (`web/src/main.ts`). It must sit inside `#screen`, not beside it,
   or it is hidden in fullscreen.
@@ -156,8 +157,9 @@ change the lock.
 * The fullscreen toggle is the last column control. It calls
   `requestFullscreen` on `#screen` while windowed and `exitFullscreen` while
   fullscreen, sends no key or pointer event to the engine, and switches its
-  label with `fullscreenchange`, including a browser Esc (owner, 2026-10-20:
-  in touch play it replaces the top-bar button).
+  label with `fullscreenchange`, including a browser Esc. It repeats the
+  top-bar action at thumb reach; the top-bar `#fullscreen` stays visible as
+  well (owner's follow-up, 2026-10-20).
 
 ## 5. Mapping to the engine
 
@@ -211,7 +213,7 @@ becomes a drag, not a right click.
 13. The toggle's on/off choice survives a reload; a blocked `localStorage` falls back to the default without an error in the console.
 14. `#game-menu` is not in the top bar; while the overlay is shown, clicking the first column control sends Escape down and up to the engine, and hiding the overlay hides it.
 15. `#touch-fullscreen` is the last column control: windowed it reads "Enter fullscreen" and enters fullscreen, in fullscreen it reads "Exit fullscreen" and leaves, and hiding the overlay hides it.
-16. While the overlay is shown the top-bar `#fullscreen` is hidden; hiding the overlay brings it back, and a desktop context keeps it while `#touch-fullscreen` stays hidden with the overlay.
+16. While the overlay is shown the top-bar `#fullscreen` stays visible next to `#touch-fullscreen`; hiding the overlay hides only the column, and a desktop context keeps the top-bar button while `#touch-fullscreen` stays hidden with the overlay.
 
 ## 8. Open questions for the brief
 

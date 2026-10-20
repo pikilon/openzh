@@ -396,8 +396,8 @@ function updateFullscreenButton(): void {
   fullscreen.setAttribute("aria-pressed", active ? "true" : "false");
   fullscreen.setAttribute("aria-label", label);
   fullscreen.title = label;
-  // In touch play the column owns the action: the same button enters while
-  // windowed and exits in fullscreen (owner, 2026-10-20).
+  // The touch column repeats the action at thumb reach; both buttons stay in
+  // sync, and the top-bar one never moves (owner, 2026-10-20).
   touchFullscreen.setAttribute("aria-pressed", active ? "true" : "false");
   touchFullscreen.setAttribute("aria-label", label);
   touchFullscreen.title = label;

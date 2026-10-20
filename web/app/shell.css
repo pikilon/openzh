@@ -439,13 +439,6 @@ body {
   transform-origin: left bottom;
 }
 
-/* In touch play the column owns the fullscreen action (owner, 2026-10-20);
-   the top-bar button returns with the overlay hidden, and is the only one a
-   desktop session uses. src/touch.ts sets the attribute in showOverlay. */
-body[data-touch-overlay="on"] #fullscreen {
-  display: none;
-}
-
 .touch-button {
   display: inline-flex;
   flex-direction: column;

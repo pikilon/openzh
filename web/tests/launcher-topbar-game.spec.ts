@@ -43,14 +43,18 @@ test("18: the game menu lives in the touch column, not the top bar, and sends Es
   await expect(page.locator("#game-menu")).toBeHidden();
 });
 
-test("23: touch play hides the top-bar fullscreen; the column toggle takes over", async ({ page }, info) => {
+test("23: touch play keeps the top-bar fullscreen visible and adds the column toggle", async ({
+  page,
+}, info) => {
   await clearStored(page);
   await page.goto(launcherUrl("/harness/errors/resolves.js"));
   await waitForState(page, "no-assets");
   await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
   await waitForState(page, "playing", START_TIMEOUT);
 
-  await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+  // Owner, 2026-10-20: the fullscreen button must not move between the top bar
+  // and the column when touch controls are toggled; the top-bar one stays.
+  await expect(page.locator("#topbar #fullscreen")).toBeVisible();
   await expect(page.locator("#touch-fullscreen")).toBeVisible();
   await expect(page.locator("#touch-fullscreen")).toHaveAttribute("aria-label", "Enter fullscreen");
 
@@ -62,7 +66,7 @@ test("23: touch play hides the top-bar fullscreen; the column toggle takes over"
   await page.locator("#touch-toggle").click();
   await expect(page.locator("#touch-controls")).toBeVisible();
   await expect(page.locator("#touch-fullscreen")).toBeVisible();
-  await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+  await expect(page.locator("#topbar #fullscreen")).toBeVisible();
 });
 
 test("the manifest asks for landscape", async ({ request }) => {

@@ -165,9 +165,9 @@ test.describe("touch device", () => {
     await expect(toggle).toHaveAttribute("aria-label", "Enter fullscreen");
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await expect(toggle.locator("span")).toHaveText("Full");
-    // In touch play the column owns the action; the top-bar button is out of
-    // the way while the overlay is shown.
-    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+    // The column adds a thumb-reachable toggle; the top-bar button stays
+    // visible too (owner, 2026-10-20: it must not move with the overlay).
+    await expect(page.locator("#topbar #fullscreen")).toBeVisible();
 
     await toggle.click();
     await expect
@@ -203,13 +203,13 @@ test.describe("touch device", () => {
     await expect(toggle).toHaveAttribute("aria-label", "Enter fullscreen");
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
     await expect(toggle.locator("span")).toHaveText("Full");
-    // The overlay is still shown, so the top-bar button stays out of the way.
-    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+    // The overlay is still shown, so both fullscreen controls are visible.
+    await expect(page.locator("#topbar #fullscreen")).toBeVisible();
   });
 
   test("4: the column shrinks to 70 % top to bottom; the joystick sits bottom right", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
-    await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+    await expect(page.locator("#topbar #fullscreen")).toBeVisible();
 
     const layout = await page.evaluate(() => {
       const ids = ["game-menu", "touch-left", "touch-right", "touch-multi", "touch-fullscreen", "touch-joystick"];

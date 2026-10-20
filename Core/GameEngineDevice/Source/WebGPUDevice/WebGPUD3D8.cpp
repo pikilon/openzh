@@ -26,6 +26,7 @@ constexpr UINT kDefaultHeight = 768;
 constexpr UINT kTextureStageCount = 8;
 constexpr UINT kTextureStateCount = 32;
 constexpr size_t kUploadFrameCount = 3;
+constexpr size_t kMaxCachedBindGroups = 4096;
 constexpr size_t kVertexUploadCapacity = 32 * 1024 * 1024;
 constexpr size_t kIndexUploadCapacity = 4 * 1024 * 1024;
 constexpr size_t kUniformUploadCapacity = 2 * 1024 * 1024;
@@ -919,6 +920,9 @@ private:
 	HRESULT drawFromMirrors(D3DPRIMITIVETYPE type, UINT count, UINT first, bool indexed, UINT minIndex = 0, UINT vertexCount = 0);
 	bool fixedFunctionUniforms(const VertexSetup &setup, uint32_t &offset);
 	DrawBindings bindGroup();
+public:
+	void forgetTextureView(WGPUTextureView view);
+private:
 	WGPUSampler sampler(UINT stage);
 	WGPUTextureFormat colorTargetFormat() const;
 	bool hasDepthTarget() const;
@@ -1273,11 +1277,15 @@ bool WebGPUD3DDevice::prepareUploadFrame()
 	if (frame.busy) {
 		return false;
 	}
-	for (const auto &[key, group] : frame.bindGroups) {
-		(void)key;
-		wgpuBindGroupRelease(group);
+	// Bind groups stay cached across frames (forgetTextureView drops those of
+	// a destroyed texture); the cap only bounds a pathological scene.
+	if (frame.bindGroups.size() > kMaxCachedBindGroups) {
+		for (const auto &[key, group] : frame.bindGroups) {
+			(void)key;
+			wgpuBindGroupRelease(group);
+		}
+		frame.bindGroups.clear();
 	}
-	frame.bindGroups.clear();
 	for (WGPUBuffer buffer : frame.retiredBuffers) wgpuBufferRelease(buffer);
 	frame.retiredBuffers.clear();
 	frame.vertices.clear();
@@ -1732,6 +1740,24 @@ WebGPUD3DDevice::DrawBindings WebGPUD3DDevice::bindGroup()
 		frame.bindGroups.emplace(bindingKey, group);
 	}
 	return { group, static_cast<uint32_t>(uniformOffset) };
+}
+
+// A texture is going away: drop the cached bind groups that hold its view,
+// before a new view can reuse the pointer the cache keys on.
+void WebGPUD3DDevice::forgetTextureView(WGPUTextureView view)
+{
+	const uintptr_t key = reinterpret_cast<uintptr_t>(view);
+	for (UploadFrame &frame : m_uploadFrames) {
+		for (auto it = frame.bindGroups.begin(); it != frame.bindGroups.end();) {
+			const auto &binding = it->first;
+			if (binding[1] == key || binding[3] == key || binding[5] == key || binding[7] == key) {
+				wgpuBindGroupRelease(it->second);
+				it = frame.bindGroups.erase(it);
+			} else {
+				++it;
+			}
+		}
+	}
 }
 
 WGPUSampler WebGPUD3DDevice::sampler(UINT stage)
@@ -5117,6 +5143,7 @@ WebGPUTexture::WebGPUTexture(WebGPUD3DDevice *device, UINT width, UINT height, U
 WebGPUTexture::~WebGPUTexture()
 {
 	if (m_view) {
+		m_device->forgetTextureView(m_view);
 		wgpuTextureViewRelease(m_view);
 	}
 	if (m_texture) {

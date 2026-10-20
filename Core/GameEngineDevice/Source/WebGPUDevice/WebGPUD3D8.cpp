@@ -273,6 +273,81 @@ struct CanonicalVertex
 	float fog;
 };
 
+struct VertexShaderProgram;
+
+// Everything convertVertex needs that does not change between the vertices of
+// one draw: the transforms, the inverse normal matrix, the lights moved to view
+// space, the vertex layout and the texture stage setup. Built once per draw by
+// prepareVertexSetup, so the per-vertex path only does per-vertex arithmetic.
+struct VertexSetup
+{
+	struct Light
+	{
+		DWORD type;
+		float position[4];  // view space
+		float direction[4]; // view space, normalized
+		float range;
+		float attenuation0;
+		float attenuation1;
+		float attenuation2;
+		float falloff;
+		float cosHalfTheta;
+		float cosHalfPhi;
+		float ambient[4];
+		float diffuse[4];
+	};
+	enum class MaterialSource : uint8_t { Material, VertexDiffuse, VertexSpecular };
+	struct TextureStage
+	{
+		bool cameraSpacePosition;
+		bool hasTransform;
+		UINT coordinateIndex;
+		const D3DMATRIX *transform;
+	};
+
+	const VertexShaderProgram *program;
+	bool rhw;
+	DWORD positionType;
+	D3DMATRIX world;
+	D3DMATRIX view;
+	D3DMATRIX projection;
+	float viewportX;
+	float viewportY;
+	float viewportWidth;
+	float viewportHeight;
+	UINT positionOffset;
+	bool hasNormal;
+	UINT normalOffset;
+	bool normalInvertible;
+	float normalInverse[3][3];
+	bool normalizeNormals;
+	bool fogEnabled;
+	DWORD fogMode;
+	bool fogRange;
+	float fogDensity;
+	float fogStart;
+	float fogEnd;
+	bool fogFromSpecular;
+	bool hasDiffuse;
+	UINT diffuseOffset;
+	bool hasSpecular;
+	UINT specularOffset;
+	bool lighting;
+	UINT lightCount;
+	Light lights[8];
+	MaterialSource diffuseSource;
+	MaterialSource ambientSource;
+	MaterialSource emissiveSource;
+	float materialDiffuse[4];
+	float materialAmbient[4];
+	float materialEmissive[4];
+	float globalAmbient[4];
+	UINT textureCount;
+	UINT uvOffset[4];
+	UINT uvCoordinateCount[4];
+	TextureStage stages[4];
+};
+
 struct TextureCombinerUniforms
 {
 	DWORD colorOp0;
@@ -673,7 +748,12 @@ private:
 	WGPUTextureFormat colorTargetFormat() const;
 	bool hasDepthTarget() const;
 	HRESULT draw(D3DPRIMITIVETYPE type, const void *vertexData, UINT vertexCount, UINT stride, const void *indexData, D3DFORMAT indexFormat, UINT indexCount, UINT baseVertex);
-	CanonicalVertex convertVertex(const uint8_t *source, UINT stride) const;
+	void prepareVertexSetup(VertexSetup &setup) const;
+	CanonicalVertex convertVertex(const uint8_t *source, UINT stride, const VertexSetup &setup) const;
+	CanonicalVertex convertVertexChecked(const uint8_t *source, UINT stride, const VertexSetup &setup) const;
+#ifdef ZHWP_VERIFY_VERTEX
+	CanonicalVertex convertVertexReference(const uint8_t *source, UINT stride) const;
+#endif
 	CanonicalVertex executeVertexShader(const VertexShaderProgram &program, const uint8_t *source, UINT stride) const;
 	UINT vertexCountFor(D3DPRIMITIVETYPE type, UINT primitiveCount) const;
 	WGPUBlendFactor blendFactor(DWORD factor) const;
@@ -1501,7 +1581,397 @@ CanonicalVertex WebGPUD3DDevice::executeVertexShader(const VertexShaderProgram &
 	return output;
 }
 
-CanonicalVertex WebGPUD3DDevice::convertVertex(const uint8_t *source, UINT stride) const
+void WebGPUD3DDevice::prepareVertexSetup(VertexSetup &setup) const
+{
+	setup = {};
+	const auto programmableShader = m_vertexShaders.find(m_vertexShader);
+	if (programmableShader != m_vertexShaders.end()) {
+		setup.program = &programmableShader->second;
+		return;
+	}
+	const DWORD fvf = m_vertexShader ? m_vertexShader : (m_vertexBuffer ? m_vertexBuffer->fvf() : D3DFVF_XYZ);
+	const DWORD positionType = fvf & D3DFVF_POSITION_MASK;
+	setup.positionType = positionType;
+	setup.rhw = positionType == D3DFVF_XYZRHW;
+	const auto worldTransform = m_transforms.find(D3DTS_WORLD);
+	const auto viewTransform = m_transforms.find(D3DTS_VIEW);
+	const auto projectionTransform = m_transforms.find(D3DTS_PROJECTION);
+	setup.world = worldTransform == m_transforms.end() ? identityMatrix() : worldTransform->second;
+	setup.view = viewTransform == m_transforms.end() ? identityMatrix() : viewTransform->second;
+	setup.projection = projectionTransform == m_transforms.end() ? identityMatrix() : projectionTransform->second;
+	setup.viewportX = static_cast<float>(m_viewport.X);
+	setup.viewportY = static_cast<float>(m_viewport.Y);
+	setup.viewportWidth = static_cast<float>(m_viewport.Width);
+	setup.viewportHeight = static_cast<float>(m_viewport.Height);
+
+	UINT offset = 0;
+	if (setup.rhw) {
+		offset = 4 * sizeof(float);
+	} else {
+		offset = 3 * sizeof(float);
+		if (positionType >= D3DFVF_XYZB1 && positionType <= D3DFVF_XYZB5) {
+			offset += ((positionType - D3DFVF_XYZB1) / 2 + 1) * sizeof(float);
+		}
+	}
+	const D3DMATRIX &worldMatrix = setup.world;
+	const D3DMATRIX &viewMatrix = setup.view;
+	setup.hasNormal = (fvf & D3DFVF_NORMAL) != 0;
+	if (setup.hasNormal) {
+		setup.normalOffset = offset;
+		float worldView[3][3] = {};
+		for (int row = 0; row < 3; ++row) {
+			for (int column = 0; column < 3; ++column) {
+				for (int index = 0; index < 3; ++index) {
+					worldView[row][column] += worldMatrix.m[row][index] * viewMatrix.m[index][column];
+				}
+			}
+		}
+		const float determinant =
+			worldView[0][0] * (worldView[1][1] * worldView[2][2] - worldView[1][2] * worldView[2][1]) -
+			worldView[0][1] * (worldView[1][0] * worldView[2][2] - worldView[1][2] * worldView[2][0]) +
+			worldView[0][2] * (worldView[1][0] * worldView[2][1] - worldView[1][1] * worldView[2][0]);
+		if (std::abs(determinant) > 1.0e-20f) {
+			const float inverseDeterminant = 1.0f / determinant;
+			const float inverse[3][3] = {
+				{ (worldView[1][1] * worldView[2][2] - worldView[1][2] * worldView[2][1]) * inverseDeterminant,
+				  (worldView[0][2] * worldView[2][1] - worldView[0][1] * worldView[2][2]) * inverseDeterminant,
+				  (worldView[0][1] * worldView[1][2] - worldView[0][2] * worldView[1][1]) * inverseDeterminant },
+				{ (worldView[1][2] * worldView[2][0] - worldView[1][0] * worldView[2][2]) * inverseDeterminant,
+				  (worldView[0][0] * worldView[2][2] - worldView[0][2] * worldView[2][0]) * inverseDeterminant,
+				  (worldView[0][2] * worldView[1][0] - worldView[0][0] * worldView[1][2]) * inverseDeterminant },
+				{ (worldView[1][0] * worldView[2][1] - worldView[1][1] * worldView[2][0]) * inverseDeterminant,
+				  (worldView[0][1] * worldView[2][0] - worldView[0][0] * worldView[2][1]) * inverseDeterminant,
+				  (worldView[0][0] * worldView[1][1] - worldView[0][1] * worldView[1][0]) * inverseDeterminant }
+			};
+			std::memcpy(setup.normalInverse, inverse, sizeof(inverse));
+			setup.normalInvertible = true;
+		}
+		offset += 3 * sizeof(float);
+		setup.normalizeNormals = m_renderStates[D3DRS_NORMALIZENORMALS] != FALSE;
+	}
+	setup.fogEnabled = !setup.rhw && m_renderStates[D3DRS_FOGENABLE] != FALSE;
+	if (setup.fogEnabled) {
+		setup.fogMode = m_renderStates[D3DRS_FOGVERTEXMODE];
+		setup.fogRange = m_renderStates[D3DRS_RANGEFOGENABLE] != FALSE;
+		setup.fogDensity = std::bit_cast<float>(m_renderStates[D3DRS_FOGDENSITY]);
+		setup.fogStart = std::bit_cast<float>(m_renderStates[D3DRS_FOGSTART]);
+		setup.fogEnd = std::bit_cast<float>(m_renderStates[D3DRS_FOGEND]);
+	}
+	if (fvf & D3DFVF_PSIZE) {
+		offset += sizeof(float);
+	}
+	setup.hasDiffuse = (fvf & D3DFVF_DIFFUSE) != 0;
+	if (setup.hasDiffuse) {
+		setup.diffuseOffset = offset;
+		offset += sizeof(DWORD);
+	}
+	setup.hasSpecular = (fvf & D3DFVF_SPECULAR) != 0;
+	if (setup.hasSpecular) {
+		setup.specularOffset = offset;
+		setup.fogFromSpecular = m_renderStates[D3DRS_FOGENABLE] != FALSE && m_renderStates[D3DRS_FOGVERTEXMODE] == D3DFOG_NONE;
+		offset += sizeof(DWORD);
+	}
+
+	setup.lighting = !setup.rhw && setup.hasNormal && m_renderStates[D3DRS_LIGHTING] != FALSE;
+	if (setup.lighting) {
+		auto source = [&](DWORD state) {
+			if (m_renderStates[D3DRS_COLORVERTEX] != FALSE) {
+				if (state == D3DMCS_COLOR1 && setup.hasDiffuse) return VertexSetup::MaterialSource::VertexDiffuse;
+				if (state == D3DMCS_COLOR2 && setup.hasSpecular) return VertexSetup::MaterialSource::VertexSpecular;
+			}
+			return VertexSetup::MaterialSource::Material;
+		};
+		auto copyColor = [](float (&destination)[4], const D3DCOLORVALUE &value) {
+			destination[0] = value.r;
+			destination[1] = value.g;
+			destination[2] = value.b;
+			destination[3] = value.a;
+		};
+		setup.diffuseSource = source(m_renderStates[D3DRS_DIFFUSEMATERIALSOURCE]);
+		setup.ambientSource = source(m_renderStates[D3DRS_AMBIENTMATERIALSOURCE]);
+		setup.emissiveSource = source(m_renderStates[D3DRS_EMISSIVEMATERIALSOURCE]);
+		copyColor(setup.materialDiffuse, m_material.Diffuse);
+		copyColor(setup.materialAmbient, m_material.Ambient);
+		copyColor(setup.materialEmissive, m_material.Emissive);
+		const DWORD ambientColor = m_renderStates[D3DRS_AMBIENT];
+		setup.globalAmbient[0] = static_cast<float>((ambientColor >> 16) & 0xff) / 255.0f;
+		setup.globalAmbient[1] = static_cast<float>((ambientColor >> 8) & 0xff) / 255.0f;
+		setup.globalAmbient[2] = static_cast<float>(ambientColor & 0xff) / 255.0f;
+		setup.globalAmbient[3] = static_cast<float>((ambientColor >> 24) & 0xff) / 255.0f;
+		auto transform = [](const std::array<float, 4> &input, const D3DMATRIX &matrix) {
+			std::array<float, 4> result = {};
+			for (int column = 0; column < 4; ++column) {
+				for (int row = 0; row < 4; ++row) {
+					result[column] += input[row] * matrix.m[row][column];
+				}
+			}
+			return result;
+		};
+		for (DWORD index = 0; index < 8; ++index) {
+			const auto enabled = m_lightEnabled.find(index);
+			const auto found = m_lights.find(index);
+			if (enabled == m_lightEnabled.end() || enabled->second == FALSE || found == m_lights.end()) continue;
+			const D3DLIGHT8 &light = found->second;
+			VertexSetup::Light &out = setup.lights[setup.lightCount++];
+			std::array<float, 4> position = { light.Position.x, light.Position.y, light.Position.z, 1.0f };
+			std::array<float, 4> direction = { light.Direction.x, light.Direction.y, light.Direction.z, 0.0f };
+			position = transform(position, viewMatrix);
+			direction = transform(direction, viewMatrix);
+			float directionLength = std::sqrt(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+			if (directionLength > 0.0f) {
+				for (int component = 0; component < 3; ++component) direction[component] /= directionLength;
+			}
+			out.type = light.Type;
+			std::copy(position.begin(), position.end(), out.position);
+			std::copy(direction.begin(), direction.end(), out.direction);
+			out.range = light.Range;
+			out.attenuation0 = light.Attenuation0;
+			out.attenuation1 = light.Attenuation1;
+			out.attenuation2 = light.Attenuation2;
+			out.falloff = light.Falloff;
+			out.cosHalfTheta = std::cos(light.Theta * 0.5f);
+			out.cosHalfPhi = std::cos(light.Phi * 0.5f);
+			copyColor(out.ambient, light.Ambient);
+			copyColor(out.diffuse, light.Diffuse);
+		}
+	}
+
+	const UINT textureCount = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+	for (UINT stage = 0; stage < std::min(textureCount, 4U); ++stage) {
+		const UINT sizeBits = (fvf >> (16 + stage * 2)) & 3;
+		const UINT coordinateCount = sizeBits == 0 ? 2 : sizeBits == 1 ? 3 : sizeBits == 2 ? 4 : 1;
+		setup.uvOffset[stage] = offset;
+		setup.uvCoordinateCount[stage] = coordinateCount;
+		setup.textureCount = stage + 1;
+		offset += coordinateCount * sizeof(float);
+	}
+	for (UINT stage = 0; stage < 4; ++stage) {
+		VertexSetup::TextureStage &out = setup.stages[stage];
+		const DWORD coordinateState = m_textureStates[stage][D3DTSS_TEXCOORDINDEX];
+		const DWORD generationMode = coordinateState & 0xffff0000;
+		out.cameraSpacePosition = !setup.rhw && generationMode == D3DTSS_TCI_CAMERASPACEPOSITION;
+		const UINT coordinateIndex = coordinateState & 0xffff;
+		out.coordinateIndex = coordinateIndex < 4 ? coordinateIndex : 0;
+		if (m_textureStates[stage][D3DTSS_TEXTURETRANSFORMFLAGS] != D3DTTFF_DISABLE) {
+			const auto textureTransform = m_transforms.find(static_cast<DWORD>(D3DTS_TEXTURE0) + stage);
+			if (textureTransform != m_transforms.end()) {
+				out.hasTransform = true;
+				out.transform = &textureTransform->second;
+			}
+		}
+	}
+}
+
+CanonicalVertex WebGPUD3DDevice::convertVertex(const uint8_t *source, UINT stride, const VertexSetup &setup) const
+{
+	if (setup.program) {
+		return executeVertexShader(*setup.program, source, stride);
+	}
+	CanonicalVertex output = {};
+	std::fill(std::begin(output.color), std::end(output.color), 1.0f);
+	output.fog = 1.0f;
+	std::array<float, 4> cameraPosition = {};
+	auto transform = [](const std::array<float, 4> &input, const D3DMATRIX &matrix) {
+		std::array<float, 4> result = {};
+		for (int column = 0; column < 4; ++column) {
+			for (int row = 0; row < 4; ++row) {
+				result[column] += input[row] * matrix.m[row][column];
+			}
+		}
+		return result;
+	};
+	if (setup.rhw) {
+		const float *position = reinterpret_cast<const float *>(source);
+		output.position[0] = ((position[0] - setup.viewportX) / setup.viewportWidth) * 2.0f - 1.0f;
+		output.position[1] = 1.0f - ((position[1] - setup.viewportY) / setup.viewportHeight) * 2.0f;
+		output.position[2] = position[2];
+		output.position[3] = 1.0f;
+	} else {
+		std::array<float, 4> position = {
+			reinterpret_cast<const float *>(source)[0],
+			reinterpret_cast<const float *>(source)[1],
+			reinterpret_cast<const float *>(source)[2],
+			1.0f,
+		};
+		position = transform(position, setup.world);
+		cameraPosition = transform(position, setup.view);
+		position = transform(cameraPosition, setup.projection);
+		std::copy(position.begin(), position.end(), output.position);
+	}
+	output.position[0] += output.position[3] / setup.viewportWidth;
+	output.position[1] -= output.position[3] / setup.viewportHeight;
+	std::array<float, 3> cameraNormal = {};
+	if (setup.hasNormal) {
+		const float *normal = reinterpret_cast<const float *>(source + setup.normalOffset);
+		if (setup.normalInvertible) {
+			for (int column = 0; column < 3; ++column) {
+				for (int row = 0; row < 3; ++row) {
+					cameraNormal[column] += normal[row] * setup.normalInverse[column][row];
+				}
+			}
+		}
+		if (setup.normalizeNormals) {
+			const float length = std::sqrt(cameraNormal[0] * cameraNormal[0] + cameraNormal[1] * cameraNormal[1] + cameraNormal[2] * cameraNormal[2]);
+			if (length > 0.0f) {
+				for (float &component : cameraNormal) component /= length;
+			}
+		}
+	}
+	if (setup.fogEnabled) {
+		const float fogDistance = setup.fogRange
+			? std::sqrt(cameraPosition[0] * cameraPosition[0] + cameraPosition[1] * cameraPosition[1] + cameraPosition[2] * cameraPosition[2])
+			: std::abs(cameraPosition[2]);
+		switch (setup.fogMode) {
+			case D3DFOG_LINEAR:
+				output.fog = setup.fogEnd == setup.fogStart ? (fogDistance <= setup.fogEnd ? 1.0f : 0.0f)
+					: (setup.fogEnd - fogDistance) / (setup.fogEnd - setup.fogStart);
+				break;
+			case D3DFOG_EXP:
+				output.fog = std::exp(-setup.fogDensity * fogDistance);
+				break;
+			case D3DFOG_EXP2: {
+				const float densityDistance = setup.fogDensity * fogDistance;
+				output.fog = std::exp(-densityDistance * densityDistance);
+				break;
+			}
+			default:
+				break;
+		}
+		output.fog = std::clamp(output.fog, 0.0f, 1.0f);
+	}
+	std::array<float, 4> diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
+	std::array<float, 4> specular = {};
+	if (setup.hasDiffuse) {
+		const DWORD color = *reinterpret_cast<const DWORD *>(source + setup.diffuseOffset);
+		diffuse[0] = static_cast<float>((color >> 16) & 0xff) / 255.0f;
+		diffuse[1] = static_cast<float>((color >> 8) & 0xff) / 255.0f;
+		diffuse[2] = static_cast<float>(color & 0xff) / 255.0f;
+		diffuse[3] = static_cast<float>((color >> 24) & 0xff) / 255.0f;
+	}
+	if (setup.hasSpecular) {
+		const DWORD color = *reinterpret_cast<const DWORD *>(source + setup.specularOffset);
+		specular[0] = static_cast<float>((color >> 16) & 0xff) / 255.0f;
+		specular[1] = static_cast<float>((color >> 8) & 0xff) / 255.0f;
+		specular[2] = static_cast<float>(color & 0xff) / 255.0f;
+		specular[3] = static_cast<float>((color >> 24) & 0xff) / 255.0f;
+		if (setup.fogFromSpecular) {
+			output.fog = specular[3];
+		}
+	}
+	std::copy(diffuse.begin(), diffuse.end(), output.color);
+	if (setup.lighting) {
+		auto pick = [&](VertexSetup::MaterialSource sourceKind, const float (&material)[4]) {
+			std::array<float, 4> value;
+			if (sourceKind == VertexSetup::MaterialSource::VertexDiffuse) value = diffuse;
+			else if (sourceKind == VertexSetup::MaterialSource::VertexSpecular) value = specular;
+			else value = { material[0], material[1], material[2], material[3] };
+			return value;
+		};
+		std::array<float, 4> lightAmbient = {};
+		std::array<float, 4> lightDiffuse = {};
+		for (UINT index = 0; index < setup.lightCount; ++index) {
+			const VertexSetup::Light &light = setup.lights[index];
+			std::array<float, 3> hitDirection = {
+				light.position[0] - cameraPosition[0], light.position[1] - cameraPosition[1], light.position[2] - cameraPosition[2]
+			};
+			const float distance = std::sqrt(hitDirection[0] * hitDirection[0] + hitDirection[1] * hitDirection[1] + hitDirection[2] * hitDirection[2]);
+			if (light.type == D3DLIGHT_DIRECTIONAL) {
+				hitDirection = { -light.direction[0], -light.direction[1], -light.direction[2] };
+			} else if (distance > 0.0f) {
+				for (float &component : hitDirection) component /= distance;
+			}
+			float attenuation = 1.0f;
+			if (light.type != D3DLIGHT_DIRECTIONAL) {
+				const float denominator = light.attenuation0 + distance * light.attenuation1 + distance * distance * light.attenuation2;
+				attenuation = denominator > 0.0f ? 1.0f / denominator : std::numeric_limits<float>::max();
+				if (distance > light.range) attenuation = 0.0f;
+			}
+			if (light.type == D3DLIGHT_SPOT) {
+				const float rho = -(hitDirection[0] * light.direction[0] + hitDirection[1] * light.direction[1] + hitDirection[2] * light.direction[2]);
+				const float theta = light.cosHalfTheta;
+				const float phi = light.cosHalfPhi;
+				float spot = 0.0f;
+				if (rho > theta) spot = 1.0f;
+				else if (rho > phi && theta != phi) spot = std::pow((rho - phi) / (theta - phi), light.falloff);
+				attenuation *= std::clamp(spot, 0.0f, 1.0f);
+			}
+			const float diffuseFactor = std::clamp(
+				cameraNormal[0] * hitDirection[0] + cameraNormal[1] * hitDirection[1] + cameraNormal[2] * hitDirection[2], 0.0f, 1.0f) * attenuation;
+			for (int component = 0; component < 4; ++component) {
+				lightAmbient[component] += light.ambient[component] * attenuation;
+				lightDiffuse[component] += light.diffuse[component] * diffuseFactor;
+			}
+		}
+		const auto materialDiffuse = pick(setup.diffuseSource, setup.materialDiffuse);
+		const auto materialAmbient = pick(setup.ambientSource, setup.materialAmbient);
+		const auto materialEmissive = pick(setup.emissiveSource, setup.materialEmissive);
+		for (int component = 0; component < 4; ++component) {
+			output.color[component] = std::clamp(
+				materialEmissive[component] + materialAmbient[component] * (setup.globalAmbient[component] + lightAmbient[component]) +
+				materialDiffuse[component] * lightDiffuse[component], 0.0f, 1.0f);
+		}
+		output.color[3] = materialDiffuse[3];
+	}
+	std::array<std::array<float, 2>, 4> sourceUV = {};
+	for (UINT stage = 0; stage < setup.textureCount; ++stage) {
+		if (setup.uvOffset[stage] + setup.uvCoordinateCount[stage] * sizeof(float) > stride) {
+			break;
+		}
+		const float *coordinates = reinterpret_cast<const float *>(source + setup.uvOffset[stage]);
+		sourceUV[stage][0] = coordinates[0];
+		sourceUV[stage][1] = setup.uvCoordinateCount[stage] > 1 ? coordinates[1] : 0.0f;
+	}
+	for (UINT stage = 0; stage < 4; ++stage) {
+		const VertexSetup::TextureStage &textureStage = setup.stages[stage];
+		std::array<float, 4> coordinates = {};
+		if (textureStage.cameraSpacePosition) {
+			coordinates = cameraPosition;
+		} else {
+			const auto &selected = sourceUV[textureStage.coordinateIndex];
+			coordinates = { selected[0], selected[1], 0.0f, 1.0f };
+		}
+		if (textureStage.hasTransform) {
+			std::array<float, 4> transformed = {};
+			for (int column = 0; column < 4; ++column) {
+				for (int row = 0; row < 4; ++row) {
+					transformed[column] += coordinates[row] * textureStage.transform->m[row][column];
+				}
+			}
+			coordinates = transformed;
+		}
+		output.uv[stage][0] = coordinates[0];
+		output.uv[stage][1] = coordinates[1];
+	}
+	return output;
+}
+
+// In a ZHWP_VERIFY_VERTEX build every vertex is also converted by the original
+// per-vertex code and the two results are compared bit for bit.
+CanonicalVertex WebGPUD3DDevice::convertVertexChecked(const uint8_t *source, UINT stride, const VertexSetup &setup) const
+{
+	const CanonicalVertex output = convertVertex(source, stride, setup);
+#ifdef ZHWP_VERIFY_VERTEX
+	static unsigned long long checked = 0, mismatched = 0;
+	const CanonicalVertex reference = convertVertexReference(source, stride);
+	++checked;
+	if (std::memcmp(&output, &reference, sizeof(output)) != 0) {
+		++mismatched;
+		if (mismatched <= 5) {
+			fprintf(stderr, "VERTEX_MISMATCH fvf=%08x shader=%d pos=(%g %g %g %g | %g %g %g %g) color=(%g %g %g %g | %g %g %g %g)\n",
+				static_cast<unsigned>(m_vertexShader), setup.program ? 1 : 0,
+				output.position[0], output.position[1], output.position[2], output.position[3],
+				reference.position[0], reference.position[1], reference.position[2], reference.position[3],
+				output.color[0], output.color[1], output.color[2], output.color[3],
+				reference.color[0], reference.color[1], reference.color[2], reference.color[3]);
+		}
+	}
+	if ((checked & 0xfffff) == 0) fprintf(stderr, "VERTEX_VERIFY checked=%llu mismatched=%llu\n", checked, mismatched);
+#endif
+	return output;
+}
+
+#ifdef ZHWP_VERIFY_VERTEX
+CanonicalVertex WebGPUD3DDevice::convertVertexReference(const uint8_t *source, UINT stride) const
 {
 	const auto programmableShader = m_vertexShaders.find(m_vertexShader);
 	if (programmableShader != m_vertexShaders.end()) {
@@ -1767,6 +2237,8 @@ CanonicalVertex WebGPUD3DDevice::convertVertex(const uint8_t *source, UINT strid
 	return output;
 }
 
+#endif
+
 HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UINT vertexCount, UINT stride, const void *indexData, D3DFORMAT indexFormat, UINT indexCount, UINT baseVertex)
 {
 	if (!vertexData || !vertexCount || !stride || FAILED(ensurePass(0, 0, 1.0f, 0))) {
@@ -1790,6 +2262,8 @@ HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UIN
 			return D3DERR_INVALIDCALL;
 	}
 	if (!expandedCount) return D3D_OK;
+	VertexSetup vertexSetup;
+	prepareVertexSetup(vertexSetup);
 	UploadFrame &frame = m_uploadFrames[m_activeUploadFrame];
 	const size_t vertexOffset = frame.vertices.size() * sizeof(CanonicalVertex);
 	const size_t firstVertex = frame.vertices.size();
@@ -1851,14 +2325,14 @@ HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UIN
 			return D3DERR_INVALIDCALL;
 		}
 		for (UINT index = 0; index < vertexCount; ++index) {
-			frame.vertices.push_back(convertVertex(bytes + static_cast<size_t>(index) * stride, stride));
+			frame.vertices.push_back(convertVertexChecked(bytes + static_cast<size_t>(index) * stride, stride, vertexSetup));
 		}
 		vertexBytes = compactVertexBytes;
 	} else {
 		if (!expandedFits) return D3DERR_OUTOFVIDEOMEMORY;
 		auto appendVertex = [&](UINT index) {
 			if (index < baseVertex || index - baseVertex >= vertexCount) return false;
-			frame.vertices.push_back(convertVertex(bytes + static_cast<size_t>(index - baseVertex) * stride, stride));
+			frame.vertices.push_back(convertVertexChecked(bytes + static_cast<size_t>(index - baseVertex) * stride, stride, vertexSetup));
 			return true;
 		};
 		if (!forEachExpandedIndex(appendVertex)) {

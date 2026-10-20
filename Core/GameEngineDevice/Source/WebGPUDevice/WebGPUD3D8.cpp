@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <unordered_map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -414,6 +415,16 @@ struct FixedFunctionUniforms
 	Light lights[8];
 };
 static_assert(sizeof(FixedFunctionUniforms::Light) == 96, "WGSL FixedFunctionLight layout");
+
+// The per-draw block a translated vs.1.1 shader (vertex_vs) reads: the 96
+// constant registers and the viewport size for the half-pixel shift that
+// executeVertexShader applies. It shares group 1 with FixedFunctionUniforms.
+struct VertexShaderUniforms
+{
+	float constants[96][4];
+	float viewport[4];
+};
+constexpr size_t kGroup1BindingSize = std::max(sizeof(FixedFunctionUniforms), sizeof(VertexShaderUniforms));
 static_assert(offsetof(FixedFunctionUniforms, normalInverse) == 448, "WGSL FixedFunction layout");
 static_assert(offsetof(FixedFunctionUniforms, viewportWidth) == 560, "WGSL FixedFunction layout");
 static_assert(offsetof(FixedFunctionUniforms, stageFlags) == 608, "WGSL FixedFunction layout");
@@ -491,6 +502,7 @@ struct VertexShaderInstruction
 
 struct VertexShaderProgram
 {
+	DWORD handle = 0;
 	std::vector<DWORD> declaration;
 	std::vector<DWORD> function;
 	std::vector<VertexDeclarationElement> elements;
@@ -865,6 +877,7 @@ private:
 		// blocks shift offset between frames, so that buffer is written whole.
 		std::vector<uint8_t> uniformShadow;
 		size_t lastFixedFunctionOffset = SIZE_MAX;
+		size_t lastFixedFunctionSize = 0;
 		// Mirror buffers replaced while this frame's draws still read them;
 		// released once the frame's commands are done.
 		std::vector<WGPUBuffer> retiredBuffers;
@@ -883,6 +896,10 @@ private:
 	WGPUTextureView swapChainDepthView() const;
 	WGPURenderPipeline pipeline(D3DPRIMITIVETYPE type, const VertexSetup *fixedFunction = nullptr, UINT stride = 0);
 	bool canUseFixedFunctionShader(const VertexSetup &setup, UINT stride) const;
+	WGPUShaderModule vertexShaderModule(const VertexShaderProgram &program);
+	bool canUseVertexShaderProgram(const VertexSetup &setup, UINT stride);
+	bool vertexShaderUniforms(uint32_t &offset);
+	bool appendGroup1Block(const void *block, size_t size, uint32_t &offset);
 	void updateFixedFunctionChoice();
 	WGPUBuffer syncMirror(GpuBufferMirror &mirror, const uint8_t *data, size_t size, WGPUBufferUsage usage, size_t useBegin, size_t useEnd);
 	void writeMirror(GpuBufferMirror &mirror);
@@ -940,6 +957,9 @@ private:
 	DWORD m_vertexShader = D3DFVF_XYZ;
 	DWORD m_nextVertexShader = 1;
 	std::unordered_map<DWORD, VertexShaderProgram> m_vertexShaders;
+	// vertex_vs modules translated from m_vertexShaders, by handle; null when
+	// a program cannot run on the GPU and stays on executeVertexShader.
+	std::unordered_map<DWORD, WGPUShaderModule> m_vertexShaderModules;
 	std::array<std::array<float, 4>, 96> m_vertexShaderConstants = {};
 	DWORD m_pixelShader = 0;
 	DWORD m_nextPixelShader = 1;
@@ -1408,8 +1428,11 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type, const Vertex
 		(static_cast<uint64_t>(m_renderStates[D3DRS_STENCILMASK] & 0xff) << 47) |
 		(static_cast<uint64_t>(m_renderStates[D3DRS_STENCILWRITEMASK] & 0xff) << 55) |
 		(static_cast<uint64_t>(renderSampleCount() > 1) << 63);
+	// A vertex_vs pipeline is keyed by its program's handle, flagged by bit 63.
+	const VertexShaderProgram *program = fixedFunction ? fixedFunction->program : nullptr;
 	const std::pair<uint64_t, uint64_t> fixedFunctionKey = {
-		key, fixedFunction ? static_cast<uint64_t>(fixedFunction->fvf) | (static_cast<uint64_t>(stride) << 32) : 0
+		key, program ? static_cast<uint64_t>(program->handle) | (static_cast<uint64_t>(stride) << 32) | (1ull << 63)
+			: fixedFunction ? static_cast<uint64_t>(fixedFunction->fvf) | (static_cast<uint64_t>(stride) << 32) : 0
 	};
 	if (fixedFunction) {
 		const auto existing = m_fixedFunctionPipelines.find(fixedFunctionKey);
@@ -1461,10 +1484,44 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type, const Vertex
 
 	// The fixed-function shader reads the application's vertex layout directly;
 	// whatever the format lacks comes from the zero buffer in slot 1.
-	std::array<WGPUVertexAttribute, 8> rawAttributes = {};
+	std::array<WGPUVertexAttribute, 16> rawAttributes = {};
 	std::array<WGPUVertexAttribute, 8> defaultAttributes = {};
 	std::array<WGPUVertexBufferLayout, 2> rawLayouts = { WGPU_VERTEX_BUFFER_LAYOUT_INIT, WGPU_VERTEX_BUFFER_LAYOUT_INIT };
-	if (fixedFunction) {
+	WGPUShaderModule vertexModule = m_shader;
+	if (program) {
+		vertexModule = vertexShaderModule(*program);
+		if (!vertexModule) return nullptr;
+		// One attribute per input register, from the declaration's last
+		// element for it, as executeVertexShader reads them.
+		std::array<int, 16> elementOfRegister;
+		elementOfRegister.fill(-1);
+		for (size_t index = 0; index < program->elements.size(); ++index) {
+			elementOfRegister[program->elements[index].vertexRegister] = static_cast<int>(index);
+		}
+		size_t rawCount = 0;
+		for (UINT reg = 0; reg < 16 && rawCount < rawAttributes.size(); ++reg) {
+			if (elementOfRegister[reg] < 0) continue;
+			const VertexDeclarationElement &element = program->elements[elementOfRegister[reg]];
+			WGPUVertexAttribute attribute = WGPU_VERTEX_ATTRIBUTE_INIT;
+			attribute.offset = element.offset;
+			attribute.shaderLocation = reg;
+			switch (element.dataType) {
+				case D3DVSDT_FLOAT1: attribute.format = WGPUVertexFormat_Float32; break;
+				case D3DVSDT_FLOAT2: attribute.format = WGPUVertexFormat_Float32x2; break;
+				case D3DVSDT_FLOAT3: attribute.format = WGPUVertexFormat_Float32x3; break;
+				case D3DVSDT_FLOAT4: attribute.format = WGPUVertexFormat_Float32x4; break;
+				case D3DVSDT_D3DCOLOR: attribute.format = WGPUVertexFormat_Unorm8x4; break;
+				case D3DVSDT_UBYTE4: attribute.format = WGPUVertexFormat_Uint8x4; break;
+				case D3DVSDT_SHORT2: attribute.format = WGPUVertexFormat_Sint16x2; break;
+				default: attribute.format = WGPUVertexFormat_Sint16x4; break;
+			}
+			rawAttributes[rawCount++] = attribute;
+		}
+		rawLayouts[0].stepMode = WGPUVertexStepMode_Vertex;
+		rawLayouts[0].arrayStride = stride;
+		rawLayouts[0].attributeCount = rawCount;
+		rawLayouts[0].attributes = rawAttributes.data();
+	} else if (fixedFunction) {
 		size_t rawCount = 0;
 		size_t defaultCount = 0;
 		auto add = [&](bool present, UINT offset, WGPUVertexFormat format, uint32_t location) {
@@ -1531,9 +1588,9 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type, const Vertex
 	depth.stencilWriteMask = m_renderStates[D3DRS_STENCILENABLE] ? m_renderStates[D3DRS_STENCILWRITEMASK] & 0xff : 0;
 	WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
 	descriptor.layout = fixedFunction ? m_fixedFunctionPipelineLayout : m_pipelineLayout;
-	descriptor.vertex.module = m_shader;
-	descriptor.vertex.entryPoint = MakeStringView(fixedFunction ? "vertex_ff" : "vertex_main");
-	descriptor.vertex.bufferCount = fixedFunction ? rawLayouts.size() : 1;
+	descriptor.vertex.module = vertexModule;
+	descriptor.vertex.entryPoint = MakeStringView(program ? "vertex_vs" : fixedFunction ? "vertex_ff" : "vertex_main");
+	descriptor.vertex.bufferCount = program ? 1 : fixedFunction ? rawLayouts.size() : 1;
 	descriptor.vertex.buffers = fixedFunction ? rawLayouts.data() : &vertexLayout;
 	descriptor.primitive.topology = topology;
 	// GeneralsX @port Codex 04/08/2026 Match Direct3D screen-space winding after converting Y-down coordinates to WebGPU NDC.
@@ -2576,6 +2633,182 @@ void WebGPUD3DDevice::updateFixedFunctionChoice()
 
 // The GPU path covers every fixed-function draw whose vertices it can read
 // straight from the application's layout; the rest stay on convertVertex.
+// Bytes a declaration element reads from the vertex (CreateVertexShader).
+static UINT vertexElementSize(DWORD dataType)
+{
+	switch (dataType) {
+		case D3DVSDT_FLOAT1: return sizeof(float);
+		case D3DVSDT_FLOAT2: return 2 * sizeof(float);
+		case D3DVSDT_FLOAT3: return 3 * sizeof(float);
+		case D3DVSDT_FLOAT4: return 4 * sizeof(float);
+		case D3DVSDT_SHORT4: return 2 * sizeof(DWORD);
+		default: return sizeof(DWORD);
+	}
+}
+
+// Translates a vs.1.1 program into a WGSL vertex_vs entry point that does
+// what executeVertexShader does per vertex; keep the two in sync. The result
+// feeds the same VertexOutput as vertex_main does with the CPU's vertices.
+static std::string vertexShaderWgsl(const VertexShaderProgram &program)
+{
+	std::string out = R"(
+struct VertexOutput {
+    @builtin(position) @invariant position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv0: vec2<f32>,
+    @location(2) uv1: vec2<f32>,
+    @location(3) uv2: vec2<f32>,
+    @location(4) uv3: vec2<f32>,
+    @location(5) fog: f32,
+};
+struct VertexShaderConstants {
+    c: array<vec4<f32>, 96>,
+    viewport: vec4<f32>,
+};
+@group(1) @binding(0) var<uniform> vs: VertexShaderConstants;
+fn vs_const(index: i32) -> vec4<f32> {
+    if (index >= 0 && index < 96) { return vs.c[index]; }
+    return vec4<f32>(0.0);
+}
+struct VertexShaderInput {
+)";
+	std::array<int, 16> elementOfRegister;
+	elementOfRegister.fill(-1);
+	for (size_t index = 0; index < program.elements.size(); ++index) {
+		elementOfRegister[program.elements[index].vertexRegister] = static_cast<int>(index);
+	}
+	bool anyInput = false;
+	for (UINT reg = 0; reg < 16; ++reg) {
+		if (elementOfRegister[reg] < 0) continue;
+		const DWORD type = program.elements[elementOfRegister[reg]].dataType;
+		const char *wgslType = type == D3DVSDT_UBYTE4 ? "vec4<u32>"
+			: (type == D3DVSDT_SHORT2 || type == D3DVSDT_SHORT4) ? "vec4<i32>" : "vec4<f32>";
+		out += "    @location(" + std::to_string(reg) + ") v" + std::to_string(reg) + ": " + wgslType + ",\n";
+		anyInput = true;
+	}
+	if (!anyInput) out += "    @builtin(vertex_index) unused: u32,\n";
+	out += "};\n@vertex\nfn vertex_vs(input: VertexShaderInput) -> VertexOutput {\n";
+	for (UINT reg = 0; reg < 16; ++reg) {
+		std::string value = "vec4<f32>(0.0)";
+		if (elementOfRegister[reg] >= 0) {
+			const DWORD type = program.elements[elementOfRegister[reg]].dataType;
+			const std::string in = "input.v" + std::to_string(reg);
+			// D3DCOLOR is B, G, R, A in memory; executeVertexShader reads it as R, G, B, A.
+			value = type == D3DVSDT_D3DCOLOR ? in + ".zyxw"
+				: (type == D3DVSDT_UBYTE4 || type == D3DVSDT_SHORT2 || type == D3DVSDT_SHORT4) ? "vec4<f32>(" + in + ")" : in;
+		}
+		out += "    let v" + std::to_string(reg) + " = " + value + ";\n";
+	}
+	out += "    var a0 = vec4<f32>(0.0);\n";
+	for (UINT reg = 0; reg < 12; ++reg) out += "    var r" + std::to_string(reg) + " = vec4<f32>(0.0);\n";
+	out += "    var oPos = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n    var oFog = vec4<f32>(0.0);\n    var oPts = vec4<f32>(0.0);\n";
+	out += "    var oD0 = vec4<f32>(1.0);\n    var oD1 = vec4<f32>(0.0);\n";
+	for (UINT reg = 0; reg < 8; ++reg) out += "    var oT" + std::to_string(reg) + " = vec4<f32>(0.0);\n";
+
+	auto source = [](DWORD token, int constantOffset) -> std::string {
+		const DWORD type = token & D3DSP_REGTYPE_MASK;
+		const UINT index = token & 0x7ff;
+		std::string value = "vec4<f32>(0.0)";
+		if (type == D3DSPR_TEMP && index < 12) value = "r" + std::to_string(index);
+		else if (type == D3DSPR_INPUT && index < 16) value = "v" + std::to_string(index);
+		else if (type == D3DSPR_CONST) {
+			std::string constantIndex = std::to_string(index + constantOffset);
+			if (token & D3DVS_ADDRESSMODE_MASK) constantIndex += " + i32(max(0.0, floor(a0.x + 0.5)))";
+			value = "vs_const(" + constantIndex + ")";
+		} else if (type == D3DSPR_ADDR) value = "a0";
+		static const char components[] = "xyzw";
+		std::string swizzle = ".";
+		for (UINT component = 0; component < 4; ++component) {
+			swizzle += components[(token >> (D3DVS_SWIZZLE_SHIFT + component * 2)) & 3];
+		}
+		value = "(" + value + ")" + swizzle;
+		if ((token & D3DSP_SRCMOD_MASK) == D3DSPSM_NEG) value = "(-" + value + ")";
+		return value;
+	};
+	auto destination = [](DWORD token) -> std::string {
+		const DWORD type = token & D3DSP_REGTYPE_MASK;
+		const UINT index = token & 0x7ff;
+		if (type == D3DSPR_TEMP && index < 12) return "r" + std::to_string(index);
+		if (type == D3DSPR_ADDR) return "a0";
+		if (type == D3DSPR_RASTOUT && index < 3) return index == 0 ? "oPos" : index == 1 ? "oFog" : "oPts";
+		if (type == D3DSPR_ATTROUT && index < 2) return "oD" + std::to_string(index);
+		if (type == D3DSPR_TEXCRDOUT && index < 8) return "oT" + std::to_string(index);
+		return {};
+	};
+	for (const VertexShaderInstruction &instruction : program.instructions) {
+		const std::string first = source(instruction.sources[0], 0);
+		const std::string second = instruction.sourceCount > 1 ? source(instruction.sources[1], 0) : std::string();
+		const std::string third = instruction.sourceCount > 2 ? source(instruction.sources[2], 0) : std::string();
+		std::string result;
+		switch (instruction.opcode) {
+			case D3DSIO_MOV: result = first; break;
+			case D3DSIO_ADD: result = first + " + " + second; break;
+			case D3DSIO_SUB: result = first + " - " + second; break;
+			case D3DSIO_MUL: result = first + " * " + second; break;
+			case D3DSIO_MAD: result = first + " * " + second + " + " + third; break;
+			case D3DSIO_M4x4:
+				result = "vec4<f32>(";
+				for (int row = 0; row < 4; ++row) {
+					if (row) result += ", ";
+					result += "dot(" + first + ", " + source(instruction.sources[1], row) + ")";
+				}
+				result += ")";
+				break;
+			default: continue;
+		}
+		const std::string target = destination(instruction.destination);
+		if (target.empty()) continue;
+		const DWORD mask = (instruction.destination / D3DSP_WRITEMASK_0) & 15;
+		if (mask == 15) {
+			out += "    " + target + " = " + result + ";\n";
+		} else {
+			out += "    " + target + " = select(" + target + ", " + result + ", vec4<bool>(";
+			for (UINT component = 0; component < 4; ++component) {
+				out += component ? ", " : "";
+				out += (mask >> component) & 1 ? "true" : "false";
+			}
+			out += "));\n";
+		}
+	}
+	out += R"(    var output: VertexOutput;
+    output.position = vec4<f32>(oPos.x + oPos.w / vs.viewport.x, oPos.y - oPos.w / vs.viewport.y, oPos.z, oPos.w);
+    output.color = oD0;
+    output.uv0 = oT0.xy;
+    output.uv1 = oT1.xy;
+    output.uv2 = oT2.xy;
+    output.uv3 = oT3.xy;
+    output.fog = select(oFog.x, 1.0, oFog.x == 0.0);
+    return output;
+}
+)";
+	return out;
+}
+
+// A vs.1.1 draw runs as vertex_vs when every declared input lies inside the
+// vertex; executeVertexShader would skip the others, vertex fetch cannot.
+bool WebGPUD3DDevice::canUseVertexShaderProgram(const VertexSetup &setup, UINT stride)
+{
+	if (!m_gpuFixedFunction || !setup.program || stride % 4 != 0 || !stride || stride > 2048) return false;
+	for (const VertexDeclarationElement &element : setup.program->elements) {
+		if (element.vertexRegister >= 16 || element.offset + vertexElementSize(element.dataType) > stride) return false;
+	}
+	return vertexShaderModule(*setup.program) != nullptr;
+}
+
+WGPUShaderModule WebGPUD3DDevice::vertexShaderModule(const VertexShaderProgram &program)
+{
+	const auto existing = m_vertexShaderModules.find(program.handle);
+	if (existing != m_vertexShaderModules.end()) return existing->second;
+	const std::string source = vertexShaderWgsl(program);
+	WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
+	wgsl.code = MakeStringView(source.c_str());
+	WGPUShaderModuleDescriptor descriptor = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+	descriptor.nextInChain = &wgsl.chain;
+	WGPUShaderModule module = wgpuDeviceCreateShaderModule(webGPUDevice(), &descriptor);
+	m_vertexShaderModules.emplace(program.handle, module);
+	return module;
+}
+
 bool WebGPUD3DDevice::canUseFixedFunctionShader(const VertexSetup &setup, UINT stride) const
 {
 	if (!m_gpuFixedFunction || setup.program || stride % 4 != 0 || stride < 3 * sizeof(float) || stride > 2048) {
@@ -2593,7 +2826,6 @@ bool WebGPUD3DDevice::canUseFixedFunctionShader(const VertexSetup &setup, UINT s
 
 bool WebGPUD3DDevice::fixedFunctionUniforms(const VertexSetup &setup, uint32_t &offset)
 {
-	UploadFrame &frame = m_uploadFrames[m_activeUploadFrame];
 	FixedFunctionUniforms uniforms = {};
 	uniforms.world = setup.world;
 	uniforms.view = setup.view;
@@ -2662,19 +2894,37 @@ bool WebGPUD3DDevice::fixedFunctionUniforms(const VertexSetup &setup, uint32_t &
 		}
 		uniforms.stageFlags[stage] = stageFlags;
 	}
+	return appendGroup1Block(&uniforms, sizeof(uniforms), offset);
+}
+
+bool WebGPUD3DDevice::vertexShaderUniforms(uint32_t &offset)
+{
+	VertexShaderUniforms uniforms = {};
+	std::memcpy(uniforms.constants, m_vertexShaderConstants.data(), sizeof(uniforms.constants));
+	uniforms.viewport[0] = static_cast<float>(m_viewport.Width);
+	uniforms.viewport[1] = static_cast<float>(m_viewport.Height);
+	return appendGroup1Block(&uniforms, sizeof(uniforms), offset);
+}
+
+// Adds a block to this frame's group 1 uniforms and returns its offset.
+bool WebGPUD3DDevice::appendGroup1Block(const void *block, size_t size, uint32_t &offset)
+{
+	UploadFrame &frame = m_uploadFrames[m_activeUploadFrame];
 	// Consecutive draws of one object or pass often share the whole block.
-	if (frame.lastFixedFunctionOffset != SIZE_MAX
-		&& std::memcmp(frame.fixedFunction.data() + frame.lastFixedFunctionOffset, &uniforms, sizeof(uniforms)) == 0) {
+	if (frame.lastFixedFunctionOffset != SIZE_MAX && frame.lastFixedFunctionSize == size
+		&& std::memcmp(frame.fixedFunction.data() + frame.lastFixedFunctionOffset, block, size) == 0) {
 		offset = static_cast<uint32_t>(frame.lastFixedFunctionOffset);
 		return true;
 	}
 	const size_t aligned = (frame.fixedFunction.size() + kUniformOffsetAlignment - 1) & ~(kUniformOffsetAlignment - 1);
-	if (aligned + sizeof(uniforms) > kFixedFunctionUploadCapacity) {
+	// The binding always spans kGroup1BindingSize bytes from the offset.
+	if (aligned + kGroup1BindingSize > kFixedFunctionUploadCapacity) {
 		return false;
 	}
-	frame.fixedFunction.resize(aligned + sizeof(uniforms));
-	std::memcpy(frame.fixedFunction.data() + aligned, &uniforms, sizeof(uniforms));
+	frame.fixedFunction.resize(aligned + size);
+	std::memcpy(frame.fixedFunction.data() + aligned, block, size);
 	frame.lastFixedFunctionOffset = aligned;
+	frame.lastFixedFunctionSize = size;
 	offset = static_cast<uint32_t>(aligned);
 	return true;
 }
@@ -2907,7 +3157,10 @@ HRESULT WebGPUD3DDevice::drawFromMirrors(D3DPRIMITIVETYPE type, UINT count, UINT
 	if (FAILED(ensurePass(0, 0, 1.0f, 0))) return D3DERR_INVALIDCALL;
 	VertexSetup setup;
 	prepareVertexSetup(setup);
-	if (!canUseFixedFunctionShader(setup, m_vertexStride)) return S_FALSE;
+	const bool programmable = setup.program != nullptr;
+	if (programmable ? !canUseVertexShaderProgram(setup, m_vertexStride) : !canUseFixedFunctionShader(setup, m_vertexStride)) {
+		return S_FALSE;
+	}
 	const bool index32 = indexed && m_indexBuffer->format() == D3DFMT_INDEX32;
 	const size_t firstVertexUsed = indexed ? static_cast<size_t>(m_baseVertex) + minIndex : first;
 	const size_t vertexUseBegin = firstVertexUsed * m_vertexStride;
@@ -2923,7 +3176,7 @@ HRESULT WebGPUD3DDevice::drawFromMirrors(D3DPRIMITIVETYPE type, UINT count, UINT
 		if (!indexBuffer) return S_FALSE;
 	}
 	uint32_t fixedFunctionOffset = 0;
-	if (!fixedFunctionUniforms(setup, fixedFunctionOffset)) return S_FALSE;
+	if (!(programmable ? vertexShaderUniforms(fixedFunctionOffset) : fixedFunctionUniforms(setup, fixedFunctionOffset))) return S_FALSE;
 	const uint64_t vertexBytes = (static_cast<uint64_t>(m_vertexBuffer->size()) + 3) & ~static_cast<uint64_t>(3);
 	const uint64_t indexBytes = indexed ? ((static_cast<uint64_t>(m_indexBuffer->size()) + 3) & ~static_cast<uint64_t>(3)) : 0;
 	return encodeFixedFunctionDraw(type, setup, m_vertexStride, vertexBuffer, 0, vertexBytes,
@@ -3282,6 +3535,10 @@ WebGPUD3DDevice::~WebGPUD3DDevice()
 	for (const auto &[key, pipelineObject] : m_fixedFunctionPipelines) {
 		(void)key;
 		wgpuRenderPipelineRelease(pipelineObject);
+	}
+	for (const auto &[handle, module] : m_vertexShaderModules) {
+		(void)handle;
+		if (module) wgpuShaderModuleRelease(module);
 	}
 	if (m_depthViewSingle) {
 		wgpuTextureViewRelease(m_depthViewSingle);
@@ -3828,7 +4085,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 	fixedFunctionEntry.visibility = WGPUShaderStage_Vertex;
 	fixedFunctionEntry.buffer.type = WGPUBufferBindingType_Uniform;
 	fixedFunctionEntry.buffer.hasDynamicOffset = WGPU_TRUE;
-	fixedFunctionEntry.buffer.minBindingSize = sizeof(FixedFunctionUniforms);
+	fixedFunctionEntry.buffer.minBindingSize = kGroup1BindingSize;
 	WGPUBindGroupLayoutDescriptor fixedFunctionLayoutDescriptor = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
 	fixedFunctionLayoutDescriptor.entryCount = 1;
 	fixedFunctionLayoutDescriptor.entries = &fixedFunctionEntry;
@@ -3875,7 +4132,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 			WGPUBindGroupEntry fixedFunctionBinding = WGPU_BIND_GROUP_ENTRY_INIT;
 			fixedFunctionBinding.binding = 0;
 			fixedFunctionBinding.buffer = frame.fixedFunctionBuffer;
-			fixedFunctionBinding.size = sizeof(FixedFunctionUniforms);
+			fixedFunctionBinding.size = kGroup1BindingSize;
 			WGPUBindGroupDescriptor fixedFunctionGroupDescriptor = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
 			fixedFunctionGroupDescriptor.layout = m_fixedFunctionGroupLayout;
 			fixedFunctionGroupDescriptor.entryCount = 1;
@@ -4436,6 +4693,7 @@ HRESULT WebGPUD3DDevice::CreateVertexShader(const DWORD *declaration, const DWOR
 	}
 	if (!functionEnded) return D3DERR_INVALIDCALL;
 	const DWORD shaderHandle = 0x80000000u | m_nextVertexShader++;
+	program.handle = shaderHandle;
 	m_vertexShaders.emplace(shaderHandle, std::move(program));
 	*handle = shaderHandle;
 	return D3D_OK;
@@ -4452,6 +4710,11 @@ HRESULT WebGPUD3DDevice::DeleteVertexShader(DWORD handle)
 {
 	if (!m_vertexShaders.erase(handle)) return D3DERR_INVALIDCALL;
 	if (m_vertexShader == handle) m_vertexShader = D3DFVF_XYZ;
+	const auto module = m_vertexShaderModules.find(handle);
+	if (module != m_vertexShaderModules.end()) {
+		if (module->second) wgpuShaderModuleRelease(module->second);
+		m_vertexShaderModules.erase(module);
+	}
 	return D3D_OK;
 }
 

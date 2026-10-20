@@ -116,6 +116,7 @@ MiniAudioManager::MiniAudioManager() :
 	m_selectedSpeakerType(0),
 	m_lastSelectedPlaybackDevice(PROVIDER_ERROR),
 	m_binkHandle(NULL),
+	m_decodedEffectBytes(0),
 	m_pref3DProvider(AsciiString::TheEmptyString),
 	m_prefSpeaker(AsciiString::TheEmptyString)
 {
@@ -371,7 +372,9 @@ void MiniAudioManager::playAudioEvent(AudioRequest *req)
 	case AT_SoundEffect:
 		if (event->isPositionalAudio()) {
 			groupToUse = &m_sound3DGroup;
-			flags = 0; // Allow spatialization for 3D
+			// GeneralsX @performance Claude 20/10/2026 Allow spatialization for 3D, but keep pitch off: nothing sets a
+			// pitch or a velocity, so the doppler ratio is always 1 and the per-sound resampler would only filter.
+			flags = MA_SOUND_FLAG_NO_PITCH;
 		}
 		else {
 			groupToUse = &m_soundGroup;
@@ -483,6 +486,10 @@ void MiniAudioManager::playAudioEvent(AudioRequest *req)
 	audio->m_sound = sound;
 	audio->m_audioBuffer = audioBuffer;
 	#else
+	if (info->m_soundType == AT_SoundEffect) {
+		flags |= holdDecodedEffect(fileToPlay);
+	}
+
 	ma_sound *sound = (ma_sound *)malloc(sizeof(ma_sound));
 	ma_result result = ma_sound_init_from_file(&m_engine, fileToPlay.str(), flags, groupToUse, NULL, sound);
 	if (result != MA_SUCCESS) {
@@ -844,6 +851,12 @@ void MiniAudioManager::openDevice(void)
 	resourceManagerConfig.jobThreadCount = 0;
 	resourceManagerConfig.flags |= MA_RESOURCE_MANAGER_FLAG_NO_THREADING | MA_RESOURCE_MANAGER_FLAG_NON_BLOCKING;
 #endif
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @performance Claude 20/10/2026 Decode at the engine rate (see engineConfig.sampleRate below), so a
+	// cached effect (holdDecodedEffect) is resampled once when it is decoded instead of on every play.
+	resourceManagerConfig.decodedFormat = ma_format_s16;
+	resourceManagerConfig.decodedSampleRate = 44100;
+#endif
 	result = ma_resource_manager_init(&resourceManagerConfig, &m_resourceManager);
 	fprintf(stderr, "AUDIO: ma_resource_manager_init -> %d\n", result);
 	if (result != MA_SUCCESS) {
@@ -884,6 +897,13 @@ void MiniAudioManager::openDevice(void)
 
 	engineConfig = ma_engine_config_init();
 	engineConfig.pResourceManager = &m_resourceManager;
+#if defined(__EMSCRIPTEN__)
+	// GeneralsX @performance Claude 20/10/2026 The browser device mixes on the main thread (ScriptProcessorNode),
+	// and at the AudioContext's default 48 kHz every sound went through miniaudio's linear resampler. Music and
+	// speech are 44.1 kHz, so mix at 44.1 kHz: miniaudio asks the AudioContext for that rate and the browser
+	// converts to the hardware rate on its audio thread. 22.05 kHz effects still resample, at an exact 2:1.
+	engineConfig.sampleRate = 44100;
+#endif
 
 	result = ma_engine_init(&engineConfig, &m_engine);
 	if (result != MA_SUCCESS) {
@@ -892,10 +912,11 @@ void MiniAudioManager::openDevice(void)
 		return;
 	}
 
-	ma_sound_group_init(&m_engine, 0, NULL, &m_musicGroup);
-	ma_sound_group_init(&m_engine, 0, NULL, &m_soundGroup);
-	ma_sound_group_init(&m_engine, 0, NULL, &m_sound3DGroup);
-	ma_sound_group_init(&m_engine, 0, NULL, &m_speechGroup);
+	// No pitch on the groups either: their resampler would only run at 1:1 (nothing sets a group pitch).
+	ma_sound_group_init(&m_engine, MA_SOUND_FLAG_NO_PITCH, NULL, &m_musicGroup);
+	ma_sound_group_init(&m_engine, MA_SOUND_FLAG_NO_PITCH, NULL, &m_soundGroup);
+	ma_sound_group_init(&m_engine, MA_SOUND_FLAG_NO_PITCH, NULL, &m_sound3DGroup);
+	ma_sound_group_init(&m_engine, MA_SOUND_FLAG_NO_PITCH, NULL, &m_speechGroup);
 
 	fprintf(stderr, "AUDIO: MiniAudio backend loaded - version %s, device: %s, playback devices: %d\n",
 		ma_version_string(),
@@ -918,6 +939,7 @@ void MiniAudioManager::closeDevice(void)
 	ma_sound_group_uninit(&m_soundGroup);
 	ma_sound_group_uninit(&m_musicGroup);
 	ma_engine_uninit(&m_engine);
+	releaseDecodedEffects();
 	ma_resource_manager_uninit(&m_resourceManager);
 	ma_context_uninit(&m_context);
 	ma_log_uninit(&m_log);
@@ -1433,7 +1455,8 @@ Bool MiniAudioManager::startNextLoop(PlayingAudio *looping)
 
 	AsciiString fileToPlay = looping->m_audioEventRTS->getFilename();
 	ma_uint32 flags = MA_SOUND_FLAG_NO_SPATIALIZATION | MA_SOUND_FLAG_NO_PITCH;
-	if (looping->m_type == PAT_3DSample) flags = 0;
+	if (looping->m_type == PAT_3DSample) flags = MA_SOUND_FLAG_NO_PITCH; // 3D: spatialized, no doppler (see playAudioEvent)
+	flags |= holdDecodedEffect(fileToPlay);
 
 	ma_result result = ma_sound_init_from_file(&m_engine, fileToPlay.str(), flags,
 		(looping->m_type == PAT_3DSample) ? &m_sound3DGroup : &m_soundGroup,
@@ -1446,6 +1469,69 @@ Bool MiniAudioManager::startNextLoop(PlayingAudio *looping)
 		return true;
 	}
 	return false;
+}
+
+//-------------------------------------------------------------------------------------------------
+// GeneralsX @performance Claude 20/10/2026 Sound effects are short and replay constantly (weapons, impacts), and
+// miniaudio decoded the MP3 and resampled it on the main thread every time one played. Like the Miles backend's
+// AudioFileCache, keep recently played effects decoded: this list holds a reference to each one's decoded buffer, and
+// a sound opened with MA_SOUND_FLAG_DECODE on the same file shares it. The budget is the game's
+// AudioFootprintInBytes, doubled because the buffers hold 44.1 kHz samples and most effects are 22.05 kHz.
+// Music and speech stream as before.
+ma_uint32 MiniAudioManager::holdDecodedEffect(const AsciiString &fileName)
+{
+#if defined(__EMSCRIPTEN__)
+	for (std::list<DecodedEffect>::iterator it = m_decodedEffects.begin(); it != m_decodedEffects.end(); ++it) {
+		if (it->m_fileName == fileName) {
+			m_decodedEffects.splice(m_decodedEffects.begin(), m_decodedEffects, it);
+			return MA_SOUND_FLAG_DECODE;
+		}
+	}
+
+	ma_resource_manager_data_source *dataSource = (ma_resource_manager_data_source *)malloc(sizeof(ma_resource_manager_data_source));
+	if (ma_resource_manager_data_source_init(&m_resourceManager, fileName.str(), MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE,
+			NULL, dataSource) != MA_SUCCESS) {
+		free(dataSource);
+		return 0;
+	}
+
+	ma_format format = ma_format_unknown;
+	ma_uint32 channels = 0;
+	ma_uint64 frames = 0;
+	ma_resource_manager_data_source_get_data_format(dataSource, &format, &channels, NULL, NULL, 0);
+	ma_resource_manager_data_source_get_length_in_pcm_frames(dataSource, &frames);
+
+	DecodedEffect effect;
+	effect.m_fileName = fileName;
+	effect.m_dataSource = dataSource;
+	effect.m_bytes = (size_t)frames * ma_get_bytes_per_frame(format, channels);
+	m_decodedEffects.push_front(effect);
+	m_decodedEffectBytes += effect.m_bytes;
+
+	const size_t budget = 2 * (size_t)getAudioSettings()->m_maxCacheSize;
+	while (m_decodedEffectBytes > budget && m_decodedEffects.size() > 1) {
+		DecodedEffect &oldest = m_decodedEffects.back();
+		// Sounds still playing it keep their own reference to the decoded buffer.
+		ma_resource_manager_data_source_uninit(oldest.m_dataSource);
+		free(oldest.m_dataSource);
+		m_decodedEffectBytes -= oldest.m_bytes;
+		m_decodedEffects.pop_back();
+	}
+	return MA_SOUND_FLAG_DECODE;
+#else
+	return 0;
+#endif
+}
+
+//-------------------------------------------------------------------------------------------------
+void MiniAudioManager::releaseDecodedEffects(void)
+{
+	for (std::list<DecodedEffect>::iterator it = m_decodedEffects.begin(); it != m_decodedEffects.end(); ++it) {
+		ma_resource_manager_data_source_uninit(it->m_dataSource);
+		free(it->m_dataSource);
+	}
+	m_decodedEffects.clear();
+	m_decodedEffectBytes = 0;
 }
 
 //-------------------------------------------------------------------------------------------------

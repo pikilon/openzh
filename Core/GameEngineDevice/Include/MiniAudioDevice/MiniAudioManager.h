@@ -188,6 +188,10 @@ protected:
 
 	void stopAllSpeech(void);
 
+	// Decoded sound-effect cache (the Miles AudioFileCache's role): returns the extra ma_sound flags for an effect.
+	ma_uint32 holdDecodedEffect(const AsciiString &fileName);
+	void releaseDecodedEffects(void);
+
 protected:
 	ma_device_info* m_playbackDevices;
 	ma_uint32 m_playbackDeviceCount;
@@ -206,6 +210,15 @@ protected:
 	ma_sound_group m_soundGroup;
 	ma_sound_group m_sound3DGroup;
 	ma_sound_group m_speechGroup;
+
+	struct DecodedEffect
+	{
+		AsciiString m_fileName;
+		ma_resource_manager_data_source *m_dataSource;
+		size_t m_bytes;
+	};
+	std::list<DecodedEffect> m_decodedEffects;	// most recently played first
+	size_t m_decodedEffectBytes;
 
 	// Currently Playing stuff. Useful if we have to preempt it.
 	// This should rarely if ever happen, as we mirror this in Sounds, and attempt to

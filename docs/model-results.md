@@ -134,3 +134,5 @@ Before D-05 the lead agent wrote all tests, so there are no test-writing rows ye
 | 2026-10-19 | #187/#188/#189/#190/#191/#192 | verify | deepseek-flash (dsh) | ok | ~3 min | full synthetic suite 377 pass, 18 skipped; real data lite-mp3: main menu, WebGPU (#184 attachments), audio, fonts, textures and 1080p resolution pass; main menu screenshot drawn, no black canvas |
 
 | 2026-10-19 | #186-#192 | publish+verify | deepseek-flash (dsh) | ok | ~3 min | gh-pages 108173de2 includes the save-path fix; live https://openzh.pikilon.com/ is cross-origin isolated, imports the lite-mp3 ZIPs, reaches the main menu with no WebGPU/sample-mismatch/InvalidCommandBuffer lines, no page errors, manifest and #donate present |
+
+| 2026-10-20 | #194 | tests+code | deepseek-flash (dsh) | ok | ~20 min | 3 new tests fail on HEAD (70 % size, game menu in the column, fullscreen exit); 19 pass after moving #game-menu, scaling the column and wiring the exit; 52 affected tests pass |

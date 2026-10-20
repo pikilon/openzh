@@ -1610,6 +1610,30 @@
         "web/src/main.ts"
       ],
       "summary": "#donate is the fourth top-bar icon button and opens a modal with the three PayPal tips, the Red Line suggestion-in-the-message convention and the issue tracker."
+    },
+    {
+      "issue": 194,
+      "title": "Touch controls: a 70% left column with the game menu and the fullscreen exit",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/194-touch-column.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/touch-controls.spec.ts tests/launcher-topbar-game.spec.ts",
+      "test_paths": [
+        "web/tests/touch-controls.spec.ts",
+        "web/tests/launcher-topbar-game.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/shell.css",
+        "web/src/main.ts",
+        "docs/specs/touch-controls.md"
+      ],
+      "summary": "The left touch column renders at 70% of its 56x54 base, the game menu moves from the top bar into it, and a fullscreen-exit button appears at its end only while #screen is fullscreen."
     }
   ]
 }

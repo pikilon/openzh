@@ -522,7 +522,21 @@ struct GpuBufferMirror
 	size_t pendingEnd = 0;
 	const uint8_t *source = nullptr;
 	size_t sourceSize = 0;
+	// What the GPU buffer holds once the queued writes land, kept for buffers
+	// the game rewrites every frame so writeMirror sends only changed blocks.
+	// Empty while unknown; a buffer that replaced a DISCARDed one never gets
+	// one, since only the bytes written since then are known.
+	std::vector<uint8_t> shadow;
+	bool renamed = false;
+	uint64_t lastWriteFrame = UINT64_MAX;
+	unsigned writeFrames = 0;
 
+	// Whether a Lock of [begin, end) may change bytes still waiting to be
+	// written, counting the 4-byte rounding writeMirror applies.
+	bool pendingOverlaps(size_t begin, size_t end) const
+	{
+		return pending && begin < ((pendingEnd + 3) & ~static_cast<size_t>(3)) && end > (pendingBegin & ~static_cast<size_t>(3));
+	}
 	void markDirty(size_t begin, size_t end, DWORD flags)
 	{
 		dirtyBegin = dirty ? std::min(dirtyBegin, begin) : begin;
@@ -847,6 +861,9 @@ private:
 		std::vector<uint8_t> uniforms;
 		std::vector<uint8_t> rawVertices;
 		std::vector<uint8_t> fixedFunction;
+		// What uniformBuffer holds from the frame's last use. The fixed-function
+		// blocks shift offset between frames, so that buffer is written whole.
+		std::vector<uint8_t> uniformShadow;
 		size_t lastFixedFunctionOffset = SIZE_MAX;
 		// Mirror buffers replaced while this frame's draws still read them;
 		// released once the frame's commands are done.
@@ -869,6 +886,11 @@ private:
 	void updateFixedFunctionChoice();
 	WGPUBuffer syncMirror(GpuBufferMirror &mirror, const uint8_t *data, size_t size, WGPUBufferUsage usage, size_t useBegin, size_t useEnd);
 	void writeMirror(GpuBufferMirror &mirror);
+	void writeMirrorRange(GpuBufferMirror &mirror, size_t begin, size_t end);
+	static bool sameBytes(const uint8_t *shadow, const uint8_t *source, size_t size, size_t begin, size_t end);
+	template <typename Write>
+	static void forEachChangedRun(const uint8_t *shadow, const uint8_t *source, size_t size, size_t begin, size_t end, Write write);
+	void writeUpload(WGPUBuffer buffer, const uint8_t *bytes, size_t size, std::vector<uint8_t> &shadow);
 	void flushMirrors();
 public:
 	void flushMirror(GpuBufferMirror &mirror);
@@ -1261,6 +1283,7 @@ void WebGPUD3DDevice::releaseUploadFrame(UploadFrame &frame)
 		wgpuBufferRelease(frame.indexBuffer);
 		frame.indexBuffer = nullptr;
 	}
+	std::vector<uint8_t>().swap(frame.uniformShadow);
 	if (frame.uniformBuffer) {
 		wgpuBufferRelease(frame.uniformBuffer);
 		frame.uniformBuffer = nullptr;
@@ -2693,9 +2716,16 @@ WGPUBuffer WebGPUD3DDevice::syncMirror(GpuBufferMirror &mirror, const uint8_t *d
 			m_uploadFrames[m_activeUploadFrame].retiredBuffers.push_back(mirror.buffer);
 			mirror.buffer = renamed;
 			mirror.usedFrame = UINT64_MAX;
+			mirror.renamed = true;
+			std::vector<uint8_t>().swap(mirror.shadow);
 		}
 		const size_t begin = std::min(dirtyBegin, size);
 		const size_t end = std::min(dirtyEnd, size);
+		// Pending bytes grow only by touching ranges: bytes in a gap may
+		// already have changed after an earlier draw of this frame read them.
+		if (end > begin && mirror.pending && (begin > mirror.pendingEnd || end < mirror.pendingBegin)) {
+			writeMirror(mirror);
+		}
 		if (end > begin) {
 			if (!mirror.pending) {
 				mirror.pending = true;
@@ -2731,19 +2761,106 @@ void WebGPUD3DDevice::writeMirror(GpuBufferMirror &mirror)
 	const size_t begin = std::min(mirror.pendingBegin, size) & ~static_cast<size_t>(3);
 	const size_t end = std::min(padded, (std::min(mirror.pendingEnd, size) + 3) & ~static_cast<size_t>(3));
 	if (end <= begin) return;
-	if (end <= size) {
-		wgpuQueueWriteBuffer(webGPUQueue(), mirror.buffer, begin, mirror.source + begin, end - begin);
-	} else {
-		std::vector<uint8_t> tail(end - begin, 0);
-		std::memcpy(tail.data(), mirror.source + begin, size - begin);
-		wgpuQueueWriteBuffer(webGPUQueue(), mirror.buffer, begin, tail.data(), tail.size());
+	if (mirror.lastWriteFrame != m_frameSerial) {
+		mirror.lastWriteFrame = m_frameSerial;
+		++mirror.writeFrames;
 	}
+	if (mirror.shadow.size() != padded) {
+		writeMirrorRange(mirror, begin, end);
+		return;
+	}
+	forEachChangedRun(mirror.shadow.data(), mirror.source, size, begin, end,
+		[&](size_t runBegin, size_t runEnd) { writeMirrorRange(mirror, runBegin, runEnd); });
+}
+
+// Calls write(begin, end) for the runs of 256-byte blocks of [begin, end)
+// whose source bytes differ from the shadow's, joined across short unchanged
+// gaps (rewriting bytes the buffer already holds is harmless).
+template <typename Write>
+void WebGPUD3DDevice::forEachChangedRun(const uint8_t *shadow, const uint8_t *source, size_t size, size_t begin, size_t end, Write write)
+{
+	constexpr size_t kBlock = 256;
+	constexpr size_t kJoinGap = 1024;
+	size_t runBegin = SIZE_MAX;
+	size_t runEnd = 0;
+	for (size_t block = begin; block < end; block += kBlock) {
+		const size_t blockEnd = std::min(block + kBlock, end);
+		if (sameBytes(shadow + block, source, size, block, blockEnd)) continue;
+		if (runBegin != SIZE_MAX && block - runEnd >= kJoinGap) {
+			write(runBegin, runEnd);
+			runBegin = SIZE_MAX;
+		}
+		if (runBegin == SIZE_MAX) runBegin = block;
+		runEnd = blockEnd;
+	}
+	if (runBegin != SIZE_MAX) write(runBegin, runEnd);
+}
+
+// Writes bytes [0, size) of an upload frame's buffer, skipping the blocks
+// that still hold the same bytes from the frame's previous use: the frame is
+// reused only after the GPU finished with it (prepareUploadFrame).
+void WebGPUD3DDevice::writeUpload(WGPUBuffer buffer, const uint8_t *bytes, size_t size, std::vector<uint8_t> &shadow)
+{
+	const size_t known = std::min(shadow.size(), size);
+	if (shadow.size() < size) shadow.resize(size);
+	auto write = [&](size_t begin, size_t end) {
+		wgpuQueueWriteBuffer(webGPUQueue(), buffer, begin, bytes + begin, end - begin);
+		std::memcpy(shadow.data() + begin, bytes + begin, end - begin);
+	};
+	forEachChangedRun(shadow.data(), bytes, size, 0, known, write);
+	if (size > known) write(known, size);
+}
+
+// Whether shadow bytes [begin, end) equal the source's, the source read as
+// zero past its size (the padding writeMirrorRange adds).
+bool WebGPUD3DDevice::sameBytes(const uint8_t *shadow, const uint8_t *source, size_t size, size_t begin, size_t end)
+{
+	if (end > size) {
+		for (size_t i = begin; i < end; ++i) {
+			if (shadow[i - begin] != (i < size ? source[i] : 0)) return false;
+		}
+		return true;
+	}
+	const uint8_t *a = shadow;
+	const uint8_t *b = source + begin;
+	size_t n = end - begin;
+	for (; n >= 8; n -= 8, a += 8, b += 8) {
+		uint64_t x, y;
+		std::memcpy(&x, a, 8);
+		std::memcpy(&y, b, 8);
+		if (x != y) return false;
+	}
+	return std::memcmp(a, b, n) == 0;
+}
+
+// Queues a write of mirror bytes [begin, end) (4-byte aligned, zero past the
+// source's size) and records it in the shadow, if the mirror keeps one.
+void WebGPUD3DDevice::writeMirrorRange(GpuBufferMirror &mirror, size_t begin, size_t end)
+{
+	const size_t size = mirror.sourceSize;
+	const uint8_t *bytes = mirror.source + begin;
+	std::vector<uint8_t> tail;
+	if (end > size) {
+		tail.assign(end - begin, 0);
+		std::memcpy(tail.data(), mirror.source + begin, size - begin);
+		bytes = tail.data();
+	}
+	wgpuQueueWriteBuffer(webGPUQueue(), mirror.buffer, begin, bytes, end - begin);
+	if (!mirror.shadow.empty()) std::memcpy(mirror.shadow.data() + begin, bytes, end - begin);
 }
 
 void WebGPUD3DDevice::flushMirrors()
 {
 	while (!m_pendingMirrors.empty()) {
-		writeMirror(*m_pendingMirrors.back());
+		GpuBufferMirror &mirror = *m_pendingMirrors.back();
+		writeMirror(mirror);
+		// With nothing left dirty, the buffer will hold exactly the source's
+		// bytes. A buffer written in several frames starts a shadow here.
+		if (mirror.shadow.empty() && !mirror.dirty && !mirror.renamed && mirror.writeFrames >= 3) {
+			const size_t padded = (mirror.sourceSize + 3) & ~static_cast<size_t>(3);
+			mirror.shadow.assign(padded, 0);
+			std::memcpy(mirror.shadow.data(), mirror.source, mirror.sourceSize);
+		}
 	}
 }
 
@@ -3898,7 +4015,7 @@ HRESULT WebGPUD3DDevice::Present(const RECT *, const RECT *, HWND, const RGNDATA
 		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.indexBuffer, 0, uploadFrame.indices.data(), uploadFrame.indices.size() * sizeof(uint32_t));
 	}
 	if (!uploadFrame.uniforms.empty()) {
-		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.uniformBuffer, 0, uploadFrame.uniforms.data(), uploadFrame.uniforms.size());
+		writeUpload(uploadFrame.uniformBuffer, uploadFrame.uniforms.data(), uploadFrame.uniforms.size(), uploadFrame.uniformShadow);
 	}
 	if (!uploadFrame.rawVertices.empty()) {
 		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.rawVertexBuffer, 0, uploadFrame.rawVertices.data(), uploadFrame.rawVertices.size());
@@ -4618,8 +4735,9 @@ HRESULT WebGPUVertexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD flag
 		return D3DERR_INVALIDCALL;
 	}
 	*data = m_data.data() + offset;
-	if (m_mirror.pending) m_device->flushMirror(m_mirror);
-	m_mirror.markDirty(offset, size ? static_cast<size_t>(offset) + size : m_data.size(), flags);
+	const size_t end = size ? static_cast<size_t>(offset) + size : m_data.size();
+	if (m_mirror.pendingOverlaps(offset, end)) m_device->flushMirror(m_mirror);
+	m_mirror.markDirty(offset, end, flags);
 	return D3D_OK;
 }
 
@@ -4689,8 +4807,9 @@ HRESULT WebGPUIndexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD flags
 		return D3DERR_INVALIDCALL;
 	}
 	*data = m_data.data() + offset;
-	if (m_mirror.pending) m_device->flushMirror(m_mirror);
-	m_mirror.markDirty(offset, size ? static_cast<size_t>(offset) + size : m_data.size(), flags);
+	const size_t end = size ? static_cast<size_t>(offset) + size : m_data.size();
+	if (m_mirror.pendingOverlaps(offset, end)) m_device->flushMirror(m_mirror);
+	m_mirror.markDirty(offset, end, flags);
 	return D3D_OK;
 }
 

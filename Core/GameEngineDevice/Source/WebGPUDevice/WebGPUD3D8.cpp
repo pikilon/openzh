@@ -29,6 +29,8 @@ constexpr size_t kVertexUploadCapacity = 32 * 1024 * 1024;
 constexpr size_t kIndexUploadCapacity = 4 * 1024 * 1024;
 constexpr size_t kUniformUploadCapacity = 2 * 1024 * 1024;
 constexpr size_t kUniformOffsetAlignment = 256;
+constexpr size_t kRawVertexUploadCapacity = 32 * 1024 * 1024;
+constexpr size_t kFixedFunctionUploadCapacity = 8 * 1024 * 1024;
 
 WGPUStringView MakeStringView(const char *value)
 {
@@ -306,6 +308,7 @@ struct VertexSetup
 	};
 
 	const VertexShaderProgram *program;
+	DWORD fvf;
 	bool rhw;
 	DWORD positionType;
 	D3DMATRIX world;
@@ -347,6 +350,76 @@ struct VertexSetup
 	UINT uvCoordinateCount[4];
 	TextureStage stages[4];
 };
+
+// The per-draw block the fixed-function vertex shader (vertex_ff) reads; it is
+// a VertexSetup packed in the WGSL uniform layout. Matrices keep the Direct3D
+// row-major memory, so WGSL's column-major view of them computes v * M as M * v.
+struct FixedFunctionUniforms
+{
+	struct Light
+	{
+		float position[4];
+		float direction[4];
+		float ambient[4];
+		float diffuse[4];
+		float range;
+		float attenuation0;
+		float attenuation1;
+		float attenuation2;
+		float falloff;
+		float cosHalfTheta;
+		float cosHalfPhi;
+		uint32_t type;
+	};
+	enum : uint32_t {
+		kHasNormal = 1u << 0,
+		kNormalInvertible = 1u << 1,
+		kNormalizeNormals = 1u << 2,
+		kFogEnabled = 1u << 3,
+		kFogRange = 1u << 4,
+		kHasDiffuse = 1u << 5,
+		kHasSpecular = 1u << 6,
+		kFogFromSpecular = 1u << 7,
+		kLighting = 1u << 8,
+		kPretransformed = 1u << 9,
+	};
+	enum : uint32_t {
+		kStageCameraSpacePosition = 1u << 0,
+		kStageHasTransform = 1u << 1,
+		kStageCoordinateShift = 8,
+	};
+	D3DMATRIX world;
+	D3DMATRIX view;
+	D3DMATRIX projection;
+	D3DMATRIX textureTransform[4];
+	float normalInverse[3][4];
+	float materialDiffuse[4];
+	float materialAmbient[4];
+	float materialEmissive[4];
+	float globalAmbient[4];
+	float viewportWidth;
+	float viewportHeight;
+	float fogDensity;
+	float fogStart;
+	float fogEnd;
+	uint32_t flags;
+	uint32_t fogMode;
+	uint32_t lightCount;
+	uint32_t diffuseSource;
+	uint32_t ambientSource;
+	uint32_t emissiveSource;
+	uint32_t padding;
+	uint32_t stageFlags[4];
+	float viewportOrigin[4];
+	Light lights[8];
+};
+static_assert(sizeof(FixedFunctionUniforms::Light) == 96, "WGSL FixedFunctionLight layout");
+static_assert(offsetof(FixedFunctionUniforms, normalInverse) == 448, "WGSL FixedFunction layout");
+static_assert(offsetof(FixedFunctionUniforms, viewportWidth) == 560, "WGSL FixedFunction layout");
+static_assert(offsetof(FixedFunctionUniforms, stageFlags) == 608, "WGSL FixedFunction layout");
+static_assert(offsetof(FixedFunctionUniforms, viewportOrigin) == 624, "WGSL FixedFunction layout");
+static_assert(offsetof(FixedFunctionUniforms, lights) == 640, "WGSL FixedFunction layout");
+static_assert(sizeof(FixedFunctionUniforms) == 1408, "WGSL FixedFunction layout");
 
 struct TextureCombinerUniforms
 {
@@ -427,6 +500,42 @@ struct VertexShaderProgram
 class WebGPUD3DDevice;
 class WebGPUTexture;
 
+// A GPU copy of a vertex or index buffer, so draws read geometry without a
+// per-draw copy. Lock marks the bytes it hands out as dirty, with the lock
+// flags; WebGPUD3DDevice::syncMirror uploads them before the next draw.
+struct GpuBufferMirror
+{
+	WGPUBuffer buffer = nullptr;
+	bool dirty = true;
+	// A D3DLOCK_DISCARD lock dropped the old contents.
+	bool discarded = false;
+	size_t dirtyBegin = 0;
+	size_t dirtyEnd = SIZE_MAX;
+	// The frame whose draws read the buffer, and the bytes they read.
+	uint64_t usedFrame = UINT64_MAX;
+	size_t usedBegin = 0;
+	size_t usedEnd = 0;
+	// Bytes synced for this frame's draws but not written yet: syncMirror
+	// gathers them so one queue write per buffer goes out before the submit.
+	bool pending = false;
+	size_t pendingBegin = 0;
+	size_t pendingEnd = 0;
+	const uint8_t *source = nullptr;
+	size_t sourceSize = 0;
+
+	void markDirty(size_t begin, size_t end, DWORD flags)
+	{
+		dirtyBegin = dirty ? std::min(dirtyBegin, begin) : begin;
+		dirtyEnd = dirty ? std::max(dirtyEnd, end) : end;
+		discarded = (dirty && discarded) || (flags & D3DLOCK_DISCARD) != 0;
+		dirty = true;
+	}
+	~GpuBufferMirror()
+	{
+		if (buffer) wgpuBufferRelease(buffer);
+	}
+};
+
 class WebGPUVertexBuffer final : public IDirect3DVertexBuffer8
 {
 public:
@@ -444,15 +553,17 @@ public:
 	DWORD STDMETHODCALLTYPE GetPriority() override { return m_priority; }
 	void STDMETHODCALLTYPE PreLoad() override {}
 	D3DRESOURCETYPE STDMETHODCALLTYPE GetType() override { return D3DRTYPE_VERTEXBUFFER; }
-	HRESULT STDMETHODCALLTYPE Lock(UINT offset, UINT size, BYTE **data, DWORD) override;
+	HRESULT STDMETHODCALLTYPE Lock(UINT offset, UINT size, BYTE **data, DWORD flags) override;
 	HRESULT STDMETHODCALLTYPE Unlock() override { return D3D_OK; }
 	HRESULT STDMETHODCALLTYPE GetDesc(D3DVERTEXBUFFER_DESC *desc) override;
 
 	const uint8_t *data() const { return m_data.data(); }
 	UINT size() const { return static_cast<UINT>(m_data.size()); }
 	DWORD fvf() const { return m_fvf; }
+	GpuBufferMirror &mirror() { return m_mirror; }
 
 private:
+	GpuBufferMirror m_mirror;
 	ULONG m_refs = 1;
 	WebGPUD3DDevice *m_device;
 	std::vector<uint8_t> m_data;
@@ -479,15 +590,17 @@ public:
 	DWORD STDMETHODCALLTYPE GetPriority() override { return m_priority; }
 	void STDMETHODCALLTYPE PreLoad() override {}
 	D3DRESOURCETYPE STDMETHODCALLTYPE GetType() override { return D3DRTYPE_INDEXBUFFER; }
-	HRESULT STDMETHODCALLTYPE Lock(UINT offset, UINT size, BYTE **data, DWORD) override;
+	HRESULT STDMETHODCALLTYPE Lock(UINT offset, UINT size, BYTE **data, DWORD flags) override;
 	HRESULT STDMETHODCALLTYPE Unlock() override { return D3D_OK; }
 	HRESULT STDMETHODCALLTYPE GetDesc(D3DINDEXBUFFER_DESC *desc) override;
 
 	const uint8_t *data() const { return m_data.data(); }
 	UINT size() const { return static_cast<UINT>(m_data.size()); }
 	D3DFORMAT format() const { return m_format; }
+	GpuBufferMirror &mirror() { return m_mirror; }
 
 private:
+	GpuBufferMirror m_mirror;
 	ULONG m_refs = 1;
 	WebGPUD3DDevice *m_device;
 	std::vector<uint8_t> m_data;
@@ -726,9 +839,18 @@ private:
 		WGPUBuffer vertexBuffer = nullptr;
 		WGPUBuffer indexBuffer = nullptr;
 		WGPUBuffer uniformBuffer = nullptr;
+		WGPUBuffer rawVertexBuffer = nullptr;
+		WGPUBuffer fixedFunctionBuffer = nullptr;
+		WGPUBindGroup fixedFunctionGroup = nullptr;
 		std::vector<CanonicalVertex> vertices;
 		std::vector<uint32_t> indices;
 		std::vector<uint8_t> uniforms;
+		std::vector<uint8_t> rawVertices;
+		std::vector<uint8_t> fixedFunction;
+		size_t lastFixedFunctionOffset = SIZE_MAX;
+		// Mirror buffers replaced while this frame's draws still read them;
+		// released once the frame's commands are done.
+		std::vector<WGPUBuffer> retiredBuffers;
 		std::map<std::array<uintptr_t, 8>, WGPUBindGroup> bindGroups;
 		bool busy = false;
 	};
@@ -742,7 +864,21 @@ private:
 	void createDepthBuffer();
 	uint32_t renderSampleCount() const;
 	WGPUTextureView swapChainDepthView() const;
-	WGPURenderPipeline pipeline(D3DPRIMITIVETYPE type);
+	WGPURenderPipeline pipeline(D3DPRIMITIVETYPE type, const VertexSetup *fixedFunction = nullptr, UINT stride = 0);
+	bool canUseFixedFunctionShader(const VertexSetup &setup, UINT stride) const;
+	void updateFixedFunctionChoice();
+	WGPUBuffer syncMirror(GpuBufferMirror &mirror, const uint8_t *data, size_t size, WGPUBufferUsage usage, size_t useBegin, size_t useEnd);
+	void writeMirror(GpuBufferMirror &mirror);
+	void flushMirrors();
+public:
+	void flushMirror(GpuBufferMirror &mirror);
+private:
+	HRESULT encodeFixedFunctionDraw(D3DPRIMITIVETYPE type, const VertexSetup &setup, UINT stride,
+		WGPUBuffer vertexBuffer, uint64_t vertexOffset, uint64_t vertexBytes,
+		WGPUBuffer indexBuffer, WGPUIndexFormat indexFormat, uint64_t indexOffset, uint64_t indexBytes,
+		uint32_t count, uint32_t firstIndex, int32_t baseVertex, uint32_t firstVertex, uint32_t fixedFunctionOffset);
+	HRESULT drawFromMirrors(D3DPRIMITIVETYPE type, UINT count, UINT first, bool indexed, UINT minIndex = 0, UINT vertexCount = 0);
+	bool fixedFunctionUniforms(const VertexSetup &setup, uint32_t &offset);
 	DrawBindings bindGroup();
 	WGPUSampler sampler(UINT stage);
 	WGPUTextureFormat colorTargetFormat() const;
@@ -793,6 +929,18 @@ private:
 	WGPUShaderModule m_shader = nullptr;
 	WGPUBindGroupLayout m_bindGroupLayout = nullptr;
 	WGPUPipelineLayout m_pipelineLayout = nullptr;
+	// GPU fixed-function transform and lighting (vertex_ff): group 1 holds the
+	// per-draw FixedFunctionUniforms, vertex slot 1 a zero buffer that feeds the
+	// attributes the vertex format lacks.
+	WGPUBindGroupLayout m_fixedFunctionGroupLayout = nullptr;
+	WGPUPipelineLayout m_fixedFunctionPipelineLayout = nullptr;
+	WGPUBuffer m_defaultAttributes = nullptr;
+	std::map<std::pair<uint64_t, uint64_t>, WGPURenderPipeline> m_fixedFunctionPipelines;
+	bool m_gpuFixedFunctionReady = false;
+	bool m_gpuFixedFunction = false;
+	bool m_fixedFunctionChoiceLogged = false;
+	uint64_t m_frameSerial = 0;
+	std::vector<GpuBufferMirror *> m_pendingMirrors;
 	std::unordered_map<uint64_t, WGPUSampler> m_samplers;
 	WGPUTexture m_whiteTexture = nullptr;
 	WGPUTextureView m_whiteView = nullptr;
@@ -808,10 +956,39 @@ private:
 	WGPUTextureView m_surfaceView = nullptr;
 	WGPUCommandEncoder m_encoder = nullptr;
 	WGPURenderPassEncoder m_pass = nullptr;
+	// What the current pass already has bound, so draws skip calls that would
+	// set the same state again (each WebGPU call from wasm is costly).
+	struct PassState
+	{
+		WGPURenderPipeline pipeline = nullptr;
+		uint32_t stencilReference = UINT32_MAX;
+		std::array<WGPUBindGroup, 2> groups = {};
+		std::array<uint32_t, 2> groupOffsets = {};
+		std::array<WGPUBuffer, 2> vertexBuffers = {};
+		std::array<uint64_t, 2> vertexOffsets = {};
+		std::array<uint64_t, 2> vertexSizes = {};
+		WGPUBuffer indexBuffer = nullptr;
+		WGPUIndexFormat indexFormat = WGPUIndexFormat_Undefined;
+		uint64_t indexOffset = 0;
+		uint64_t indexSize = 0;
+	};
+	PassState m_passState;
+	void bindPipeline(WGPURenderPipeline pipeline, uint32_t stencilReference);
+	void bindGroupAt(uint32_t index, WGPUBindGroup group, uint32_t offset);
+	void bindVertexBuffer(uint32_t slot, WGPUBuffer buffer, uint64_t offset, uint64_t size);
+	void bindIndexBuffer(WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size);
 	bool m_frameLoaded = false;
 	std::array<UploadFrame, kUploadFrameCount> m_uploadFrames;
 	size_t m_activeUploadFrame = 0;
 	size_t m_nextUploadFrame = 0;
+	// Indexed draws often name a vertex range much larger than what their
+	// indices touch (W3D shares big vertex buffers). draw() converts only the
+	// referenced vertices; these map a source vertex to its slot in the upload
+	// frame for the current draw. An entry is valid when its stamp matches
+	// m_remapGeneration, so nothing has to be cleared between draws.
+	std::vector<uint32_t> m_remapSlot;
+	std::vector<uint32_t> m_remapStamp;
+	uint32_t m_remapGeneration = 0;
 	unsigned int m_pendingSubmissions = 0;
 };
 
@@ -972,12 +1149,52 @@ HRESULT WebGPUD3DDevice::ensurePass(DWORD clearFlags, D3DCOLOR color, float dept
 	passDescriptor.colorAttachments = &colorAttachment;
 	passDescriptor.depthStencilAttachment = depthView ? &depthAttachment : nullptr;
 	m_pass = wgpuCommandEncoderBeginRenderPass(m_encoder, &passDescriptor);
+	m_passState = {};
 	if (!m_pass) {
 		return D3DERR_DRIVERINTERNALERROR;
 	}
 	wgpuRenderPassEncoderSetViewport(m_pass, static_cast<float>(m_viewport.X), static_cast<float>(m_viewport.Y), static_cast<float>(m_viewport.Width), static_cast<float>(m_viewport.Height), m_viewport.MinZ, m_viewport.MaxZ);
 	m_frameLoaded = true;
 	return D3D_OK;
+}
+
+void WebGPUD3DDevice::bindPipeline(WGPURenderPipeline pipeline, uint32_t stencilReference)
+{
+	if (m_passState.pipeline != pipeline) {
+		wgpuRenderPassEncoderSetPipeline(m_pass, pipeline);
+		m_passState.pipeline = pipeline;
+	}
+	if (m_passState.stencilReference != stencilReference) {
+		wgpuRenderPassEncoderSetStencilReference(m_pass, stencilReference);
+		m_passState.stencilReference = stencilReference;
+	}
+}
+
+void WebGPUD3DDevice::bindGroupAt(uint32_t index, WGPUBindGroup group, uint32_t offset)
+{
+	if (m_passState.groups[index] == group && m_passState.groupOffsets[index] == offset) return;
+	wgpuRenderPassEncoderSetBindGroup(m_pass, index, group, 1, &offset);
+	m_passState.groups[index] = group;
+	m_passState.groupOffsets[index] = offset;
+}
+
+void WebGPUD3DDevice::bindVertexBuffer(uint32_t slot, WGPUBuffer buffer, uint64_t offset, uint64_t size)
+{
+	if (m_passState.vertexBuffers[slot] == buffer && m_passState.vertexOffsets[slot] == offset && m_passState.vertexSizes[slot] == size) return;
+	wgpuRenderPassEncoderSetVertexBuffer(m_pass, slot, buffer, offset, size);
+	m_passState.vertexBuffers[slot] = buffer;
+	m_passState.vertexOffsets[slot] = offset;
+	m_passState.vertexSizes[slot] = size;
+}
+
+void WebGPUD3DDevice::bindIndexBuffer(WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size)
+{
+	if (m_passState.indexBuffer == buffer && m_passState.indexFormat == format && m_passState.indexOffset == offset && m_passState.indexSize == size) return;
+	wgpuRenderPassEncoderSetIndexBuffer(m_pass, buffer, format, offset, size);
+	m_passState.indexBuffer = buffer;
+	m_passState.indexFormat = format;
+	m_passState.indexOffset = offset;
+	m_passState.indexSize = size;
 }
 
 void WebGPUD3DDevice::finishPass()
@@ -1019,9 +1236,14 @@ bool WebGPUD3DDevice::prepareUploadFrame()
 		wgpuBindGroupRelease(group);
 	}
 	frame.bindGroups.clear();
+	for (WGPUBuffer buffer : frame.retiredBuffers) wgpuBufferRelease(buffer);
+	frame.retiredBuffers.clear();
 	frame.vertices.clear();
 	frame.indices.clear();
 	frame.uniforms.clear();
+	frame.rawVertices.clear();
+	frame.fixedFunction.clear();
+	frame.lastFixedFunctionOffset = SIZE_MAX;
 	m_activeUploadFrame = m_nextUploadFrame;
 	return true;
 }
@@ -1033,6 +1255,8 @@ void WebGPUD3DDevice::releaseUploadFrame(UploadFrame &frame)
 		wgpuBindGroupRelease(group);
 	}
 	frame.bindGroups.clear();
+	for (WGPUBuffer buffer : frame.retiredBuffers) wgpuBufferRelease(buffer);
+	frame.retiredBuffers.clear();
 	if (frame.indexBuffer) {
 		wgpuBufferRelease(frame.indexBuffer);
 		frame.indexBuffer = nullptr;
@@ -1040,6 +1264,18 @@ void WebGPUD3DDevice::releaseUploadFrame(UploadFrame &frame)
 	if (frame.uniformBuffer) {
 		wgpuBufferRelease(frame.uniformBuffer);
 		frame.uniformBuffer = nullptr;
+	}
+	if (frame.fixedFunctionGroup) {
+		wgpuBindGroupRelease(frame.fixedFunctionGroup);
+		frame.fixedFunctionGroup = nullptr;
+	}
+	if (frame.fixedFunctionBuffer) {
+		wgpuBufferRelease(frame.fixedFunctionBuffer);
+		frame.fixedFunctionBuffer = nullptr;
+	}
+	if (frame.rawVertexBuffer) {
+		wgpuBufferRelease(frame.rawVertexBuffer);
+		frame.rawVertexBuffer = nullptr;
 	}
 	if (frame.vertexBuffer) {
 		wgpuBufferRelease(frame.vertexBuffer);
@@ -1121,7 +1357,7 @@ WGPUTextureView WebGPUD3DDevice::swapChainDepthView() const
 	return renderSampleCount() == 1 && m_depthViewSingle ? m_depthViewSingle : m_depthView;
 }
 
-WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
+WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type, const VertexSetup *fixedFunction, UINT stride)
 {
 	WGPUPrimitiveTopology topology = WGPUPrimitiveTopology_TriangleList;
 	switch (type) {
@@ -1149,9 +1385,19 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
 		(static_cast<uint64_t>(m_renderStates[D3DRS_STENCILMASK] & 0xff) << 47) |
 		(static_cast<uint64_t>(m_renderStates[D3DRS_STENCILWRITEMASK] & 0xff) << 55) |
 		(static_cast<uint64_t>(renderSampleCount() > 1) << 63);
-	const auto existing = m_pipelines.find(key);
-	if (existing != m_pipelines.end()) {
-		return existing->second;
+	const std::pair<uint64_t, uint64_t> fixedFunctionKey = {
+		key, fixedFunction ? static_cast<uint64_t>(fixedFunction->fvf) | (static_cast<uint64_t>(stride) << 32) : 0
+	};
+	if (fixedFunction) {
+		const auto existing = m_fixedFunctionPipelines.find(fixedFunctionKey);
+		if (existing != m_fixedFunctionPipelines.end()) {
+			return existing->second;
+		}
+	} else {
+		const auto existing = m_pipelines.find(key);
+		if (existing != m_pipelines.end()) {
+			return existing->second;
+		}
 	}
 
 	std::array<WGPUVertexAttribute, 7> attributes = {
@@ -1190,6 +1436,44 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
 	vertexLayout.attributeCount = attributes.size();
 	vertexLayout.attributes = attributes.data();
 
+	// The fixed-function shader reads the application's vertex layout directly;
+	// whatever the format lacks comes from the zero buffer in slot 1.
+	std::array<WGPUVertexAttribute, 8> rawAttributes = {};
+	std::array<WGPUVertexAttribute, 8> defaultAttributes = {};
+	std::array<WGPUVertexBufferLayout, 2> rawLayouts = { WGPU_VERTEX_BUFFER_LAYOUT_INIT, WGPU_VERTEX_BUFFER_LAYOUT_INIT };
+	if (fixedFunction) {
+		size_t rawCount = 0;
+		size_t defaultCount = 0;
+		auto add = [&](bool present, UINT offset, WGPUVertexFormat format, uint32_t location) {
+			WGPUVertexAttribute attribute = WGPU_VERTEX_ATTRIBUTE_INIT;
+			attribute.format = format;
+			attribute.offset = present ? offset : 0;
+			attribute.shaderLocation = location;
+			if (present) rawAttributes[rawCount++] = attribute;
+			else defaultAttributes[defaultCount++] = attribute;
+		};
+		add(true, 0, WGPUVertexFormat_Float32x3, 0);
+		add(fixedFunction->hasNormal, fixedFunction->normalOffset, WGPUVertexFormat_Float32x3, 1);
+		add(fixedFunction->hasDiffuse, fixedFunction->diffuseOffset, WGPUVertexFormat_Unorm8x4, 2);
+		add(fixedFunction->hasSpecular, fixedFunction->specularOffset, WGPUVertexFormat_Unorm8x4, 3);
+		for (UINT stage = 0; stage < 4; ++stage) {
+			const bool present = stage < fixedFunction->textureCount;
+			const UINT count = present ? fixedFunction->uvCoordinateCount[stage] : 2;
+			const WGPUVertexFormat format = count == 1 ? WGPUVertexFormat_Float32
+				: count == 3 ? WGPUVertexFormat_Float32x3
+				: count == 4 ? WGPUVertexFormat_Float32x4 : WGPUVertexFormat_Float32x2;
+			add(present, present ? fixedFunction->uvOffset[stage] : 0, format, 4 + stage);
+		}
+		rawLayouts[0].stepMode = WGPUVertexStepMode_Vertex;
+		rawLayouts[0].arrayStride = stride;
+		rawLayouts[0].attributeCount = rawCount;
+		rawLayouts[0].attributes = rawAttributes.data();
+		rawLayouts[1].stepMode = WGPUVertexStepMode_Vertex;
+		rawLayouts[1].arrayStride = 0;
+		rawLayouts[1].attributeCount = defaultCount;
+		rawLayouts[1].attributes = defaultAttributes.data();
+	}
+
 	WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
 	blend.color.operation = WGPUBlendOperation_Add;
 	blend.color.srcFactor = blendFactor(m_renderStates[D3DRS_SRCBLEND]);
@@ -1223,11 +1507,11 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
 	depth.stencilReadMask = m_renderStates[D3DRS_STENCILENABLE] ? m_renderStates[D3DRS_STENCILMASK] & 0xff : 0xff;
 	depth.stencilWriteMask = m_renderStates[D3DRS_STENCILENABLE] ? m_renderStates[D3DRS_STENCILWRITEMASK] & 0xff : 0;
 	WGPURenderPipelineDescriptor descriptor = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-	descriptor.layout = m_pipelineLayout;
+	descriptor.layout = fixedFunction ? m_fixedFunctionPipelineLayout : m_pipelineLayout;
 	descriptor.vertex.module = m_shader;
-	descriptor.vertex.entryPoint = MakeStringView("vertex_main");
-	descriptor.vertex.bufferCount = 1;
-	descriptor.vertex.buffers = &vertexLayout;
+	descriptor.vertex.entryPoint = MakeStringView(fixedFunction ? "vertex_ff" : "vertex_main");
+	descriptor.vertex.bufferCount = fixedFunction ? rawLayouts.size() : 1;
+	descriptor.vertex.buffers = fixedFunction ? rawLayouts.data() : &vertexLayout;
 	descriptor.primitive.topology = topology;
 	// GeneralsX @port Codex 04/08/2026 Match Direct3D screen-space winding after converting Y-down coordinates to WebGPU NDC.
 	descriptor.primitive.frontFace = WGPUFrontFace_CW;
@@ -1243,7 +1527,8 @@ WGPURenderPipeline WebGPUD3DDevice::pipeline(D3DPRIMITIVETYPE type)
 	descriptor.fragment = &fragment;
 	WGPURenderPipeline created = wgpuDeviceCreateRenderPipeline(webGPUDevice(), &descriptor);
 	if (created) {
-		m_pipelines.emplace(key, created);
+		if (fixedFunction) m_fixedFunctionPipelines.emplace(fixedFunctionKey, created);
+		else m_pipelines.emplace(key, created);
 	}
 	return created;
 }
@@ -1591,6 +1876,7 @@ void WebGPUD3DDevice::prepareVertexSetup(VertexSetup &setup) const
 	}
 	const DWORD fvf = m_vertexShader ? m_vertexShader : (m_vertexBuffer ? m_vertexBuffer->fvf() : D3DFVF_XYZ);
 	const DWORD positionType = fvf & D3DFVF_POSITION_MASK;
+	setup.fvf = fvf;
 	setup.positionType = positionType;
 	setup.rhw = positionType == D3DFVF_XYZRHW;
 	const auto worldTransform = m_transforms.find(D3DTS_WORLD);
@@ -2239,6 +2525,295 @@ CanonicalVertex WebGPUD3DDevice::convertVertexReference(const uint8_t *source, U
 
 #endif
 
+// Transform and lighting run on the GPU unless the page asks for the CPU path
+// (?cputnl=1, or globalThis.zhwpCpuTnl = true at run time) to compare the two.
+// Read once per frame, so a frame never mixes the paths.
+void WebGPUD3DDevice::updateFixedFunctionChoice()
+{
+#ifdef ZHWP_VERIFY_VERTEX
+	// The verification build checks the CPU conversion, so it must run it.
+	m_gpuFixedFunction = false;
+#else
+	const bool cpu = EM_ASM_INT({
+		try {
+			if (typeof globalThis.zhwpCpuTnl === 'undefined') {
+				globalThis.zhwpCpuTnl = new URLSearchParams(location.search).get('cputnl') === '1';
+			}
+			return globalThis.zhwpCpuTnl ? 1 : 0;
+		} catch (e) { return 0; }
+	}) != 0;
+	const bool gpu = m_gpuFixedFunctionReady && !cpu;
+	if (gpu != m_gpuFixedFunction || !m_fixedFunctionChoiceLogged) {
+		fprintf(stderr, "INFO: fixed-function transform and lighting on the %s\n", gpu ? "GPU" : "CPU");
+		m_fixedFunctionChoiceLogged = true;
+	}
+	m_gpuFixedFunction = gpu;
+#endif
+}
+
+// The GPU path covers every fixed-function draw whose vertices it can read
+// straight from the application's layout; the rest stay on convertVertex.
+bool WebGPUD3DDevice::canUseFixedFunctionShader(const VertexSetup &setup, UINT stride) const
+{
+	if (!m_gpuFixedFunction || setup.program || stride % 4 != 0 || stride < 3 * sizeof(float) || stride > 2048) {
+		return false;
+	}
+	if (setup.hasNormal && setup.normalOffset + 3 * sizeof(float) > stride) return false;
+	if (setup.hasDiffuse && setup.diffuseOffset + sizeof(DWORD) > stride) return false;
+	if (setup.hasSpecular && setup.specularOffset + sizeof(DWORD) > stride) return false;
+	for (UINT stage = 0; stage < setup.textureCount; ++stage) {
+		// convertVertex stops reading coordinates at the first set past the stride.
+		if (setup.uvOffset[stage] + setup.uvCoordinateCount[stage] * sizeof(float) > stride) return false;
+	}
+	return true;
+}
+
+bool WebGPUD3DDevice::fixedFunctionUniforms(const VertexSetup &setup, uint32_t &offset)
+{
+	UploadFrame &frame = m_uploadFrames[m_activeUploadFrame];
+	FixedFunctionUniforms uniforms = {};
+	uniforms.world = setup.world;
+	uniforms.view = setup.view;
+	uniforms.projection = setup.projection;
+	uniforms.viewportWidth = setup.viewportWidth;
+	uniforms.viewportHeight = setup.viewportHeight;
+	uniforms.viewportOrigin[0] = setup.viewportX;
+	uniforms.viewportOrigin[1] = setup.viewportY;
+	uint32_t flags = setup.rhw ? FixedFunctionUniforms::kPretransformed : 0;
+	if (setup.hasNormal) flags |= FixedFunctionUniforms::kHasNormal;
+	if (setup.normalInvertible) {
+		flags |= FixedFunctionUniforms::kNormalInvertible;
+		for (int row = 0; row < 3; ++row) {
+			for (int column = 0; column < 3; ++column) uniforms.normalInverse[row][column] = setup.normalInverse[row][column];
+		}
+	}
+	if (setup.normalizeNormals) flags |= FixedFunctionUniforms::kNormalizeNormals;
+	if (setup.fogEnabled) {
+		flags |= FixedFunctionUniforms::kFogEnabled;
+		if (setup.fogRange) flags |= FixedFunctionUniforms::kFogRange;
+		uniforms.fogMode = setup.fogMode;
+		uniforms.fogDensity = setup.fogDensity;
+		uniforms.fogStart = setup.fogStart;
+		uniforms.fogEnd = setup.fogEnd;
+	}
+	if (setup.hasDiffuse) flags |= FixedFunctionUniforms::kHasDiffuse;
+	if (setup.hasSpecular) {
+		flags |= FixedFunctionUniforms::kHasSpecular;
+		if (setup.fogFromSpecular) flags |= FixedFunctionUniforms::kFogFromSpecular;
+	}
+	if (setup.lighting) {
+		flags |= FixedFunctionUniforms::kLighting;
+		uniforms.diffuseSource = static_cast<uint32_t>(setup.diffuseSource);
+		uniforms.ambientSource = static_cast<uint32_t>(setup.ambientSource);
+		uniforms.emissiveSource = static_cast<uint32_t>(setup.emissiveSource);
+		std::memcpy(uniforms.materialDiffuse, setup.materialDiffuse, sizeof(uniforms.materialDiffuse));
+		std::memcpy(uniforms.materialAmbient, setup.materialAmbient, sizeof(uniforms.materialAmbient));
+		std::memcpy(uniforms.materialEmissive, setup.materialEmissive, sizeof(uniforms.materialEmissive));
+		std::memcpy(uniforms.globalAmbient, setup.globalAmbient, sizeof(uniforms.globalAmbient));
+		uniforms.lightCount = setup.lightCount;
+		for (UINT index = 0; index < setup.lightCount; ++index) {
+			const VertexSetup::Light &light = setup.lights[index];
+			FixedFunctionUniforms::Light &out = uniforms.lights[index];
+			std::memcpy(out.position, light.position, sizeof(out.position));
+			std::memcpy(out.direction, light.direction, sizeof(out.direction));
+			std::memcpy(out.ambient, light.ambient, sizeof(out.ambient));
+			std::memcpy(out.diffuse, light.diffuse, sizeof(out.diffuse));
+			out.range = light.range;
+			out.attenuation0 = light.attenuation0;
+			out.attenuation1 = light.attenuation1;
+			out.attenuation2 = light.attenuation2;
+			out.falloff = light.falloff;
+			out.cosHalfTheta = light.cosHalfTheta;
+			out.cosHalfPhi = light.cosHalfPhi;
+			out.type = light.type;
+		}
+	}
+	uniforms.flags = flags;
+	for (UINT stage = 0; stage < 4; ++stage) {
+		const VertexSetup::TextureStage &textureStage = setup.stages[stage];
+		uint32_t stageFlags = textureStage.coordinateIndex << FixedFunctionUniforms::kStageCoordinateShift;
+		if (textureStage.cameraSpacePosition) stageFlags |= FixedFunctionUniforms::kStageCameraSpacePosition;
+		if (textureStage.hasTransform) {
+			stageFlags |= FixedFunctionUniforms::kStageHasTransform;
+			uniforms.textureTransform[stage] = *textureStage.transform;
+		}
+		uniforms.stageFlags[stage] = stageFlags;
+	}
+	// Consecutive draws of one object or pass often share the whole block.
+	if (frame.lastFixedFunctionOffset != SIZE_MAX
+		&& std::memcmp(frame.fixedFunction.data() + frame.lastFixedFunctionOffset, &uniforms, sizeof(uniforms)) == 0) {
+		offset = static_cast<uint32_t>(frame.lastFixedFunctionOffset);
+		return true;
+	}
+	const size_t aligned = (frame.fixedFunction.size() + kUniformOffsetAlignment - 1) & ~(kUniformOffsetAlignment - 1);
+	if (aligned + sizeof(uniforms) > kFixedFunctionUploadCapacity) {
+		return false;
+	}
+	frame.fixedFunction.resize(aligned + sizeof(uniforms));
+	std::memcpy(frame.fixedFunction.data() + aligned, &uniforms, sizeof(uniforms));
+	frame.lastFixedFunctionOffset = aligned;
+	offset = static_cast<uint32_t>(aligned);
+	return true;
+}
+
+WGPUBuffer WebGPUD3DDevice::syncMirror(GpuBufferMirror &mirror, const uint8_t *data, size_t size, WGPUBufferUsage usage, size_t useBegin, size_t useEnd)
+{
+	const size_t padded = (size + 3) & ~static_cast<size_t>(3);
+	if (!padded) return nullptr;
+	if (!mirror.buffer) {
+		WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+		descriptor.usage = usage | WGPUBufferUsage_CopyDst;
+		descriptor.size = padded;
+		mirror.buffer = wgpuDeviceCreateBuffer(webGPUDevice(), &descriptor);
+		if (!mirror.buffer) return nullptr;
+		mirror.markDirty(0, size, 0);
+	}
+	mirror.source = data;
+	mirror.sourceSize = size;
+	if (mirror.dirty) {
+		size_t dirtyBegin = mirror.dirtyBegin;
+		size_t dirtyEnd = mirror.dirtyEnd;
+		// Queue writes land before all of this frame's commands, so bytes an
+		// earlier draw of this frame read must not change under it. The game
+		// does rewrite such bytes, even under D3DLOCK_NOOVERWRITE, so the check
+		// is on the ranges themselves. After DISCARD the draws so far keep the
+		// old buffer and the mirror moves to a new one holding the new bytes;
+		// after any other lock this draw copies its vertices instead.
+		const bool overlapsUse = mirror.usedFrame == m_frameSerial
+			&& std::min(dirtyEnd, size) > mirror.usedBegin && std::min(dirtyBegin, size) < mirror.usedEnd;
+		if (overlapsUse && !mirror.discarded) return nullptr;
+		if (overlapsUse) {
+			WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+			descriptor.usage = usage | WGPUBufferUsage_CopyDst;
+			descriptor.size = padded;
+			WGPUBuffer renamed = wgpuDeviceCreateBuffer(webGPUDevice(), &descriptor);
+			if (!renamed) return nullptr;
+			// The old buffer still owes this frame's earlier draws their bytes.
+			writeMirror(mirror);
+			m_uploadFrames[m_activeUploadFrame].retiredBuffers.push_back(mirror.buffer);
+			mirror.buffer = renamed;
+			mirror.usedFrame = UINT64_MAX;
+		}
+		const size_t begin = std::min(dirtyBegin, size);
+		const size_t end = std::min(dirtyEnd, size);
+		if (end > begin) {
+			if (!mirror.pending) {
+				mirror.pending = true;
+				mirror.pendingBegin = begin;
+				mirror.pendingEnd = end;
+				m_pendingMirrors.push_back(&mirror);
+			} else {
+				mirror.pendingBegin = std::min(mirror.pendingBegin, begin);
+				mirror.pendingEnd = std::max(mirror.pendingEnd, end);
+			}
+		}
+		mirror.dirty = false;
+	}
+	if (mirror.usedFrame != m_frameSerial) {
+		mirror.usedFrame = m_frameSerial;
+		mirror.usedBegin = useBegin;
+		mirror.usedEnd = useEnd;
+	} else {
+		mirror.usedBegin = std::min(mirror.usedBegin, useBegin);
+		mirror.usedEnd = std::max(mirror.usedEnd, useEnd);
+	}
+	return mirror.buffer;
+}
+
+// Writes the bytes syncMirror gathered for the mirror's current buffer.
+void WebGPUD3DDevice::writeMirror(GpuBufferMirror &mirror)
+{
+	if (!mirror.pending) return;
+	mirror.pending = false;
+	m_pendingMirrors.erase(std::find(m_pendingMirrors.begin(), m_pendingMirrors.end(), &mirror));
+	const size_t size = mirror.sourceSize;
+	const size_t padded = (size + 3) & ~static_cast<size_t>(3);
+	const size_t begin = std::min(mirror.pendingBegin, size) & ~static_cast<size_t>(3);
+	const size_t end = std::min(padded, (std::min(mirror.pendingEnd, size) + 3) & ~static_cast<size_t>(3));
+	if (end <= begin) return;
+	if (end <= size) {
+		wgpuQueueWriteBuffer(webGPUQueue(), mirror.buffer, begin, mirror.source + begin, end - begin);
+	} else {
+		std::vector<uint8_t> tail(end - begin, 0);
+		std::memcpy(tail.data(), mirror.source + begin, size - begin);
+		wgpuQueueWriteBuffer(webGPUQueue(), mirror.buffer, begin, tail.data(), tail.size());
+	}
+}
+
+void WebGPUD3DDevice::flushMirrors()
+{
+	while (!m_pendingMirrors.empty()) {
+		writeMirror(*m_pendingMirrors.back());
+	}
+}
+
+// Before the application changes a buffer (Lock) or frees it, the bytes its
+// mirror still owes this frame's draws are written out, while they still hold
+// what those draws read.
+void WebGPUD3DDevice::flushMirror(GpuBufferMirror &mirror)
+{
+	writeMirror(mirror);
+}
+
+HRESULT WebGPUD3DDevice::encodeFixedFunctionDraw(D3DPRIMITIVETYPE type, const VertexSetup &setup, UINT stride,
+	WGPUBuffer vertexBuffer, uint64_t vertexOffset, uint64_t vertexBytes,
+	WGPUBuffer indexBuffer, WGPUIndexFormat indexFormat, uint64_t indexOffset, uint64_t indexBytes,
+	uint32_t count, uint32_t firstIndex, int32_t baseVertex, uint32_t firstVertex, uint32_t fixedFunctionOffset)
+{
+	UploadFrame &frame = m_uploadFrames[m_activeUploadFrame];
+	WGPURenderPipeline renderPipeline = pipeline(type, &setup, stride);
+	const DrawBindings bindings = bindGroup();
+	if (!renderPipeline || !bindings.group) {
+		return D3DERR_DRIVERINTERNALERROR;
+	}
+	bindPipeline(renderPipeline, m_renderStates[D3DRS_STENCILREF] & 0xff);
+	bindGroupAt(0, bindings.group, bindings.uniformOffset);
+	bindGroupAt(1, frame.fixedFunctionGroup, fixedFunctionOffset);
+	bindVertexBuffer(0, vertexBuffer, vertexOffset, vertexBytes);
+	bindVertexBuffer(1, m_defaultAttributes, 0, 16);
+	if (indexBuffer) {
+		bindIndexBuffer(indexBuffer, indexFormat, indexOffset, indexBytes);
+		wgpuRenderPassEncoderDrawIndexed(m_pass, count, 1, firstIndex, baseVertex, 0);
+	} else {
+		wgpuRenderPassEncoderDraw(m_pass, count, 1, firstVertex, 0);
+	}
+	return D3D_OK;
+}
+
+// List draws straight from the GPU copies of the bound buffers: no per-draw
+// copy and no CPU work per vertex or index. Returns S_FALSE when the draw must
+// go through draw() instead.
+HRESULT WebGPUD3DDevice::drawFromMirrors(D3DPRIMITIVETYPE type, UINT count, UINT first, bool indexed, UINT minIndex, UINT vertexCount)
+{
+	if (!m_gpuFixedFunction || !count) return S_FALSE;
+	if (type != D3DPT_TRIANGLELIST && type != D3DPT_LINELIST && type != D3DPT_POINTLIST) return S_FALSE;
+	if (FAILED(ensurePass(0, 0, 1.0f, 0))) return D3DERR_INVALIDCALL;
+	VertexSetup setup;
+	prepareVertexSetup(setup);
+	if (!canUseFixedFunctionShader(setup, m_vertexStride)) return S_FALSE;
+	const bool index32 = indexed && m_indexBuffer->format() == D3DFMT_INDEX32;
+	const size_t firstVertexUsed = indexed ? static_cast<size_t>(m_baseVertex) + minIndex : first;
+	const size_t vertexUseBegin = firstVertexUsed * m_vertexStride;
+	const size_t vertexUseEnd = vertexUseBegin + static_cast<size_t>(indexed ? vertexCount : count) * m_vertexStride;
+	WGPUBuffer vertexBuffer = syncMirror(m_vertexBuffer->mirror(), m_vertexBuffer->data(), m_vertexBuffer->size(), WGPUBufferUsage_Vertex,
+		vertexUseBegin, vertexUseEnd);
+	if (!vertexBuffer) return S_FALSE;
+	WGPUBuffer indexBuffer = nullptr;
+	if (indexed) {
+		const size_t indexSize = index32 ? 4 : 2;
+		indexBuffer = syncMirror(m_indexBuffer->mirror(), m_indexBuffer->data(), m_indexBuffer->size(), WGPUBufferUsage_Index,
+			static_cast<size_t>(first) * indexSize, (static_cast<size_t>(first) + count) * indexSize);
+		if (!indexBuffer) return S_FALSE;
+	}
+	uint32_t fixedFunctionOffset = 0;
+	if (!fixedFunctionUniforms(setup, fixedFunctionOffset)) return S_FALSE;
+	const uint64_t vertexBytes = (static_cast<uint64_t>(m_vertexBuffer->size()) + 3) & ~static_cast<uint64_t>(3);
+	const uint64_t indexBytes = indexed ? ((static_cast<uint64_t>(m_indexBuffer->size()) + 3) & ~static_cast<uint64_t>(3)) : 0;
+	return encodeFixedFunctionDraw(type, setup, m_vertexStride, vertexBuffer, 0, vertexBytes,
+		indexBuffer, index32 ? WGPUIndexFormat_Uint32 : WGPUIndexFormat_Uint16, 0, indexBytes,
+		count, indexed ? first : 0, indexed ? static_cast<int32_t>(m_baseVertex) : 0, indexed ? 0 : first, fixedFunctionOffset);
+}
+
 HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UINT vertexCount, UINT stride, const void *indexData, D3DFORMAT indexFormat, UINT indexCount, UINT baseVertex)
 {
 	if (!vertexData || !vertexCount || !stride || FAILED(ensurePass(0, 0, 1.0f, 0))) {
@@ -2303,17 +2878,83 @@ HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UIN
 		}
 		return true;
 	};
+	if (canUseFixedFunctionShader(vertexSetup, stride)) {
+		// GPU transform and lighting: upload the application's vertices as they
+		// are and let vertex_ff do what convertVertex does on the CPU.
+		const bool plainList = !indexData && (type == D3DPT_POINTLIST || type == D3DPT_LINELIST || type == D3DPT_TRIANGLELIST);
+		// Each draw's vertices start on a multiple of its stride, so the whole
+		// staging buffer can stay bound and the draw addresses them by index.
+		const size_t rawOffset = (frame.rawVertices.size() + stride - 1) / stride * stride;
+		const size_t rawBytes = static_cast<size_t>(vertexCount) * stride;
+		const size_t rawIndexOffset = frame.indices.size() * sizeof(uint32_t);
+		const size_t rawIndexBytes = plainList ? 0 : expandedCount * sizeof(uint32_t);
+		uint32_t fixedFunctionOffset = 0;
+		// Without upload space left this frame the draw falls through to the CPU path.
+		if (rawOffset + rawBytes <= kRawVertexUploadCapacity && rawIndexOffset + rawIndexBytes <= kIndexUploadCapacity
+			&& fixedFunctionUniforms(vertexSetup, fixedFunctionOffset)) {
+			if (!plainList) {
+				const size_t firstIndex = frame.indices.size();
+				auto appendIndex = [&](UINT index) {
+					if (index < baseVertex || index - baseVertex >= vertexCount) return false;
+					frame.indices.push_back(index - baseVertex);
+					return true;
+				};
+				if (!forEachExpandedIndex(appendIndex)) {
+					frame.indices.resize(firstIndex);
+					return D3DERR_INVALIDCALL;
+				}
+			}
+			frame.rawVertices.resize(rawOffset);
+			frame.rawVertices.insert(frame.rawVertices.end(), bytes, bytes + rawBytes);
+			const uint32_t firstRaw = static_cast<uint32_t>(rawOffset / stride);
+			return encodeFixedFunctionDraw(type, vertexSetup, stride, frame.rawVertexBuffer, 0, kRawVertexUploadCapacity,
+				plainList ? nullptr : frame.indexBuffer, WGPUIndexFormat_Uint32, 0, kIndexUploadCapacity,
+				static_cast<uint32_t>(expandedCount), static_cast<uint32_t>(rawIndexOffset / sizeof(uint32_t)),
+				static_cast<int32_t>(firstRaw), firstRaw, fixedFunctionOffset);
+		}
+	}
 	const size_t expandedVertexBytes = expandedCount * sizeof(CanonicalVertex);
 	const size_t compactVertexBytes = static_cast<size_t>(vertexCount) * sizeof(CanonicalVertex);
 	const size_t indexOffset = frame.indices.size() * sizeof(uint32_t);
 	const size_t indexBytes = expandedCount * sizeof(uint32_t);
 	const bool expandedFits = vertexOffset + expandedVertexBytes <= kVertexUploadCapacity;
+	// An indexed draw uploads at most one vertex per index, never more than its range.
+	const size_t referencedVertexBytes = std::min<size_t>(vertexCount, expandedCount) * sizeof(CanonicalVertex);
+	const bool referencedFits = indexData
+		&& vertexOffset + referencedVertexBytes <= kVertexUploadCapacity
+		&& indexOffset + indexBytes <= kIndexUploadCapacity;
 	const bool indexedFits = vertexOffset + compactVertexBytes <= kVertexUploadCapacity
 		&& indexOffset + indexBytes <= kIndexUploadCapacity;
-	const bool useIndices = indexedFits
-		&& (compactVertexBytes + indexBytes < expandedVertexBytes || !expandedFits);
-	size_t vertexBytes = expandedVertexBytes;
-	if (useIndices) {
+	const bool useIndices = referencedFits || (indexedFits
+		&& (compactVertexBytes + indexBytes < expandedVertexBytes || !expandedFits));
+	if (referencedFits) {
+		if (m_remapStamp.size() < vertexCount) {
+			m_remapStamp.resize(vertexCount, 0);
+			m_remapSlot.resize(vertexCount);
+		}
+		if (++m_remapGeneration == 0) {
+			std::fill(m_remapStamp.begin(), m_remapStamp.end(), 0);
+			m_remapGeneration = 1;
+		}
+		const uint32_t generation = m_remapGeneration;
+		const size_t firstIndex = frame.indices.size();
+		auto appendReferenced = [&](UINT index) {
+			if (index < baseVertex || index - baseVertex >= vertexCount) return false;
+			const UINT local = index - baseVertex;
+			if (m_remapStamp[local] != generation) {
+				m_remapStamp[local] = generation;
+				m_remapSlot[local] = static_cast<uint32_t>(frame.vertices.size() - firstVertex);
+				frame.vertices.push_back(convertVertexChecked(bytes + static_cast<size_t>(local) * stride, stride, vertexSetup));
+			}
+			frame.indices.push_back(m_remapSlot[local]);
+			return true;
+		};
+		if (!forEachExpandedIndex(appendReferenced)) {
+			frame.indices.resize(firstIndex);
+			frame.vertices.resize(firstVertex);
+			return D3DERR_INVALIDCALL;
+		}
+	} else if (useIndices) {
 		const size_t firstIndex = frame.indices.size();
 		auto appendIndex = [&](UINT index) {
 			if (index < baseVertex || index - baseVertex >= vertexCount) return false;
@@ -2327,7 +2968,6 @@ HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UIN
 		for (UINT index = 0; index < vertexCount; ++index) {
 			frame.vertices.push_back(convertVertexChecked(bytes + static_cast<size_t>(index) * stride, stride, vertexSetup));
 		}
-		vertexBytes = compactVertexBytes;
 	} else {
 		if (!expandedFits) return D3DERR_OUTOFVIDEOMEMORY;
 		auto appendVertex = [&](UINT index) {
@@ -2345,15 +2985,17 @@ HRESULT WebGPUD3DDevice::draw(D3DPRIMITIVETYPE type, const void *vertexData, UIN
 	if (!renderPipeline || !bindings.group) {
 		return D3DERR_DRIVERINTERNALERROR;
 	}
-	wgpuRenderPassEncoderSetPipeline(m_pass, renderPipeline);
-	wgpuRenderPassEncoderSetStencilReference(m_pass, m_renderStates[D3DRS_STENCILREF] & 0xff);
-	wgpuRenderPassEncoderSetBindGroup(m_pass, 0, bindings.group, 1, &bindings.uniformOffset);
-	wgpuRenderPassEncoderSetVertexBuffer(m_pass, 0, frame.vertexBuffer, vertexOffset, vertexBytes);
+	// The whole staging buffers stay bound; the draw addresses its part of them.
+	bindPipeline(renderPipeline, m_renderStates[D3DRS_STENCILREF] & 0xff);
+	bindGroupAt(0, bindings.group, bindings.uniformOffset);
+	bindVertexBuffer(0, frame.vertexBuffer, 0, kVertexUploadCapacity);
+	const uint32_t firstConverted = static_cast<uint32_t>(vertexOffset / sizeof(CanonicalVertex));
 	if (useIndices) {
-		wgpuRenderPassEncoderSetIndexBuffer(m_pass, frame.indexBuffer, WGPUIndexFormat_Uint32, indexOffset, indexBytes);
-		wgpuRenderPassEncoderDrawIndexed(m_pass, static_cast<uint32_t>(expandedCount), 1, 0, 0, 0);
+		bindIndexBuffer(frame.indexBuffer, WGPUIndexFormat_Uint32, 0, kIndexUploadCapacity);
+		wgpuRenderPassEncoderDrawIndexed(m_pass, static_cast<uint32_t>(expandedCount), 1,
+			static_cast<uint32_t>(indexOffset / sizeof(uint32_t)), static_cast<int32_t>(firstConverted), 0);
 	} else {
-		wgpuRenderPassEncoderDraw(m_pass, static_cast<uint32_t>(expandedCount), 1, 0, 0);
+		wgpuRenderPassEncoderDraw(m_pass, static_cast<uint32_t>(expandedCount), 1, firstConverted, 0);
 	}
 	return D3D_OK;
 }
@@ -2364,6 +3006,8 @@ HRESULT WebGPUD3DDevice::DrawPrimitive(D3DPRIMITIVETYPE type, UINT startVertex, 
 	const UINT count = vertexCountFor(type, primitiveCount);
 	const size_t offset = static_cast<size_t>(startVertex) * m_vertexStride;
 	if (offset + static_cast<size_t>(count) * m_vertexStride > m_vertexBuffer->size()) return D3DERR_INVALIDCALL;
+	const HRESULT mirrored = drawFromMirrors(type, count, startVertex, false);
+	if (mirrored != S_FALSE) return mirrored;
 	return draw(type, m_vertexBuffer->data() + offset, count, m_vertexStride, nullptr, D3DFMT_UNKNOWN, count, 0);
 }
 
@@ -2376,6 +3020,8 @@ HRESULT WebGPUD3DDevice::DrawIndexedPrimitive(D3DPRIMITIVETYPE type, UINT minInd
 	const size_t vertexOffset = static_cast<size_t>(m_baseVertex + minIndex) * m_vertexStride;
 	if (indexOffset + static_cast<size_t>(indexCount) * indexSize > m_indexBuffer->size() ||
 		vertexOffset + static_cast<size_t>(vertexCount) * m_vertexStride > m_vertexBuffer->size()) return D3DERR_INVALIDCALL;
+	const HRESULT mirrored = drawFromMirrors(type, indexCount, startIndex, true, minIndex, vertexCount);
+	if (mirrored != S_FALSE) return mirrored;
 	return draw(type, m_vertexBuffer->data() + vertexOffset, vertexCount, m_vertexStride, m_indexBuffer->data() + indexOffset, m_indexBuffer->format(), indexCount, minIndex);
 }
 
@@ -2516,6 +3162,10 @@ WebGPUD3DDevice::~WebGPUD3DDevice()
 		(void)key;
 		wgpuRenderPipelineRelease(pipelineObject);
 	}
+	for (const auto &[key, pipelineObject] : m_fixedFunctionPipelines) {
+		(void)key;
+		wgpuRenderPipelineRelease(pipelineObject);
+	}
 	if (m_depthViewSingle) {
 		wgpuTextureViewRelease(m_depthViewSingle);
 	}
@@ -2550,6 +3200,15 @@ WebGPUD3DDevice::~WebGPUD3DDevice()
 	if (m_pipelineLayout) {
 		wgpuPipelineLayoutRelease(m_pipelineLayout);
 	}
+	if (m_fixedFunctionPipelineLayout) {
+		wgpuPipelineLayoutRelease(m_fixedFunctionPipelineLayout);
+	}
+	if (m_fixedFunctionGroupLayout) {
+		wgpuBindGroupLayoutRelease(m_fixedFunctionGroupLayout);
+	}
+	if (m_defaultAttributes) {
+		wgpuBufferRelease(m_defaultAttributes);
+	}
 	if (m_bindGroupLayout) {
 		wgpuBindGroupLayoutRelease(m_bindGroupLayout);
 	}
@@ -2582,8 +3241,11 @@ struct VertexInput {
     @location(6) fog: f32,
 };
 
+// @invariant: a mesh drawn in several passes (shadow volumes, multi-pass
+// terrain) must land on exactly the same depth in every pipeline, as Direct3D
+// guarantees, or stencil and depth-equal tests disagree between passes.
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @builtin(position) @invariant position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv0: vec2<f32>,
     @location(2) uv1: vec2<f32>,
@@ -2602,6 +3264,189 @@ fn vertex_main(input: VertexInput) -> VertexOutput {
     output.uv2 = input.uv2;
     output.uv3 = input.uv3;
     output.fog = input.fog;
+    return output;
+}
+
+// Fixed-function transform and lighting on the GPU. Mirrors
+// WebGPUD3DDevice::convertVertex step for step; keep the two in sync.
+struct FixedFunctionLight {
+    position: vec4<f32>,
+    direction: vec4<f32>,
+    ambient: vec4<f32>,
+    diffuse: vec4<f32>,
+    range: f32,
+    attenuation0: f32,
+    attenuation1: f32,
+    attenuation2: f32,
+    falloff: f32,
+    cos_half_theta: f32,
+    cos_half_phi: f32,
+    kind: u32,
+};
+
+struct FixedFunction {
+    world: mat4x4<f32>,
+    view: mat4x4<f32>,
+    projection: mat4x4<f32>,
+    texture_transform: array<mat4x4<f32>, 4>,
+    normal_inverse: array<vec4<f32>, 3>,
+    material_diffuse: vec4<f32>,
+    material_ambient: vec4<f32>,
+    material_emissive: vec4<f32>,
+    global_ambient: vec4<f32>,
+    viewport_width: f32,
+    viewport_height: f32,
+    fog_density: f32,
+    fog_start: f32,
+    fog_end: f32,
+    flags: u32,
+    fog_mode: u32,
+    light_count: u32,
+    diffuse_source: u32,
+    ambient_source: u32,
+    emissive_source: u32,
+    padding: u32,
+    stage_flags: vec4<u32>,
+    viewport_origin: vec4<f32>,
+    lights: array<FixedFunctionLight, 8>,
+};
+
+@group(1) @binding(0) var<uniform> ff: FixedFunction;
+
+struct FixedFunctionInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) diffuse: vec4<f32>,
+    @location(3) specular: vec4<f32>,
+    @location(4) uv0: vec2<f32>,
+    @location(5) uv1: vec2<f32>,
+    @location(6) uv2: vec2<f32>,
+    @location(7) uv3: vec2<f32>,
+};
+
+fn ff_material(source: u32, material: vec4<f32>, diffuse: vec4<f32>, specular: vec4<f32>) -> vec4<f32> {
+    if (source == 1u) { return diffuse; }
+    if (source == 2u) { return specular; }
+    return material;
+}
+
+@vertex
+fn vertex_ff(input: FixedFunctionInput) -> VertexOutput {
+    var output: VertexOutput;
+    let flags = ff.flags;
+    var camera = vec4<f32>(0.0);
+    var clip: vec4<f32>;
+    if ((flags & 512u) != 0u) {
+        // D3DFVF_XYZRHW: screen pixels to normalized device coordinates.
+        clip = vec4<f32>(((input.position.x - ff.viewport_origin.x) / ff.viewport_width) * 2.0 - 1.0,
+                         1.0 - ((input.position.y - ff.viewport_origin.y) / ff.viewport_height) * 2.0,
+                         input.position.z, 1.0);
+    } else {
+        camera = ff.view * (ff.world * vec4<f32>(input.position, 1.0));
+        clip = ff.projection * camera;
+    }
+    clip.x += clip.w / ff.viewport_width;
+    clip.y -= clip.w / ff.viewport_height;
+    output.position = clip;
+
+    var normal = vec3<f32>(0.0);
+    if ((flags & 1u) != 0u) {
+        if ((flags & 2u) != 0u) {
+            normal = vec3<f32>(dot(ff.normal_inverse[0].xyz, input.normal),
+                               dot(ff.normal_inverse[1].xyz, input.normal),
+                               dot(ff.normal_inverse[2].xyz, input.normal));
+        }
+        if ((flags & 4u) != 0u) {
+            let normal_length = length(normal);
+            if (normal_length > 0.0) { normal /= normal_length; }
+        }
+    }
+
+    var fog = 1.0;
+    if ((flags & 8u) != 0u) {
+        let fog_distance = select(abs(camera.z), length(camera.xyz), (flags & 16u) != 0u);
+        switch (ff.fog_mode) {
+            case 3u: {
+                if (ff.fog_end == ff.fog_start) {
+                    fog = select(0.0, 1.0, fog_distance <= ff.fog_end);
+                } else {
+                    fog = (ff.fog_end - fog_distance) / (ff.fog_end - ff.fog_start);
+                }
+            }
+            case 1u: { fog = exp(-ff.fog_density * fog_distance); }
+            case 2u: {
+                let density_distance = ff.fog_density * fog_distance;
+                fog = exp(-density_distance * density_distance);
+            }
+            default: {}
+        }
+        fog = clamp(fog, 0.0, 1.0);
+    }
+
+    // Direct3D colours are B,G,R,A in memory.
+    var diffuse = vec4<f32>(1.0);
+    var specular = vec4<f32>(0.0);
+    if ((flags & 32u) != 0u) { diffuse = input.diffuse.zyxw; }
+    if ((flags & 64u) != 0u) {
+        specular = input.specular.zyxw;
+        if ((flags & 128u) != 0u) { fog = specular.w; }
+    }
+    var color = diffuse;
+    if ((flags & 256u) != 0u) {
+        var light_ambient = vec4<f32>(0.0);
+        var light_diffuse = vec4<f32>(0.0);
+        for (var index = 0u; index < ff.light_count; index++) {
+            let light = ff.lights[index];
+            var hit = light.position.xyz - camera.xyz;
+            let light_distance = length(hit);
+            if (light.kind == 3u) {
+                hit = -light.direction.xyz;
+            } else if (light_distance > 0.0) {
+                hit /= light_distance;
+            }
+            var attenuation = 1.0;
+            if (light.kind != 3u) {
+                let denominator = light.attenuation0 + light_distance * light.attenuation1 + light_distance * light_distance * light.attenuation2;
+                attenuation = select(0x1.fffffep+127f, 1.0 / denominator, denominator > 0.0);
+                if (light_distance > light.range) { attenuation = 0.0; }
+            }
+            if (light.kind == 2u) {
+                let rho = -dot(hit, light.direction.xyz);
+                var spot = 0.0;
+                if (rho > light.cos_half_theta) {
+                    spot = 1.0;
+                } else if (rho > light.cos_half_phi && light.cos_half_theta != light.cos_half_phi) {
+                    spot = pow((rho - light.cos_half_phi) / (light.cos_half_theta - light.cos_half_phi), light.falloff);
+                }
+                attenuation *= clamp(spot, 0.0, 1.0);
+            }
+            let diffuse_factor = clamp(dot(normal, hit), 0.0, 1.0) * attenuation;
+            light_ambient += light.ambient * attenuation;
+            light_diffuse += light.diffuse * diffuse_factor;
+        }
+        let material_diffuse = ff_material(ff.diffuse_source, ff.material_diffuse, diffuse, specular);
+        let material_ambient = ff_material(ff.ambient_source, ff.material_ambient, diffuse, specular);
+        let material_emissive = ff_material(ff.emissive_source, ff.material_emissive, diffuse, specular);
+        color = clamp(material_emissive + material_ambient * (ff.global_ambient + light_ambient)
+            + material_diffuse * light_diffuse, vec4<f32>(0.0), vec4<f32>(1.0));
+        color.a = material_diffuse.a;
+    }
+    output.color = color;
+    output.fog = fog;
+
+    let source_uv = array<vec2<f32>, 4>(input.uv0, input.uv1, input.uv2, input.uv3);
+    var uv: array<vec2<f32>, 4>;
+    for (var stage = 0u; stage < 4u; stage++) {
+        let stage_flags = ff.stage_flags[stage];
+        var coordinates = vec4<f32>(source_uv[(stage_flags >> 8u) & 3u], 0.0, 1.0);
+        if ((stage_flags & 1u) != 0u) { coordinates = camera; }
+        if ((stage_flags & 2u) != 0u) { coordinates = ff.texture_transform[stage] * coordinates; }
+        uv[stage] = coordinates.xy;
+    }
+    output.uv0 = uv[0];
+    output.uv1 = uv[1];
+    output.uv2 = uv[2];
+    output.uv3 = uv[3];
     return output;
 }
 
@@ -2860,6 +3705,31 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 	pipelineLayoutDescriptor.bindGroupLayoutCount = 1;
 	pipelineLayoutDescriptor.bindGroupLayouts = &m_bindGroupLayout;
 	m_pipelineLayout = wgpuDeviceCreatePipelineLayout(webGPUDevice(), &pipelineLayoutDescriptor);
+
+	WGPUBindGroupLayoutEntry fixedFunctionEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+	fixedFunctionEntry.binding = 0;
+	fixedFunctionEntry.visibility = WGPUShaderStage_Vertex;
+	fixedFunctionEntry.buffer.type = WGPUBufferBindingType_Uniform;
+	fixedFunctionEntry.buffer.hasDynamicOffset = WGPU_TRUE;
+	fixedFunctionEntry.buffer.minBindingSize = sizeof(FixedFunctionUniforms);
+	WGPUBindGroupLayoutDescriptor fixedFunctionLayoutDescriptor = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+	fixedFunctionLayoutDescriptor.entryCount = 1;
+	fixedFunctionLayoutDescriptor.entries = &fixedFunctionEntry;
+	m_fixedFunctionGroupLayout = wgpuDeviceCreateBindGroupLayout(webGPUDevice(), &fixedFunctionLayoutDescriptor);
+	const std::array<WGPUBindGroupLayout, 2> fixedFunctionGroupLayouts = { m_bindGroupLayout, m_fixedFunctionGroupLayout };
+	WGPUPipelineLayoutDescriptor fixedFunctionPipelineDescriptor = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+	fixedFunctionPipelineDescriptor.bindGroupLayoutCount = fixedFunctionGroupLayouts.size();
+	fixedFunctionPipelineDescriptor.bindGroupLayouts = fixedFunctionGroupLayouts.data();
+	m_fixedFunctionPipelineLayout = wgpuDeviceCreatePipelineLayout(webGPUDevice(), &fixedFunctionPipelineDescriptor);
+	WGPUBufferDescriptor defaultAttributesDescriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+	defaultAttributesDescriptor.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
+	defaultAttributesDescriptor.size = 16;
+	m_defaultAttributes = wgpuDeviceCreateBuffer(webGPUDevice(), &defaultAttributesDescriptor);
+	const std::array<uint8_t, 16> zeros = {};
+	wgpuQueueWriteBuffer(webGPUQueue(), m_defaultAttributes, 0, zeros.data(), zeros.size());
+	m_gpuFixedFunctionReady = m_fixedFunctionGroupLayout && m_fixedFunctionPipelineLayout && m_defaultAttributes;
+	updateFixedFunctionChoice();
+
 	for (UploadFrame &frame : m_uploadFrames) {
 		WGPUBufferDescriptor vertexDescriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
 		vertexDescriptor.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
@@ -2875,6 +3745,30 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
 		frame.uniformBuffer = wgpuDeviceCreateBuffer(webGPUDevice(), &uniformDescriptor);
 		if (!frame.vertexBuffer || !frame.indexBuffer || !frame.uniformBuffer) {
 			return false;
+		}
+		if (m_gpuFixedFunctionReady) {
+			WGPUBufferDescriptor rawDescriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+			rawDescriptor.usage = WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst;
+			rawDescriptor.size = kRawVertexUploadCapacity;
+			frame.rawVertexBuffer = wgpuDeviceCreateBuffer(webGPUDevice(), &rawDescriptor);
+			WGPUBufferDescriptor fixedFunctionDescriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+			fixedFunctionDescriptor.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+			fixedFunctionDescriptor.size = kFixedFunctionUploadCapacity;
+			frame.fixedFunctionBuffer = wgpuDeviceCreateBuffer(webGPUDevice(), &fixedFunctionDescriptor);
+			WGPUBindGroupEntry fixedFunctionBinding = WGPU_BIND_GROUP_ENTRY_INIT;
+			fixedFunctionBinding.binding = 0;
+			fixedFunctionBinding.buffer = frame.fixedFunctionBuffer;
+			fixedFunctionBinding.size = sizeof(FixedFunctionUniforms);
+			WGPUBindGroupDescriptor fixedFunctionGroupDescriptor = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+			fixedFunctionGroupDescriptor.layout = m_fixedFunctionGroupLayout;
+			fixedFunctionGroupDescriptor.entryCount = 1;
+			fixedFunctionGroupDescriptor.entries = &fixedFunctionBinding;
+			frame.fixedFunctionGroup = frame.fixedFunctionBuffer
+				? wgpuDeviceCreateBindGroup(webGPUDevice(), &fixedFunctionGroupDescriptor) : nullptr;
+			if (!frame.rawVertexBuffer || !frame.fixedFunctionGroup) {
+				m_gpuFixedFunctionReady = false;
+				m_gpuFixedFunction = false;
+			}
 		}
 	}
 
@@ -3006,6 +3900,13 @@ HRESULT WebGPUD3DDevice::Present(const RECT *, const RECT *, HWND, const RGNDATA
 	if (!uploadFrame.uniforms.empty()) {
 		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.uniformBuffer, 0, uploadFrame.uniforms.data(), uploadFrame.uniforms.size());
 	}
+	if (!uploadFrame.rawVertices.empty()) {
+		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.rawVertexBuffer, 0, uploadFrame.rawVertices.data(), uploadFrame.rawVertices.size());
+	}
+	if (!uploadFrame.fixedFunction.empty()) {
+		wgpuQueueWriteBuffer(webGPUQueue(), uploadFrame.fixedFunctionBuffer, 0, uploadFrame.fixedFunction.data(), uploadFrame.fixedFunction.size());
+	}
+	flushMirrors();
 	WGPUCommandBuffer commands = wgpuCommandEncoderFinish(m_encoder, nullptr);
 	wgpuQueueSubmit(webGPUQueue(), 1, &commands);
 	uploadFrame.busy = true;
@@ -3018,6 +3919,8 @@ HRESULT WebGPUD3DDevice::Present(const RECT *, const RECT *, HWND, const RGNDATA
 		.userdata2 = &uploadFrame,
 	});
 	m_nextUploadFrame = (m_activeUploadFrame + 1) % kUploadFrameCount;
+	++m_frameSerial;
+	updateFixedFunctionChoice();
 	#if !defined(__EMSCRIPTEN__)
 	// GeneralsX @port Codex 04/08/2026 Browsers present WebGPU surfaces when requestAnimationFrame returns.
 	wgpuSurfacePresent(m_context->surface());
@@ -3676,6 +4579,7 @@ WebGPUVertexBuffer::WebGPUVertexBuffer(WebGPUD3DDevice *device, UINT length, DWO
 
 WebGPUVertexBuffer::~WebGPUVertexBuffer()
 {
+	m_device->flushMirror(m_mirror);
 	m_device->Release();
 }
 
@@ -3708,12 +4612,14 @@ HRESULT WebGPUVertexBuffer::GetDevice(IDirect3DDevice8 **device)
 	return ReturnObject<IDirect3DDevice8>(m_device, device);
 }
 
-HRESULT WebGPUVertexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD)
+HRESULT WebGPUVertexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD flags)
 {
 	if (!data || offset > m_data.size() || (size && static_cast<size_t>(offset) + size > m_data.size())) {
 		return D3DERR_INVALIDCALL;
 	}
 	*data = m_data.data() + offset;
+	if (m_mirror.pending) m_device->flushMirror(m_mirror);
+	m_mirror.markDirty(offset, size ? static_cast<size_t>(offset) + size : m_data.size(), flags);
 	return D3D_OK;
 }
 
@@ -3744,6 +4650,7 @@ WebGPUIndexBuffer::WebGPUIndexBuffer(WebGPUD3DDevice *device, UINT length, DWORD
 
 WebGPUIndexBuffer::~WebGPUIndexBuffer()
 {
+	m_device->flushMirror(m_mirror);
 	m_device->Release();
 }
 
@@ -3776,12 +4683,14 @@ HRESULT WebGPUIndexBuffer::GetDevice(IDirect3DDevice8 **device)
 	return ReturnObject<IDirect3DDevice8>(m_device, device);
 }
 
-HRESULT WebGPUIndexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD)
+HRESULT WebGPUIndexBuffer::Lock(UINT offset, UINT size, BYTE **data, DWORD flags)
 {
 	if (!data || offset > m_data.size() || (size && static_cast<size_t>(offset) + size > m_data.size())) {
 		return D3DERR_INVALIDCALL;
 	}
 	*data = m_data.data() + offset;
+	if (m_mirror.pending) m_device->flushMirror(m_mirror);
+	m_mirror.markDirty(offset, size ? static_cast<size_t>(offset) + size : m_data.size(), flags);
 	return D3D_OK;
 }
 

@@ -315,7 +315,7 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXECUTABLE_SUFFIX": ".html",
-                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten",
+                "VCPKG_TARGET_TRIPLET": "wasm32-emscripten-wasmeh",
                 "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{EMSCRIPTEN_ROOT}/cmake/Modules/Platform/Emscripten.cmake",
                 "RTS_BUILD_CORE_TOOLS": "OFF",
                 "RTS_BUILD_GENERALS": "OFF",

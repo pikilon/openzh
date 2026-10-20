@@ -1,11 +1,13 @@
 // Browser features the launcher needs before it reads several GB of game data
 // (docs/briefs/30-browser-features.md): WebGPU for rendering, cross-origin
-// isolation for SharedArrayBuffer and OPFS for the archive store.
+// isolation for SharedArrayBuffer and OPFS for the archive store. The engine is built with JSPI
+// (WebAssembly.Suspending, Chromium 137+), which it needs to suspend while the browser works.
 
 export interface FeatureEnv {
   gpu: unknown; // navigator.gpu
   crossOriginIsolated: boolean; // window.crossOriginIsolated
   getDirectory: unknown; // navigator.storage?.getDirectory
+  suspending: unknown; // WebAssembly.Suspending
 }
 
 export function currentEnv(): FeatureEnv {
@@ -13,6 +15,7 @@ export function currentEnv(): FeatureEnv {
     gpu: navigator.gpu,
     crossOriginIsolated: window.crossOriginIsolated,
     getDirectory: navigator.storage?.getDirectory,
+    suspending: (WebAssembly as { Suspending?: unknown }).Suspending,
   };
 }
 
@@ -22,5 +25,6 @@ export function missingFeatures(env: FeatureEnv): string[] {
   if (env.gpu === undefined || env.gpu === null) missing.push("WebGPU");
   if (env.crossOriginIsolated !== true) missing.push("Cross-origin isolation");
   if (typeof env.getDirectory !== "function") missing.push("Origin private file system");
+  if (typeof env.suspending !== "function") missing.push("WebAssembly JSPI");
   return missing;
 }

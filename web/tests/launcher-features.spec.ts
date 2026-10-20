@@ -10,11 +10,12 @@ import { installZip } from "./helpers/install-zip";
 
 // Issue #30: before a player spends minutes importing several GB, the launcher
 // must name the browser features it needs: WebGPU, cross-origin isolation (for
-// SharedArrayBuffer) and OPFS. Element ids are part of the page's contract.
+// SharedArrayBuffer) and OPFS; and, since the engine moved to JSPI,
+// WebAssembly.Suspending. Element ids are part of the page's contract.
 // Issue #159: with a feature missing the page is `unsupported`, the picker is
 // disabled and the engine never starts, even with a stored install.
 
-type MissingFeature = "gpu" | "isolation" | "opfs";
+type MissingFeature = "gpu" | "isolation" | "opfs" | "jspi";
 
 // Overrides the page's environment before any page script runs, which is the
 // only way to simulate a browser that lacks these features in Brave. The store
@@ -34,6 +35,9 @@ async function openLauncher(
     }
     if (features.includes("opfs")) {
       Object.defineProperty(navigator.storage, "getDirectory", { value: undefined, configurable: true });
+    }
+    if (features.includes("jspi")) {
+      Object.defineProperty(WebAssembly, "Suspending", { value: undefined, configurable: true });
     }
   }, missing);
   await page.goto(launcherUrl(module));
@@ -111,10 +115,10 @@ test("4: when a feature is missing, #zip-input is disabled and the engine never 
 });
 
 test("5: several missing features appear in contract order separated by ', '", async ({ page }) => {
-  await openLauncher(page, ["gpu", "isolation", "opfs"]);
+  await openLauncher(page, ["gpu", "isolation", "opfs", "jspi"]);
 
   await expect(page.locator("#unsupported")).toHaveText(
-    "Missing browser features: WebGPU, Cross-origin isolation, Origin private file system",
+    "Missing browser features: WebGPU, Cross-origin isolation, Origin private file system, WebAssembly JSPI",
   );
 });
 
@@ -126,4 +130,12 @@ test("6: when not cross-origin isolated, #unsupported contains Cross-origin isol
   const unsupported = page.locator("#unsupported");
   await expect(unsupported).toBeVisible();
   await expect(unsupported).toContainText("Cross-origin isolation");
+});
+
+test("7: without WebAssembly.Suspending, #unsupported contains WebAssembly JSPI", async ({ page }) => {
+  await openLauncher(page, ["jspi"]);
+
+  const unsupported = page.locator("#unsupported");
+  await expect(unsupported).toBeVisible();
+  await expect(unsupported).toContainText("WebAssembly JSPI");
 });

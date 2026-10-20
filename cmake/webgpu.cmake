@@ -8,7 +8,8 @@ endif()
 # JS exceptions every call that may throw inside a function with cleanups leaves wasm through an invoke_*
 # trampoline. JSPI suspends the wasm stack in the engine instead, so the code runs uninstrumented. The vcpkg
 # dependencies must use the same exception and setjmp model, hence the wasm32-emscripten-wasmeh triplet.
-option(ZHWP_WEB_JSPI "Use JSPI and native wasm exceptions instead of ASYNCIFY and JS exceptions" OFF)
+# Phone, main menu: ~45 -> ~55 fps; the ASYNCIFY and invoke_* overhead was ~9 % of the main thread.
+option(ZHWP_WEB_JSPI "Use JSPI and native wasm exceptions instead of ASYNCIFY and JS exceptions" ON)
 if(ZHWP_WEB_JSPI)
     if(NOT VCPKG_TARGET_TRIPLET STREQUAL "wasm32-emscripten-wasmeh")
         message(FATAL_ERROR "ZHWP_WEB_JSPI needs -DVCPKG_TARGET_TRIPLET=wasm32-emscripten-wasmeh")

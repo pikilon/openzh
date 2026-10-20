@@ -1634,6 +1634,31 @@
         "docs/specs/touch-controls.md"
       ],
       "summary": "The left touch column renders at 70% of its 56x54 base, the game menu moves from the top bar into it, and a fullscreen-exit button appears at its end only while #screen is fullscreen."
+    },
+    {
+      "issue": 197,
+      "title": "Touch controls: the fullscreen toggle in the left column",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/197-touch-fullscreen-column.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/touch-controls.spec.ts tests/launcher-topbar-game.spec.ts tests/launcher-fullscreen.spec.ts tests/launcher-fullscreen-fallbacks.spec.ts",
+      "test_paths": [
+        "web/tests/touch-controls.spec.ts",
+        "web/tests/launcher-topbar-game.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/app/shell.css",
+        "web/src/main.ts",
+        "web/src/touch.ts",
+        "docs/specs/touch-controls.md"
+      ],
+      "summary": "In touch play the column's last button #touch-fullscreen enters fullscreen windowed and exits it in fullscreen, while the top-bar #fullscreen hides with the overlay shown and returns when it is hidden; desktop keeps the top-bar button."
     }
   ]
 }

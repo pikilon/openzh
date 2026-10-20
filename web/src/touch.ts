@@ -317,6 +317,10 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+    // In touch play the column holds the fullscreen action; the top-bar button
+    // takes over again when the overlay is hidden (web/app/shell.css).
+    if (show) document.body.dataset.touchOverlay = "on";
+    else delete document.body.dataset.touchOverlay;
     if (show) restoreDock();
     if (!show) {
       clearLocks();

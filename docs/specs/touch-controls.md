@@ -50,7 +50,7 @@ two-finger gestures are left for later.
 ## 3. Scope
 
 In: a toggle button, the overlay with the game-menu button, three lock buttons,
-a fullscreen-exit button and a mini joystick, and the mapping from touch to the
+a fullscreen toggle and a mini joystick, and the mapping from touch to the
 engine's mouse and keyboard input, in the browser build, in windowed and
 fullscreen play.
 
@@ -80,19 +80,20 @@ native builds.
 
 * Controls anchored to the bottom of the game area, drawn over the canvas: the
   game menu, the **Left lock**, **Right lock** and **Multi lock**, and the
-  fullscreen exit (only in fullscreen), stacked in a column at the bottom-left
-  corner, and the **mini joystick** at the very bottom-right corner. The order
-  top to bottom is game menu, Left, Right, Multi, fullscreen exit.
+  fullscreen toggle, stacked in a column at the bottom-left corner, and the
+  **mini joystick** at the very bottom-right corner. The order top to bottom is
+  game menu, Left, Right, Multi, fullscreen toggle.
 * Every column button is rendered at 70 % of its 56 x 54 CSS px base
   (39.2 x 37.8 CSS px), owner's choice of 2026-10-20; icons and the text label
   shrink with it. The label stays visible: Left, Right and Multi carry a mouse
   icon (the pressed button of the mouse is filled; Multi is a mouse with a
   plus), `aria-pressed` reflects the lock, the game menu carries the pause
-  icon, and the fullscreen exit the four-corner icon.
-* `#touch-fullscreen-exit` is hidden while `#screen` is not the fullscreen
-  element and appears as the last column control while it is. Entering
-  fullscreen stays on the top-bar `#fullscreen` button; the column only offers
-  the exit.
+  icon, and the fullscreen toggle the four-corner icon.
+* `#touch-fullscreen` is the last column control: windowed it reads "Enter
+  fullscreen" and enters; while `#screen` is the fullscreen element it reads
+  "Exit fullscreen" and leaves. While the touch overlay is shown, the top-bar
+  `#fullscreen` is not displayed; it returns when the overlay is hidden, which
+  is the only fullscreen control a desktop session uses.
 * The overlay is a DOM element inside `#screen`, the element put in browser
   fullscreen (`web/src/main.ts`). It must sit inside `#screen`, not beside it,
   or it is hidden in fullscreen.
@@ -152,10 +153,11 @@ change the lock.
   `keydown` + `keyup` to the engine as before (owner, 2026-10-20: it moves out
   of the top bar into the touch column). It is reachable only while the overlay
   is shown; on desktop the keyboard Esc still opens the menu.
-* The fullscreen exit is the last column control and only shows while `#screen`
-  is the fullscreen element. It calls the browser's `exitFullscreen` and sends
-  no key or pointer event to the engine. Entering fullscreen stays on the
-  top-bar `#fullscreen` button.
+* The fullscreen toggle is the last column control. It calls
+  `requestFullscreen` on `#screen` while windowed and `exitFullscreen` while
+  fullscreen, sends no key or pointer event to the engine, and switches its
+  label with `fullscreenchange`, including a browser Esc (owner, 2026-10-20:
+  in touch play it replaces the top-bar button).
 
 ## 5. Mapping to the engine
 
@@ -197,7 +199,7 @@ becomes a drag, not a right click.
 1. The toggle button is visible in the playing view on an 812 x 375 viewport with touch emulation, and is not visible in the launcher before Play.
 2. Pressing the toggle shows the overlay; pressing it again hides the overlay and clears the locks and any joystick push.
 3. The overlay lies inside `#screen`, and stays visible and usable after `requestFullscreen` on `#screen`.
-4. The column runs top to bottom (game menu, Left, Right, Multi, fullscreen exit in fullscreen) at the left edge, each button is 39.2 x 37.8 CSS px on the 812 x 375 viewport (70 % of its 56 x 54 base), and the joystick is at the bottom-right corner.
+4. The column runs top to bottom (game menu, Left, Right, Multi, fullscreen toggle) at the left edge, each button is 39.2 x 37.8 CSS px on the 812 x 375 viewport (70 % of its 56 x 54 base), and the joystick is at the bottom-right corner.
 5. A tap on each lock button toggles its `aria-pressed` between true and false and sends no map click.
 6. With no lock on, a tap on a unit in the map selects it (left click), and a 500 ms press without movement issues a right click at that point.
 7. With Left lock on, a one-finger drag over units selects exactly the units inside the box when the finger lifts.
@@ -208,7 +210,8 @@ becomes a drag, not a right click.
 12. Desktop mouse and keyboard behaviour is unchanged: with the overlay hidden and no touch, the same input produces the same events as before.
 13. The toggle's on/off choice survives a reload; a blocked `localStorage` falls back to the default without an error in the console.
 14. `#game-menu` is not in the top bar; while the overlay is shown, clicking the first column control sends Escape down and up to the engine, and hiding the overlay hides it.
-15. `#touch-fullscreen-exit` is hidden windowed, appears as the last column control in fullscreen, and clicking it leaves fullscreen and hides it.
+15. `#touch-fullscreen` is the last column control: windowed it reads "Enter fullscreen" and enters fullscreen, in fullscreen it reads "Exit fullscreen" and leaves, and hiding the overlay hides it.
+16. While the overlay is shown the top-bar `#fullscreen` is hidden; hiding the overlay brings it back, and a desktop context keeps it while `#touch-fullscreen` stays hidden with the overlay.
 
 ## 8. Open questions for the brief
 
@@ -221,7 +224,7 @@ becomes a drag, not a right click.
 
 * Playwright in Brave only (D-04), with touch emulation (`hasTouch`) and the
   fake engine harness in `web/tests/harness/` for the input contracts. Criteria
-  1-5 and 13 need no engine. Criteria 6-12, 14 and 15 need a fake engine that
+  1-5 and 13 need no engine. Criteria 6-12 and 14-16 need a fake engine that
   records the mouse and key events it receives.
 * Test paths: `web/tests/touch-controls.spec.ts` and
   `web/tests/launcher-topbar-game.spec.ts`. No game data in the tests

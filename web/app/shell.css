@@ -427,7 +427,7 @@ body {
   pointer-events: auto;
 }
 
-/* The vertical column: game menu, the three latches and the fullscreen exit.
+/* The vertical column: game menu, the three latches and the fullscreen toggle.
    The 56 x 54 buttons are the design base; the whole column renders at 70 %
    of it (owner, 2026-10-20), icons, labels and gaps included. */
 .touch-column {
@@ -437,6 +437,13 @@ body {
   gap: 6px;
   transform: scale(0.7);
   transform-origin: left bottom;
+}
+
+/* In touch play the column owns the fullscreen action (owner, 2026-10-20);
+   the top-bar button returns with the overlay hidden, and is the only one a
+   desktop session uses. src/touch.ts sets the attribute in showOverlay. */
+body[data-touch-overlay="on"] #fullscreen {
+  display: none;
 }
 
 .touch-button {

@@ -43,6 +43,28 @@ test("18: the game menu lives in the touch column, not the top bar, and sends Es
   await expect(page.locator("#game-menu")).toBeHidden();
 });
 
+test("23: touch play hides the top-bar fullscreen; the column toggle takes over", async ({ page }, info) => {
+  await clearStored(page);
+  await page.goto(launcherUrl("/harness/errors/resolves.js"));
+  await waitForState(page, "no-assets");
+  await page.locator("#zip-input").setInputFiles(await installZip(info.outputPath()));
+  await waitForState(page, "playing", START_TIMEOUT);
+
+  await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+  await expect(page.locator("#touch-fullscreen")).toBeVisible();
+  await expect(page.locator("#touch-fullscreen")).toHaveAttribute("aria-label", "Enter fullscreen");
+
+  await page.locator("#touch-toggle").click();
+  await expect(page.locator("#touch-controls")).toBeHidden();
+  await expect(page.locator("#touch-fullscreen")).toBeHidden();
+  await expect(page.locator("#topbar #fullscreen")).toBeVisible();
+
+  await page.locator("#touch-toggle").click();
+  await expect(page.locator("#touch-controls")).toBeVisible();
+  await expect(page.locator("#touch-fullscreen")).toBeVisible();
+  await expect(page.locator("#topbar #fullscreen")).toBeHidden();
+});
+
 test("the manifest asks for landscape", async ({ request }) => {
   const manifest = await (await request.get("/app/manifest.webmanifest")).json();
   expect(manifest.orientation).toBe("landscape");

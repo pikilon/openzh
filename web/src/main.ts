@@ -44,6 +44,7 @@ type EngineModule = {
   _GeneralsXSetAudioMuted?: (muted: number) => unknown;
   _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
+  _GeneralsXIsCinematic?: () => unknown;
   FS?: { syncfs?: (populate: boolean, callback: (error: unknown | null) => void) => void };
 };
 

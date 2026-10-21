@@ -120,6 +120,10 @@ native builds.
 * Pointer capture: the joystick keeps the pointer that started it; other
   pointers are ignored. `pointercancel` and window `blur` release it.
 * The vector is sent to the engine as analog camera pan (see 5.2).
+* During a scripted cinematic the engine reports an active letterbox; the
+  joystick is disabled until it ends: it dims, sets `aria-disabled="true"`,
+  ignores pointers, releases an active drag and sends no pan. It re-enables
+  within 200 ms of the letterbox clearing.
 
 ### 4.4 Lock buttons
 
@@ -214,6 +218,7 @@ becomes a drag, not a right click.
 14. `#game-menu` is not in the top bar; while the overlay is shown, clicking the first column control sends Escape down and up to the engine, and hiding the overlay hides it.
 15. `#touch-fullscreen` is the last column control: windowed it reads "Enter fullscreen" and enters fullscreen, in fullscreen it reads "Exit fullscreen" and leaves, and hiding the overlay hides it.
 16. While the overlay is shown the top-bar `#fullscreen` stays visible next to `#touch-fullscreen`; hiding the overlay hides only the column, and a desktop context keeps the top-bar button while `#touch-fullscreen` stays hidden with the overlay.
+17. While the engine reports a cinematic, the joystick sends no pan call, ignores a drag and shows `aria-disabled="true"`; when the cinematic ends it pans again.
 
 ## 8. Open questions for the brief
 

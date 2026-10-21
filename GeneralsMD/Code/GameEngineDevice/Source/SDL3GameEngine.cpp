@@ -60,6 +60,7 @@
 #include "Common/GlobalData.h"
 #include "Common/MessageStream.h"
 #include "GameLogic/VictoryConditions.h"
+#include "GameLogic/ScriptEngine.h"
 #include "Common/AudioAffect.h"
 #include "Common/GameAudio.h"
 #include "GameClient/View.h"
@@ -274,6 +275,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
 {
 	if (TheTacticalView == nullptr || TheGlobalData == nullptr)
 		return FALSE;
+	// Issue #200: a scripted cinematic owns the camera; the touch joystick must not move it.
+	if (TheScriptEngine != nullptr && TheScriptEngine->isLetterBoxActive())
+		return FALSE;
 	if (x > 1.0f) x = 1.0f;
 	else if (x < -1.0f) x = -1.0f;
 	if (y > 1.0f) y = 1.0f;
@@ -289,6 +293,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
 	if (TheInGameUI != nullptr)
 		TheInGameUI->setScrollAmount(offset);
 	return TheTacticalView->userScrollBy(&offset);
+}
+
+// GeneralsX @feature 20/10/2026 Issue #200: the page disables the touch joystick while a
+// scripted cinematic plays. The letterbox is the engine's own cinematic marker.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXIsCinematic()
+{
+	if (TheScriptEngine == nullptr)
+		return FALSE;
+	return TheScriptEngine->isLetterBoxActive() ? TRUE : FALSE;
 }
 
 // GeneralsX @feature Codex 06/08/2026 Pause when the player leaves the game surface. Esc cannot

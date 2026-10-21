@@ -9,9 +9,13 @@ import { readJoystickOffset, readTouchControls, writeJoystickOffset, writeTouchC
 const LONG_PRESS_MS = 500;
 const MOVE_SLOP_PX = 10;
 const DEAD_ZONE = 0.15;
+// Issue #200: the engine marks a scripted cinematic with the letterbox; poll it
+// so the joystick disables itself while the camera is not the player's.
+const CINEMATIC_POLL_MS = 200;
 
 export interface TouchEngine {
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
+  _GeneralsXIsCinematic?: () => unknown;
 }
 
 export interface TouchControlsHost {
@@ -317,8 +321,11 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
-    if (show) restoreDock();
-    if (!show) {
+    if (show) {
+      startCinematicPolling();
+      restoreDock();
+    } else {
+      stopCinematicPolling();
       clearLocks();
       resetMap(true);
       resetJoystick();
@@ -339,8 +346,11 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   let joyX = 0;
   let joyY = 0;
   let panFrame = 0;
+  let cinematic = false;
+  let cinematicTimer = 0;
 
   function pan(x: number, y: number): void {
+    if (cinematic) return;
     const engine = host.engine();
     const fn = engine?._GeneralsXPanCamera;
     if (typeof fn === "function") {
@@ -387,6 +397,53 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     if (wasActive) pan(0, 0);
   }
 
+  // Issue #200: a scripted cinematic owns the camera. The engine reports its
+  // letterbox; while it is on the stick is dimmed, ignores pointers and stops
+  // any drag. The engine's GeneralsXPanCamera also refuses to scroll.
+  function readCinematic(): boolean {
+    const engine = host.engine();
+    const fn = engine?._GeneralsXIsCinematic;
+    if (typeof fn !== "function") return false;
+    try {
+      return Boolean(fn.call(engine));
+    } catch {
+      return false;
+    }
+  }
+
+  function setCinematic(on: boolean): void {
+    if (cinematic === on) return;
+    if (on) {
+      // Stop an active drag before latching so the 0,0 stop still reaches the engine.
+      resetJoystick();
+      cinematic = true;
+      joystick.dataset.cinematic = "on";
+      joystick.setAttribute("aria-disabled", "true");
+      return;
+    }
+    cinematic = false;
+    delete joystick.dataset.cinematic;
+    joystick.removeAttribute("aria-disabled");
+  }
+
+  function pollCinematic(): void {
+    setCinematic(readCinematic());
+  }
+
+  function startCinematicPolling(): void {
+    if (cinematicTimer !== 0) return;
+    pollCinematic();
+    cinematicTimer = window.setInterval(pollCinematic, CINEMATIC_POLL_MS);
+  }
+
+  function stopCinematicPolling(): void {
+    if (cinematicTimer !== 0) {
+      window.clearInterval(cinematicTimer);
+      cinematicTimer = 0;
+    }
+    setCinematic(false);
+  }
+
   function updateJoystick(clientX: number, clientY: number): void {
     const rect = joystick.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
@@ -420,7 +477,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   }
 
   function onJoystickDown(event: PointerEvent): void {
-    if (!isTouch(event) || joystickPointer !== null) return;
+    if (cinematic || !isTouch(event) || joystickPointer !== null) return;
     event.preventDefault();
     event.stopPropagation();
     joystickPointer = event.pointerId;

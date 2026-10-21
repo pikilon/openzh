@@ -526,6 +526,14 @@ body {
   height: 55px;
   border-radius: 50%;
   touch-action: none;
+  transition: opacity 120ms ease-out;
+}
+
+/* Issue #200: a scripted cinematic owns the camera; the stick ignores touches
+   and dims until the engine reports that the letterbox is gone. */
+.touch-joystick[data-cinematic="on"] {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .touch-joystick::before {

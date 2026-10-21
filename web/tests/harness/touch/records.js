@@ -41,5 +41,8 @@ export default async function factory(options) {
       probe.__panCalls.push([x, y]);
       return 1;
     },
+    _GeneralsXIsCinematic() {
+      return probe.__cinematic ? 1 : 0;
+    },
   };
 }

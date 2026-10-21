@@ -20,6 +20,7 @@ type Probe = Window &
     }[];
     __touchKeys?: { type: string; key: string; code: string }[];
     __panCalls?: [number, number][];
+    __cinematic?: boolean;
   };
 
 async function startPlaying(page: Page, dir: string): Promise<void> {
@@ -370,6 +371,47 @@ test.describe("touch device", () => {
     await expect
       .poll(() => page.locator("#touch-knob").evaluate((element) => element.style.transform))
       .toBe("translate(0px, 0px)");
+  });
+
+  test("20: the joystick is disabled while a cinematic plays", async ({ page }, info) => {
+    await startPlaying(page, info.outputPath());
+    const joystick = page.locator("#touch-joystick");
+    await expect(joystick).not.toHaveAttribute("aria-disabled", "true");
+
+    await page.evaluate(() => {
+      (window as unknown as Probe).__cinematic = true;
+    });
+    await expect(joystick).toHaveAttribute("aria-disabled", "true", { timeout: WAIT });
+    await expect(joystick).toHaveAttribute("data-cinematic", "on");
+    const during = (await panCalls(page)).length;
+
+    await joystickTouch(page, "pointerdown", 0, 0);
+    await joystickTouch(page, "pointermove", 0, -50);
+    await page.waitForTimeout(300);
+    await joystickTouch(page, "pointerup", 0, -50);
+    expect((await panCalls(page)).length).toBe(during);
+    await expect
+      .poll(() => page.locator("#touch-knob").evaluate((element) => element.style.transform))
+      .toBe("translate(0px, 0px)");
+
+    await page.evaluate(() => {
+      (window as unknown as Probe).__cinematic = false;
+    });
+    await expect(joystick).not.toHaveAttribute("aria-disabled", "true", { timeout: WAIT });
+    await expect(joystick).not.toHaveAttribute("data-cinematic", "on");
+
+    await joystickTouch(page, "pointerdown", 0, 0);
+    await joystickTouch(page, "pointermove", 0, -50);
+    await expect
+      .poll(
+        async () => {
+          const calls = (await panCalls(page)).slice(during);
+          return calls.some(([x, y]) => Math.abs(x) < 0.05 && y < -0.9);
+        },
+        { timeout: WAIT },
+      )
+      .toBe(true);
+    await joystickTouch(page, "pointerup", 0, -50);
   });
 
   test("11: a touch on the overlay never reaches the map", async ({ page }, info) => {

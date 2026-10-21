@@ -309,6 +309,36 @@ test.describe("touch device", () => {
     expect(events.at(-1)).toMatchObject({ type: "pointerup", button: 0, buttons: 0 });
   });
 
+  test("7b: Pan lock turns a one-finger drag into a right-button drag scroll", async ({
+    page,
+  }, info) => {
+    await startPlaying(page, info.outputPath());
+    const box = await page.locator("#touch-pan").boundingBox();
+    const screen = await page.locator("#screen").boundingBox();
+    expect(box, "Pan button is rendered").not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(screen!.y);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(screen!.x + screen!.width);
+    await page.locator("#touch-pan").click();
+    await expect(page.locator("#touch-pan")).toHaveAttribute("aria-pressed", "true");
+    await page.locator("#touch-left").click();
+    await expect(page.locator("#touch-pan")).toHaveAttribute("aria-pressed", "false");
+    await page.locator("#touch-pan").click();
+    const before = (await pointerEvents(page)).length;
+
+    await canvasTouch(page, "pointerdown", 0.3, 0.4);
+    await canvasTouch(page, "pointermove", 0.5, 0.5);
+    await canvasTouch(page, "pointermove", 0.65, 0.6);
+    await canvasTouch(page, "pointerup", 0.65, 0.6);
+
+    await expect
+      .poll(async () => (await pointerEvents(page)).length, { timeout: WAIT })
+      .toBeGreaterThanOrEqual(before + 4);
+    const events = (await pointerEvents(page)).slice(before);
+    expect(events[0]).toMatchObject({ type: "pointerdown", button: 2, buttons: 2 });
+    expect(events.filter((event) => event.type === "pointermove").length).toBeGreaterThanOrEqual(1);
+    expect(events.at(-1)).toMatchObject({ type: "pointerup", button: 2, buttons: 0 });
+  });
+
   test("8: Right lock turns a tap into a right click and no selection click", async ({
     page,
   }, info) => {

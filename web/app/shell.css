@@ -480,6 +480,20 @@ body {
   box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
 }
 
+/* Pan lock: right side, left of the zoom bar, above the joystick's reach. */
+.touch-pan[hidden] {
+  display: none;
+}
+
+.touch-pan {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: calc(46px + max(6px, env(safe-area-inset-right)));
+  z-index: 5;
+  transform: scale(0.7);
+  transform-origin: right top;
+}
+
 /* The dock holds the joystick and its drag grip. By default it sits clear of the
    corner, where the right thumb rests; the grip moves it (src/touch.ts). */
 .touch-joystick-dock {

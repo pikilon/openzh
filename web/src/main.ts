@@ -45,6 +45,7 @@ type EngineModule = {
   _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
   _GeneralsXIsCinematic?: () => unknown;
+  _GeneralsXZoomCamera?: (notches: number) => unknown;
   FS?: { syncfs?: (populate: boolean, callback: (error: unknown | null) => void) => void };
 };
 

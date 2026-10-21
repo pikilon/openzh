@@ -383,6 +383,7 @@ test.describe("touch device", () => {
     });
     await expect(joystick).toHaveAttribute("aria-disabled", "true", { timeout: WAIT });
     await expect(joystick).toHaveAttribute("data-cinematic", "on");
+    await expect(page.locator("#touch-zoom")).toHaveAttribute("data-cinematic", "on");
     const during = (await panCalls(page)).length;
 
     await joystickTouch(page, "pointerdown", 0, 0);
@@ -399,6 +400,7 @@ test.describe("touch device", () => {
     });
     await expect(joystick).not.toHaveAttribute("aria-disabled", "true", { timeout: WAIT });
     await expect(joystick).not.toHaveAttribute("data-cinematic", "on");
+    await expect(page.locator("#touch-zoom")).not.toHaveAttribute("data-cinematic", "on");
 
     await joystickTouch(page, "pointerdown", 0, 0);
     await joystickTouch(page, "pointermove", 0, -50);

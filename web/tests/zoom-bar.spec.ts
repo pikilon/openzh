@@ -1,10 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { importInstall, openLauncher, START_TIMEOUT } from "./helpers/launcher";
 
-// Issue #195: the touch zoom bar. The fake engine records the wheel events the
-// page synthesises on the canvas, plus pointer and pan events so a touch on the
-// bar cannot be mistaken for a map interaction. No game data and no engine
-// build are involved.
+// Issue #195: the touch zoom bar. The fake engine records the direct zoom calls
+// (and, for an engine without the export, the wheel events the page synthesises
+// on the canvas), plus pointer and pan events so a touch on the bar cannot be
+// mistaken for a map interaction. No game data and no engine build are involved.
 
 const FAKE = "/harness/touch/records.js";
 const WAIT = START_TIMEOUT;
@@ -15,7 +15,9 @@ type Probe = Window &
   typeof globalThis & {
     __touchPointer?: { type: string; pointerType: string; button: number; buttons: number; x: number; y: number }[];
     __panCalls?: [number, number][];
+    __zoomCalls?: number[];
     __wheelEvents?: { deltaY: number; deltaMode: number; defaultPrevented: boolean }[];
+    __noZoomExport?: boolean;
   };
 
 async function startPlaying(page: Page, dir: string): Promise<void> {
@@ -34,6 +36,10 @@ async function panCalls(page: Page): Promise<[number, number][]> {
 
 async function wheelEvents(page: Page): Promise<NonNullable<Probe["__wheelEvents"]>> {
   return page.evaluate(() => [...((window as unknown as Probe).__wheelEvents ?? [])]);
+}
+
+async function zoomCalls(page: Page): Promise<number[]> {
+  return page.evaluate(() => [...((window as unknown as Probe).__zoomCalls ?? [])]);
 }
 
 async function thumbOffset(page: Page): Promise<number> {
@@ -196,6 +202,11 @@ test.describe("touch zoom bar", () => {
     expect(await ticksOpacity()).toBe(0);
     expect(await thumbWidth()).toBeLessThanOrEqual(10);
     expect(await thumbOffset(page)).toBe(0);
+    const triangle = await page.locator("#touch-zoom-thumb").evaluate((element) => {
+      const style = getComputedStyle(element, "::before");
+      return parseFloat(style.borderRightWidth);
+    });
+    expect(triangle).toBeGreaterThanOrEqual(6);
 
     // Pressed: the plate, the ticks and the grip. Headless Brave keeps CSS
     // transitions at time zero without frames, so finish them before measuring.
@@ -237,38 +248,37 @@ test.describe("touch zoom bar", () => {
 
   test("3: dragging up zooms in and the thumb returns on release", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
-    const before = (await wheelEvents(page)).length;
+    const before = (await zoomCalls(page)).length;
 
     expect(await barTouch(page, "pointerdown", 0)).toBe(false);
     await barTouch(page, "pointermove", -48);
-    await expect.poll(async () => (await wheelEvents(page)).length, { timeout: WAIT }).toBeGreaterThan(
+    await expect.poll(async () => (await zoomCalls(page)).length, { timeout: WAIT }).toBeGreaterThan(
       before,
     );
 
-    const events = (await wheelEvents(page)).slice(before);
-    expect(events.length).toBeGreaterThan(0);
-    expect(events.every((event) => event.deltaMode === 0)).toBe(true);
-    expect(events.every((event) => event.deltaY < 0)).toBe(true);
+    const calls = (await zoomCalls(page)).slice(before);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((notches) => notches > 0)).toBe(true);
     expect(await thumbOffset(page)).toBeLessThan(-10);
 
-    const afterMove = events.length;
+    const afterMove = calls.length;
     await barTouch(page, "pointerup", -48);
     await expect.poll(() => thumbOffset(page)).toBe(0);
     await page.waitForTimeout(250);
-    expect((await wheelEvents(page)).length).toBe(before + afterMove);
+    expect((await zoomCalls(page)).length).toBe(before + afterMove);
   });
 
   test("4: dragging down zooms out", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
-    const before = (await wheelEvents(page)).length;
+    const before = (await zoomCalls(page)).length;
 
     await barTouch(page, "pointerdown", 0);
     await barTouch(page, "pointermove", 48);
-    await expect.poll(async () => (await wheelEvents(page)).length, { timeout: WAIT }).toBeGreaterThan(
+    await expect.poll(async () => (await zoomCalls(page)).length, { timeout: WAIT }).toBeGreaterThan(
       before,
     );
-    const events = (await wheelEvents(page)).slice(before);
-    expect(events.every((event) => event.deltaY > 0)).toBe(true);
+    const calls = (await zoomCalls(page)).slice(before);
+    expect(calls.every((notches) => notches < 0)).toBe(true);
     expect(await thumbOffset(page)).toBeGreaterThan(10);
     await barTouch(page, "pointerup", 48);
   });
@@ -286,7 +296,7 @@ test.describe("touch zoom bar", () => {
     expect((await panCalls(page)).length).toBe(pans);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
     expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0);
-    expect((await wheelEvents(page)).length).toBeGreaterThan(0);
+    expect((await zoomCalls(page)).length).toBeGreaterThan(0);
   });
 
   test("6: hiding the overlay hides the bar and resets the thumb", async ({ page }, info) => {
@@ -320,6 +330,22 @@ test.describe("touch zoom bar", () => {
     expect(overlaps(box.bar, landing)).toBe(false);
     expect(landing.right).toBeLessThanOrEqual(box.bar.left - 7);
     expect(box.elementAtCentre).toBe(true);
+  });
+
+  test("9: an engine without the zoom export falls back to the wheel path", async ({ page }, info) => {
+    await page.addInitScript(() => {
+      (window as unknown as Probe).__noZoomExport = true;
+    });
+    await startPlaying(page, info.outputPath());
+    const before = (await wheelEvents(page)).length;
+
+    await barTouch(page, "pointerdown", 0);
+    await barTouch(page, "pointermove", -48);
+    await expect.poll(async () => (await wheelEvents(page)).length, { timeout: WAIT }).toBeGreaterThan(
+      before,
+    );
+    expect((await zoomCalls(page)).length).toBe(0);
+    await barTouch(page, "pointerup", -48);
   });
 });
 

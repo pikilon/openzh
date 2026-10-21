@@ -14,6 +14,7 @@ export default async function factory(options) {
   probe.__touchPointer = [];
   probe.__touchKeys = [];
   probe.__panCalls = [];
+  probe.__zoomCalls = [];
   probe.__wheelEvents = [];
 
   for (const type of ["pointerdown", "pointermove", "pointerup"]) {
@@ -43,7 +44,7 @@ export default async function factory(options) {
     });
   }
 
-  return {
+  const engine = {
     _GeneralsXSetAudioMuted() {
       return 1;
     },
@@ -55,4 +56,11 @@ export default async function factory(options) {
       return probe.__cinematic ? 1 : 0;
     },
   };
+  if (!probe.__noZoomExport) {
+    engine._GeneralsXZoomCamera = (notches) => {
+      probe.__zoomCalls.push(notches);
+      return 1;
+    };
+  }
+  return engine;
 }

@@ -533,6 +533,10 @@ body {
 
 /* Issue #200: a scripted cinematic owns the camera; the stick ignores touches
    and dims until the engine reports that the letterbox is gone. */
+.touch-zoom[data-cinematic="on"] {
+  opacity: 0.35;
+}
+
 .touch-joystick[data-cinematic="on"] {
   opacity: 0.35;
   pointer-events: none;
@@ -713,6 +717,23 @@ body {
     height 160ms ease,
     margin-top 160ms ease,
     border-radius 160ms ease;
+}
+
+/* A left-pointing triangle on the thumb keeps the marker visible beside the
+   finger that covers the thumb itself (owner, 2026-10-21). */
+.touch-zoom-thumb::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  margin-top: -5px;
+  margin-right: 4px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 8px solid var(--accent-soft);
+  filter: drop-shadow(0 0 4px rgba(46, 168, 255, 0.7));
 }
 
 .touch-zoom.is-active .touch-zoom-thumb {

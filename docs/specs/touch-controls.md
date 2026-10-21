@@ -126,6 +126,7 @@ native builds.
 * Pointer capture: the joystick keeps the pointer that started it; other
   pointers are ignored. `pointercancel` and window `blur` release it.
 * The vector is sent to the engine as analog camera pan (see 5.2).
+* The same lock applies on the main menu and its shell map (not in a match): `GeneralsXIsCinematic` and `GeneralsXPanCamera` share `GeneralsXCameraLocked` (owner, 2026-10-21).
 * During a scripted cinematic the engine reports an active letterbox; the
   joystick is disabled until it ends: it dims, sets `aria-disabled="true"`,
   ignores pointers, releases an active drag and sends no pan. It re-enables
@@ -184,13 +185,16 @@ change the lock.
 * While pressed the rail carries nine tick marks (`.touch-zoom-tick`), the
   middle one longer, and a thumb (`#touch-zoom-thumb`) near its centre. The
   thumb follows the finger during a drag, clamped inside the rail, and returns
-  to the centre on release.
+  to the centre on release. A left-pointing triangle on the thumb's left edge
+  keeps the marker visible beside the finger that covers the thumb (owner,
+  2026-10-21).
 * Only touch and pen pointers start a drag (owner's request, 2026-10-20: no
   mixing with scrolling). `pointerdown` captures the pointer and cancels the
   event; vertical movement up zooms in and down zooms out; 4 CSS px is one
-  retail wheel notch. The page synthesises a `WheelEvent` on `#canvas` with
-  `deltaMode: 0` and `deltaY = -notches * 100`, which is the engine's existing
-  wheel path. A tap without movement does not zoom.
+  notch. The bar calls `_GeneralsXZoomCamera(notches)`, which applies the same
+  `userZoom(-notches * View::ZoomHeightPerSecond * m_mouseScrollFactor)` as
+  `LookAtXlat`'s wheel handler; an engine without the export falls back to a
+  synthetic `WheelEvent` on `#canvas`. A tap without movement does not zoom.
 * The bar is relative: its displacement is a zoom delta, not an absolute
   camera position, because the engine exposes no zoom value to the page. An
   absolute fader and pinch are later work.
@@ -265,7 +269,8 @@ rebuild. Negative `deltaY` is zoom in, positive is zoom out.
 18. The zoom bar is visible on the right edge inside `#screen` while the overlay is shown, at least 140 CSS px tall on an 812 x 375 viewport, and hidden with the overlay.
 19. At rest the bar is a thin line with a small thumb and no tick marks; pressing it widens the rail to 30 CSS px, shows the nine tick marks and grows the thumb; dragging up zooms in, dragging down zooms out, and the thumb returns to the centre on release.
 20. The bar never intersects the joystick, its grip or its landing ring, including after the joystick is dragged to its rightmost position.
-21. A touch on the bar sends no pointer event to the canvas, pans no camera and scrolls no page; the page dispatches the zoom as a wheel event on the canvas.
+21. A touch on the bar sends no pointer event to the canvas, pans no camera and scrolls no page; the page zooms through `_GeneralsXZoomCamera` (or the wheel fallback for an engine without it).
+22. The zoom thumb carries a left-pointing triangle so the marker stays visible beside the finger.
 
 ## 8. Open questions for the brief
 

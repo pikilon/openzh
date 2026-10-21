@@ -268,6 +268,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetAudioMuted(Int muted)
 	return TRUE;
 }
 
+// GeneralsX @feature 21/10/2026 Issue #200: the touch joystick must not move a scene the player
+// does not own: a scripted cinematic (letterbox) or the main-menu shell map.
+static bool GeneralsXCameraLocked()
+{
+	if (TheScriptEngine != nullptr && TheScriptEngine->isLetterBoxActive())
+		return true;
+	if (TheGameLogic != nullptr && (TheGameLogic->isInShellGame() || !TheGameLogic->isInGame()))
+		return true;
+	return false;
+}
+
 // GeneralsX @feature 19/10/2026 Issue #187: analog camera pan for the touch joystick. The arrow
 // keys only expose on/off directions, so this applies the same per-frame offset the keyboard
 // scroll uses (LookAtXlat's SCROLL_AMT and keyboard factor), scaled by a vector in [-1, 1].
@@ -276,7 +287,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
 	if (TheTacticalView == nullptr || TheGlobalData == nullptr)
 		return FALSE;
 	// Issue #200: a scripted cinematic owns the camera; the touch joystick must not move it.
-	if (TheScriptEngine != nullptr && TheScriptEngine->isLetterBoxActive())
+	if (GeneralsXCameraLocked())
 		return FALSE;
 	if (x > 1.0f) x = 1.0f;
 	else if (x < -1.0f) x = -1.0f;
@@ -299,9 +310,32 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
 // scripted cinematic plays. The letterbox is the engine's own cinematic marker.
 extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXIsCinematic()
 {
-	if (TheScriptEngine == nullptr)
+	return GeneralsXCameraLocked() ? TRUE : FALSE;
+}
+
+// GeneralsX @feature 21/10/2026 Issue #195: the touch zoom bar drives the tactical view directly.
+// The wheel path runs through the window and LookAt translators, which expect the mouse over the
+// 3D view; a synthetic browser wheel event cannot guarantee that, so the bar calls this with the
+// same math as LookAtXlat's MSG_RAW_MOUSE_WHEEL.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXZoomCamera(float notches)
+{
+	if (TheTacticalView == nullptr || TheGlobalData == nullptr || TheInGameUI == nullptr)
 		return FALSE;
-	return TheScriptEngine->isLetterBoxActive() ? TRUE : FALSE;
+	if (TheGameLogic == nullptr || !TheGameLogic->isInGame() || TheGameLogic->isLoadingMap())
+		return FALSE;
+	if (!TheInGameUI->getInputEnabled())
+		return FALSE;
+	// Issue #200: cinematics and the menu shell map own the camera; no touch zoom either.
+	if (GeneralsXCameraLocked())
+		return FALSE;
+	if (notches > 4.0f)
+		notches = 4.0f;
+	else if (notches < -4.0f)
+		notches = -4.0f;
+	if (notches == 0.0f)
+		return TRUE;
+	TheTacticalView->userZoom(-notches * View::ZoomHeightPerSecond * TheGlobalData->m_mouseScrollFactor);
+	return TRUE;
 }
 
 // GeneralsX @feature Codex 06/08/2026 Pause when the player leaves the game surface. Esc cannot

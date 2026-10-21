@@ -20,6 +20,7 @@ const ZOOM_WHEEL_DELTA_PER_NOTCH = 100;
 export interface TouchEngine {
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
   _GeneralsXIsCinematic?: () => unknown;
+  _GeneralsXZoomCamera?: (notches: number) => unknown;
 }
 
 export interface TouchControlsHost {
@@ -283,14 +284,25 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   // ----- zoom bar -----
 
   // The bar is relative: the engine has no zoom getter, so the thumb shows the
-  // current drag from the centre, not an absolute camera height. The wheel
-  // event is the engine's existing zoom path (LookAtXlat.cpp).
+  // current drag from the centre, not an absolute camera height. It calls the
+  // engine's direct zoom export; an older engine without it falls back to a
+  // synthetic wheel event (the previous path).
   let zoomPointer: number | null = null;
   let zoomLastY = 0;
   let zoomThumbY = 0;
 
   function sendZoom(notches: number): void {
     if (!Number.isFinite(notches) || notches === 0) return;
+    const engine = host.engine();
+    const zoomCamera = engine?._GeneralsXZoomCamera;
+    if (typeof zoomCamera === "function") {
+      try {
+        zoomCamera.call(engine, notches);
+        return;
+      } catch {
+        // Fall through to the wheel path for an engine without the export.
+      }
+    }
     const event = new WheelEvent("wheel", {
       bubbles: true,
       cancelable: true,
@@ -333,6 +345,8 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     if (!playing || !enabled || !isTouch(event) || zoomPointer !== null) return;
     event.preventDefault();
     event.stopPropagation();
+    // Issue #200: the bar is dimmed during a cinematic; the touch is swallowed, not zoomed.
+    if (cinematic) return;
     zoomPointer = event.pointerId;
     zoom.classList.add("is-active");
     zoomLastY = event.clientY;
@@ -530,12 +544,15 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     if (on) {
       // Stop an active drag before latching so the 0,0 stop still reaches the engine.
       resetJoystick();
+      resetZoom();
       cinematic = true;
+      zoom.dataset.cinematic = "on";
       joystick.dataset.cinematic = "on";
       joystick.setAttribute("aria-disabled", "true");
       return;
     }
     cinematic = false;
+    delete zoom.dataset.cinematic;
     delete joystick.dataset.cinematic;
     joystick.removeAttribute("aria-disabled");
   }

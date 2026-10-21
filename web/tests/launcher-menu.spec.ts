@@ -424,3 +424,58 @@ test("30: the title, headings and menu/about text name no EA trademark", async (
     expect(text).not.toMatch(/Generals|Zero Hour/i);
   }
 });
+
+// Issue #201: the hamburger menu owns a plain page reload. Unlike #reload,
+// which deletes the stored archives, this action keeps all stored data.
+
+test("201: the hamburger menu holds an enabled Refresh page button", async ({ page }) => {
+  await openShell(page);
+  await expectState(page, "no-assets", WAIT);
+  // The owner asked for the menu, not the top bar.
+  await expect(page.locator("#topbar #refresh-page")).toHaveCount(0);
+
+  await openMenu(page);
+
+  const refresh = page.locator("#menu #refresh-page");
+  await expect(refresh).toHaveCount(1);
+  await expect(refresh).toBeVisible();
+  await expect(refresh).toBeEnabled();
+  await expect(refresh).toHaveAttribute("type", "button");
+  await expect(refresh).toHaveText("Refresh page");
+  await expect(refresh).toHaveAccessibleName("Refresh page");
+});
+
+test("201: #refresh-page reloads the page", async ({ page }) => {
+  await openShell(page);
+  await expectState(page, "no-assets", WAIT);
+  await openMenu(page);
+  await page.evaluate(() => {
+    (window as unknown as { __refreshMarker?: boolean }).__refreshMarker = true;
+  });
+
+  const loaded = page.waitForEvent("load");
+  await page.locator("#refresh-page").click();
+  await loaded;
+
+  await expectShell(page);
+  await expectState(page, "no-assets", START_WAIT);
+  const marker = await page.evaluate(
+    () => (window as unknown as { __refreshMarker?: boolean }).__refreshMarker,
+  );
+  expect(marker).toBeUndefined();
+});
+
+test("201: #refresh-page keeps the stored game data and returns to the game", async ({ page }, info) => {
+  await startPlaying(page, info.outputPath());
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await openMenu(page);
+
+  const loaded = page.waitForEvent("load");
+  await page.locator("#refresh-page").click();
+  await loaded;
+
+  await expectShell(page);
+  await expect(page.locator("#stored-summary")).toHaveText("Stored: 4 archives");
+  await expectState(page, "playing");
+  await expect(page.locator("#canvas")).toBeVisible();
+});

@@ -81,6 +81,7 @@ const menu = byId<HTMLDialogElement>("menu");
 const menuClose = byId<HTMLButtonElement>("menu-close");
 const menuStored = byId<HTMLElement>("menu-stored");
 const menuStorage = byId<HTMLElement>("menu-storage");
+const refreshPage = byId<HTMLButtonElement>("refresh-page");
 const reload = byId<HTMLButtonElement>("reload");
 const reloadDialog = byId<HTMLDialogElement>("reload-dialog");
 const reloadWarning = byId<HTMLElement>("reload-warning");
@@ -1094,6 +1095,9 @@ function wireMenu(): void {
     menuButton.setAttribute("aria-expanded", "false");
     menuButton.focus();
   });
+
+  // A plain reload: unlike #reload it deletes nothing and keeps the store.
+  refreshPage.addEventListener("click", () => window.location.reload());
 
   about.addEventListener("click", () => openDialog(aboutDialog));
   aboutClose.addEventListener("click", () => closeDialog(aboutDialog));

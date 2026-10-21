@@ -1659,6 +1659,29 @@
         "docs/specs/touch-controls.md"
       ],
       "summary": "In touch play the column's last button #touch-fullscreen enters fullscreen windowed and exits it in fullscreen, while the top-bar #fullscreen hides with the overlay shown and returns when it is hidden; desktop keeps the top-bar button."
+    },
+    {
+      "issue": 201,
+      "title": "Launcher: refresh button in the hamburger menu",
+      "phase": 1,
+      "status": "needs-owner",
+      "blocked": false,
+      "blocked_by": null,
+      "size": "s",
+      "local_model_ok": true,
+      "brief": "docs/briefs/201-menu-refresh.md",
+      "depends_on": [],
+      "check": "cd web && npx playwright test tests/launcher-menu.spec.ts",
+      "test_paths": [
+        "web/tests/launcher-menu.spec.ts"
+      ],
+      "allowed_paths": [
+        "web/app/index.html",
+        "web/src/main.ts",
+        "web/tests/launcher-menu.spec.ts",
+        "docs/tasks.json"
+      ],
+      "summary": "A Refresh page button in the hamburger menu's new App section reloads the document through window.location.reload(), keeping the stored game data, saves and preferences; #reload stays the delete-only action."
     }
   ]
 }

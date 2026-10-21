@@ -8,6 +8,7 @@ import { listStored } from "./opfs-store";
 import { FileBridge } from "./bridge";
 import { mountArchives } from "./mount";
 import { addUserDataPersistence } from "./user-data";
+import { keepWebGpuAlive } from "./webgpu-keepalive";
 
 export { saveUserData } from "./user-data";
 export { addUserFiles } from "./user-files";
@@ -20,6 +21,7 @@ type Options = {
 export async function prepareEngineOptions<T extends object>(
   options: T,
 ): Promise<T & { preRun: ((m: any) => void)[] }> {
+  keepWebGpuAlive();
   const files: StoredFile[] = await listStored();
   const bridge = files.length > 0 ? await FileBridge.start(files) : undefined;
   if (bridge !== undefined) {

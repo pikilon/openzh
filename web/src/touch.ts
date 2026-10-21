@@ -1,8 +1,8 @@
 // Touch controls (docs/specs/touch-controls.md): the toggle, the overlay with
-// its three latch buttons and the mini joystick, and the translation of touches
-// into the pointer and keyboard events the SDL3 engine already understands.
-// Desktop input is untouched: only pointerType "touch" (and "pen") is captured,
-// and only while the overlay is shown.
+// its three latch buttons, the mini joystick and the zoom bar, and the
+// translation of touches into the pointer, key and wheel events the SDL3 engine
+// already understands. Desktop input is untouched: only pointerType "touch"
+// (and "pen") is captured, and only while the overlay is shown.
 
 import { readJoystickOffset, readTouchControls, writeJoystickOffset, writeTouchControls } from "./prefs";
 
@@ -12,6 +12,10 @@ const DEAD_ZONE = 0.15;
 // Issue #200: the engine marks a scripted cinematic with the letterbox; poll it
 // so the joystick disables itself while the camera is not the player's.
 const CINEMATIC_POLL_MS = 200;
+// Four CSS pixels of zoom-bar travel is one retail wheel notch. The engine's
+// wheel path multiplies a notch by View::ZoomHeightPerSecond (10 height units).
+const ZOOM_PX_PER_NOTCH = 4;
+const ZOOM_WHEEL_DELTA_PER_NOTCH = 100;
 
 export interface TouchEngine {
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
@@ -29,6 +33,8 @@ export interface TouchControlsHost {
   grip: HTMLButtonElement;
   joystick: HTMLElement;
   knob: HTMLElement;
+  zoom: HTMLElement;
+  zoomThumb: HTMLElement;
   engine: () => TouchEngine | null;
 }
 
@@ -51,7 +57,8 @@ function deviceHasTouch(): boolean {
 }
 
 export function createTouchControls(host: TouchControlsHost): TouchControls {
-  const { canvas, overlay, toggle, left, right, multi, dock, grip, joystick, knob } = host;
+  const { canvas, overlay, toggle, left, right, multi, dock, grip, joystick, knob, zoom, zoomThumb } =
+    host;
 
   const stored = readTouchControls();
   let enabled = stored ?? deviceHasTouch();
@@ -273,6 +280,111 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     canvas.addEventListener(type, handler, { capture: true, passive: false });
   }
 
+  // ----- zoom bar -----
+
+  // The bar is relative: the engine has no zoom getter, so the thumb shows the
+  // current drag from the centre, not an absolute camera height. The wheel
+  // event is the engine's existing zoom path (LookAtXlat.cpp).
+  let zoomPointer: number | null = null;
+  let zoomLastY = 0;
+  let zoomThumbY = 0;
+
+  function sendZoom(notches: number): void {
+    if (!Number.isFinite(notches) || notches === 0) return;
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+      deltaX: 0,
+      deltaY: -notches * ZOOM_WHEEL_DELTA_PER_NOTCH,
+    });
+    // A synthetic wheel event has no default action, but mark it cancelled so
+    // no future listener can turn a zoom drag into a page scroll.
+    event.preventDefault();
+    canvas.dispatchEvent(event);
+  }
+
+  function zoomLimit(): number {
+    const rail = zoom.getBoundingClientRect();
+    const thumb = zoomThumb.getBoundingClientRect();
+    return Math.max(1, rail.height / 2 - thumb.height / 2 - 4);
+  }
+
+  function setZoomThumb(y: number): void {
+    zoomThumbY = y;
+    zoomThumb.style.setProperty("--zoom-thumb", `${y}px`);
+  }
+
+  function resetZoom(): void {
+    if (zoomPointer !== null) {
+      try {
+        if (zoom.hasPointerCapture(zoomPointer)) zoom.releasePointerCapture(zoomPointer);
+      } catch {
+        // A synthetic pointer has nothing captured.
+      }
+    }
+    zoomPointer = null;
+    zoom.classList.remove("is-active");
+    setZoomThumb(0);
+  }
+
+  function onZoomDown(event: PointerEvent): void {
+    if (!playing || !enabled || !isTouch(event) || zoomPointer !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    zoomPointer = event.pointerId;
+    zoom.classList.add("is-active");
+    zoomLastY = event.clientY;
+    const rail = zoom.getBoundingClientRect();
+    const limit = zoomLimit();
+    const offset = event.clientY - (rail.top + rail.height / 2);
+    setZoomThumb(Math.min(Math.max(offset, -limit), limit));
+    try {
+      zoom.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointers (and browsers without capture) keep bubbling.
+    }
+  }
+
+  function onZoomMove(event: PointerEvent): void {
+    if (zoomPointer === null || event.pointerId !== zoomPointer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dy = event.clientY - zoomLastY;
+    zoomLastY = event.clientY;
+    sendZoom(-dy / ZOOM_PX_PER_NOTCH);
+    const limit = zoomLimit();
+    setZoomThumb(Math.min(Math.max(zoomThumbY + dy, -limit), limit));
+  }
+
+  function onZoomUp(event: PointerEvent): void {
+    if (zoomPointer === null || event.pointerId !== zoomPointer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pointer = zoomPointer;
+    zoomPointer = null;
+    try {
+      if (zoom.hasPointerCapture(pointer)) zoom.releasePointerCapture(pointer);
+    } catch {
+      // Nothing captured.
+    }
+    zoom.classList.remove("is-active");
+    setZoomThumb(0);
+  }
+
+  zoom.addEventListener("pointerdown", onZoomDown, { passive: false });
+  zoom.addEventListener("pointermove", onZoomMove, { passive: false });
+  zoom.addEventListener("pointerup", onZoomUp, { passive: false });
+  zoom.addEventListener("pointercancel", onZoomUp, { passive: false });
+  zoom.addEventListener("contextmenu", (event) => event.preventDefault());
+  zoom.addEventListener("lostpointercapture", () => {
+    if (zoomPointer === null) return;
+    zoomPointer = null;
+    zoom.classList.remove("is-active");
+    setZoomThumb(0);
+  });
+
   // ----- locks and the overlay -----
 
   function setLock(which: "left" | "right" | "multi", on: boolean): void {
@@ -320,6 +432,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
 
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
+    zoom.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
     if (show) {
       startCinematicPolling();
@@ -329,6 +442,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
       clearLocks();
       resetMap(true);
       resetJoystick();
+      resetZoom();
     }
   }
 
@@ -515,6 +629,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   window.addEventListener("blur", () => {
     resetMap(true);
     resetJoystick();
+    resetZoom();
   });
 
   // ----- moving the joystick -----
@@ -536,7 +651,11 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
       // box already includes the current shift, so work from its default spot.
       const baseLeft = box.left - dockDx;
       const baseTop = box.top - dockDy;
-      dx = Math.min(Math.max(dx, area.left - baseLeft), area.right - box.width - baseLeft);
+      // The joystick and its 16 px landing ring stay 8 px clear of the zoom
+      // bar, so a moved joystick can never cover it.
+      const rail = zoom.hidden ? null : zoom.getBoundingClientRect();
+      const limitRight = rail !== null && rail.width > 0 ? rail.left - 24 : area.right;
+      dx = Math.min(Math.max(dx, area.left - baseLeft), limitRight - box.width - baseLeft);
       dy = Math.min(Math.max(dy, area.top - baseTop), area.bottom - box.height - baseTop);
     }
     dockDx = dx;

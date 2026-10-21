@@ -128,6 +128,8 @@ const touch = createTouchControls({
   grip: byId<HTMLButtonElement>("touch-joystick-grip"),
   joystick: byId<HTMLElement>("touch-joystick"),
   knob: byId<HTMLElement>("touch-knob"),
+  zoom: byId<HTMLElement>("touch-zoom"),
+  zoomThumb: byId<HTMLElement>("touch-zoom-thumb"),
   engine: () => engineModule,
 });
 

@@ -50,8 +50,9 @@ two-finger gestures are left for later.
 ## 3. Scope
 
 In: a toggle button, the overlay with the game-menu button, three lock buttons,
-a fullscreen toggle and a mini joystick, and the mapping from touch to the
-engine's mouse and keyboard input, in the browser build, in windowed and
+a fullscreen toggle, a mini joystick and a vertical zoom bar with tick marks on
+the right edge, and the mapping from touch to the engine's mouse and keyboard
+input, in the browser build, in windowed and fullscreen play.
 fullscreen play.
 
 Out: control groups (Ctrl+1..9), minimap gestures, pinch zoom, a touch keyboard,
@@ -80,7 +81,8 @@ native builds.
 
 * Controls anchored to the bottom of the game area, drawn over the canvas: the
   game menu, the **Left lock**, **Right lock** and **Multi lock**, and the
-  fullscreen toggle, stacked in a column at the bottom-left corner, and the
+  fullscreen toggle, stacked in a column at the bottom-left corner, the
+  **zoom bar** (section 4.7) along the right edge above the joystick, and the
   **mini joystick** at the very bottom-right corner. The order top to bottom is
   game menu, Left, Right, Multi, fullscreen toggle.
 * Every column button is rendered at 70 % of its 56 x 54 CSS px base
@@ -97,10 +99,14 @@ native builds.
   thumb-reachable duplicate and both controls follow `fullscreenchange`.
 * The overlay is a DOM element inside `#screen`, the element put in browser
   fullscreen (`web/src/main.ts`). It must sit inside `#screen`, not beside it,
-  or it is hidden in fullscreen.
+  or it is hidden in fullscreen. The zoom bar is a sibling inside `#screen`,
+  because it spans the height of the game view, and follows the overlay's
+  visibility.
 * The overlay never covers the top bar. The joystick sits over the bottom-right
   corner of the view (owner's choice, 2026-10-20) and is small to stay out of the
-  way.
+  way. It keeps a 60 CSS px right margin so the joystick and its landing ring
+  stay left of the zoom bar; while the bar is shown, the dock is clamped to the
+  left of the bar even when the player drags it.
 * Overlay controls are isolated: `pointerdown`, `pointerup` and `click` stop
   propagation, and `contextmenu` is prevented, so a touch on a control never
   reaches the map. Each control sets `touch-action: none`.
@@ -165,6 +171,29 @@ change the lock.
   top-bar action at thumb reach; the top-bar `#fullscreen` stays visible as
   well (owner's follow-up, 2026-10-20).
 
+### 4.7 Zoom bar
+
+* `#touch-zoom` is a sibling of `#touch-controls` inside `#screen`, hidden while
+  the overlay is hidden. It is a 30 CSS px wide rail on the right edge (with the
+  same 6 px safe area as the overlay), from 8 px below the top of `#screen` to
+  127 px above the overlay's bottom plus its safe area, so it ends above the
+  joystick's grip and never intersects the joystick or its 16 px landing ring.
+* The rail carries nine tick marks (`.touch-zoom-tick`), the middle one longer,
+  and a thumb (`#touch-zoom-thumb`) at its centre. The thumb follows the finger
+  during a drag, clamped inside the rail, and returns to the centre on release.
+* Only touch and pen pointers start a drag (owner's request, 2026-10-20: no
+  mixing with scrolling). `pointerdown` captures the pointer and cancels the
+  event; vertical movement up zooms in and down zooms out; 4 CSS px is one
+  retail wheel notch. The page synthesises a `WheelEvent` on `#canvas` with
+  `deltaMode: 0` and `deltaY = -notches * 100`, which is the engine's existing
+  wheel path. A tap without movement does not zoom.
+* The bar is relative: its displacement is a zoom delta, not an absolute
+  camera position, because the engine exposes no zoom value to the page. An
+  absolute fader and pinch are later work.
+* A touch on the bar produces no pointer event on the canvas, no camera pan and
+  no page scroll. The bar cancels its pointer events, stops their propagation
+  and sets `touch-action: none`.
+
 ## 5. Mapping to the engine
 
 ### 5.1 Map input
@@ -191,6 +220,13 @@ box drag, joystick) and emits only mouse down, move and up events with
 timestamps the engine understands. A long press that moves more than 10 CSS px
 becomes a drag, not a right click.
 
+### 5.4 Camera zoom
+
+The zoom bar synthesises a `WheelEvent` on the canvas with `deltaMode: 0` and
+`deltaY = -notches * 100`; SDL3 and `LookAtXlat.cpp` already translate a wheel
+event into `TheTacticalView->userZoom`, so the engine needs no change and no
+rebuild. Negative `deltaY` is zoom in, positive is zoom out.
+
 ## 6. Decisions and non-goals
 
 * Long press for the right click without a lock (Generals port precedent).
@@ -199,6 +235,9 @@ becomes a drag, not a right click.
   with one finger.
 * The overlay is not drawn over the engine canvas in fullscreen from a second
   canvas; it is DOM inside `#screen`.
+* The zoom bar is relative, not an absolute fader: the engine has no getter for
+  the camera zoom, and an absolute thumb would drift from the real camera.
+  Absolute zoom and pinch are later work.
 
 ## 7. Acceptance criteria
 
@@ -219,6 +258,10 @@ becomes a drag, not a right click.
 15. `#touch-fullscreen` is the last column control: windowed it reads "Enter fullscreen" and enters fullscreen, in fullscreen it reads "Exit fullscreen" and leaves, and hiding the overlay hides it.
 16. While the overlay is shown the top-bar `#fullscreen` stays visible next to `#touch-fullscreen`; hiding the overlay hides only the column, and a desktop context keeps the top-bar button while `#touch-fullscreen` stays hidden with the overlay.
 17. While the engine reports a cinematic, the joystick sends no pan call, ignores a drag and shows `aria-disabled="true"`; when the cinematic ends it pans again.
+18. The zoom bar is visible on the right edge inside `#screen` while the overlay is shown, at least 140 CSS px tall on an 812 x 375 viewport, and hidden with the overlay.
+19. The bar shows nine tick marks and a centred thumb; dragging up zooms in, dragging down zooms out, and the thumb returns to the centre on release.
+20. The bar never intersects the joystick, its grip or its landing ring, including after the joystick is dragged to its rightmost position.
+21. A touch on the bar sends no pointer event to the canvas, pans no camera and scrolls no page; the page dispatches the zoom as a wheel event on the canvas.
 
 ## 8. Open questions for the brief
 
@@ -231,8 +274,8 @@ becomes a drag, not a right click.
 
 * Playwright in Brave only (D-04), with touch emulation (`hasTouch`) and the
   fake engine harness in `web/tests/harness/` for the input contracts. Criteria
-  1-5 and 13 need no engine. Criteria 6-12 and 14-16 need a fake engine that
-  records the mouse and key events it receives.
-* Test paths: `web/tests/touch-controls.spec.ts` and
-  `web/tests/launcher-topbar-game.spec.ts`. No game data in the tests
-  (AGENTS.md, Local Game Data).
+  1-5 and 13 need no engine. Criteria 6-12, 14-16 and 17-20 need a fake engine
+  that records the mouse, key, wheel and pan events it receives.
+* Test paths: `web/tests/touch-controls.spec.ts`,
+  `web/tests/launcher-topbar-game.spec.ts` and `web/tests/zoom-bar.spec.ts`. No
+  game data in the tests (AGENTS.md, Local Game Data).

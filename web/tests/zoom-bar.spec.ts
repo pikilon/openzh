@@ -176,17 +176,62 @@ test.describe("touch zoom bar", () => {
     expect(box.bar.bottom).toBeLessThanOrEqual(box.grip.top - 7);
   });
 
-  test("2: nine ticks and a centred thumb", async ({ page }, info) => {
+  test("2: a thin line at rest that widens on press, with nine ticks and a bigger grip", async ({
+    page,
+  }, info) => {
     await startPlaying(page, info.outputPath());
-    const ticks = page.locator("#touch-zoom .touch-zoom-tick");
+    const zoom = page.locator("#touch-zoom");
+    const ticks = zoom.locator(".touch-zoom-tick");
+    const ticksLayer = page.locator(".touch-zoom-ticks");
     await expect(ticks).toHaveCount(9);
-    for (let i = 0; i < 9; i += 1) {
-      await expect(ticks.nth(i)).toBeVisible();
-    }
+
+    const rail = () =>
+      zoom.evaluate((element) => parseFloat(getComputedStyle(element, "::after").width));
+    const ticksOpacity = () =>
+      ticksLayer.evaluate((element) => parseFloat(getComputedStyle(element).opacity));
+    const thumbWidth = async () => (await page.locator("#touch-zoom-thumb").boundingBox())!.width;
+
+    // At rest: a 2 px line, no ticks, a small thumb.
+    expect(await rail()).toBeLessThanOrEqual(4);
+    expect(await ticksOpacity()).toBe(0);
+    expect(await thumbWidth()).toBeLessThanOrEqual(10);
+    expect(await thumbOffset(page)).toBe(0);
+
+    // Pressed: the plate, the ticks and the grip. Headless Brave keeps CSS
+    // transitions at time zero without frames, so finish them before measuring.
+    await barTouch(page, "pointerdown", 0);
+    await expect(zoom).toHaveClass(/is-active/);
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) {
+        try {
+          animation.finish();
+        } catch {
+          // An infinite animation has no end to reach.
+        }
+      }
+    });
+    expect(await rail()).toBeGreaterThanOrEqual(29);
+    expect(await ticksOpacity()).toBe(1);
+    expect(await thumbWidth()).toBeGreaterThanOrEqual(24);
     const widths = await ticks.evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().width),
     );
     expect(widths[4]).toBeGreaterThan(widths[0]);
+
+    // Released: back to the line.
+    await barTouch(page, "pointerup", 0);
+    await page.evaluate(() => {
+      for (const animation of document.getAnimations()) {
+        try {
+          animation.finish();
+        } catch {
+          // An infinite animation has no end to reach.
+        }
+      }
+    });
+    expect(await rail()).toBeLessThanOrEqual(4);
+    expect(await ticksOpacity()).toBe(0);
+    expect(await thumbWidth()).toBeLessThanOrEqual(10);
     expect(await thumbOffset(page)).toBe(0);
   });
 

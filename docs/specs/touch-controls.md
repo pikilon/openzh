@@ -174,13 +174,17 @@ change the lock.
 ### 4.7 Zoom bar
 
 * `#touch-zoom` is a sibling of `#touch-controls` inside `#screen`, hidden while
-  the overlay is hidden. It is a 30 CSS px wide rail on the right edge (with the
-  same 6 px safe area as the overlay), from 8 px below the top of `#screen` to
-  127 px above the overlay's bottom plus its safe area, so it ends above the
+  the overlay is hidden. It is a 30 CSS px wide hit area on the right edge (with
+  the same 6 px safe area as the overlay), from 8 px below the top of `#screen`
+  to 127 px above the overlay's bottom plus its safe area, so it ends above the
   joystick's grip and never intersects the joystick or its 16 px landing ring.
-* The rail carries nine tick marks (`.touch-zoom-tick`), the middle one longer,
-  and a thumb (`#touch-zoom-thumb`) at its centre. The thumb follows the finger
-  during a drag, clamped inside the rail, and returns to the centre on release.
+  At rest it draws only a 2 px line against the right edge and a 9 px thumb;
+  pressing it widens the rail into the full 30 px plate, reveals the ticks and
+  grows the thumb into the 26 x 10 grip (owner, 2026-10-21).
+* While pressed the rail carries nine tick marks (`.touch-zoom-tick`), the
+  middle one longer, and a thumb (`#touch-zoom-thumb`) near its centre. The
+  thumb follows the finger during a drag, clamped inside the rail, and returns
+  to the centre on release.
 * Only touch and pen pointers start a drag (owner's request, 2026-10-20: no
   mixing with scrolling). `pointerdown` captures the pointer and cancels the
   event; vertical movement up zooms in and down zooms out; 4 CSS px is one
@@ -259,7 +263,7 @@ rebuild. Negative `deltaY` is zoom in, positive is zoom out.
 16. While the overlay is shown the top-bar `#fullscreen` stays visible next to `#touch-fullscreen`; hiding the overlay hides only the column, and a desktop context keeps the top-bar button while `#touch-fullscreen` stays hidden with the overlay.
 17. While the engine reports a cinematic, the joystick sends no pan call, ignores a drag and shows `aria-disabled="true"`; when the cinematic ends it pans again.
 18. The zoom bar is visible on the right edge inside `#screen` while the overlay is shown, at least 140 CSS px tall on an 812 x 375 viewport, and hidden with the overlay.
-19. The bar shows nine tick marks and a centred thumb; dragging up zooms in, dragging down zooms out, and the thumb returns to the centre on release.
+19. At rest the bar is a thin line with a small thumb and no tick marks; pressing it widens the rail to 30 CSS px, shows the nine tick marks and grows the thumb; dragging up zooms in, dragging down zooms out, and the thumb returns to the centre on release.
 20. The bar never intersects the joystick, its grip or its landing ring, including after the joystick is dragged to its rightmost position.
 21. A touch on the bar sends no pointer event to the canvas, pans no camera and scrolls no page; the page dispatches the zoom as a wheel event on the canvas.
 

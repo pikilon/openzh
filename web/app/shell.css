@@ -591,9 +591,11 @@ body {
 
 /* ----- touch zoom bar (docs/specs/touch-controls.md, #195) ----- */
 
-/* A 30 px rail on the right edge, from the top of the game view to just above
-   the joystick grip. It is relative: the finger's travel is the zoom delta and
-   the thumb springs back, because the engine exposes no absolute zoom value. */
+/* A 30 px hit area on the right edge. At rest it is a 2 px line with a 9 px
+   thumb; pressing widens it into the full 30 px plate with the nine ticks and
+   the 26 x 10 grip (owner, 2026-10-21). It is relative: the finger's travel is
+   the zoom delta and the thumb springs back, because the engine exposes no
+   absolute zoom value. */
 .touch-zoom {
   position: absolute;
   top: max(8px, env(safe-area-inset-top));
@@ -603,9 +605,49 @@ body {
   width: 30px;
   padding: 8px 0;
   color: var(--accent-soft);
+  opacity: 0.9;
+  cursor: ns-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: opacity 160ms ease;
+}
+
+.touch-zoom[hidden] {
+  display: none;
+}
+
+/* The visible rail: a hairline against the right edge, which grows leftwards
+   into the plate while the bar is pressed. */
+.touch-zoom::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 2px;
+  bottom: 0;
+  z-index: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: rgba(143, 216, 255, 0.55);
+  box-shadow: 0 0 6px rgba(46, 168, 255, 0.4);
+  transition:
+    width 160ms ease,
+    right 160ms ease,
+    border-radius 160ms ease;
+  pointer-events: none;
+}
+
+.touch-zoom.is-active {
+  opacity: 1;
+}
+
+.touch-zoom.is-active::after {
+  right: 0;
+  width: 30px;
+  border-radius: 4px;
   background: linear-gradient(180deg, rgba(20, 54, 92, 0.88), rgba(5, 16, 32, 0.94));
   border: 1px solid var(--line);
-  opacity: 0.55;
+  box-shadow: 0 0 12px rgba(46, 168, 255, 0.25);
   clip-path: polygon(
     6px 0,
     100% 0,
@@ -614,28 +656,23 @@ body {
     0 100%,
     0 6px
   );
-  cursor: ns-resize;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.touch-zoom[hidden] {
-  display: none;
-}
-
-.touch-zoom.is-active {
-  opacity: 0.85;
 }
 
 .touch-zoom-ticks {
   position: absolute;
   inset: 10px 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
+  opacity: 0;
+  transition: opacity 160ms ease;
   pointer-events: none;
+}
+
+.touch-zoom.is-active .touch-zoom-ticks {
+  opacity: 1;
 }
 
 .touch-zoom-tick {
@@ -651,26 +688,45 @@ body {
   background: var(--accent-soft);
 }
 
+/* Small but visible at rest, against the line; the grip expands only while the
+   bar is pressed. */
 .touch-zoom-thumb {
   position: absolute;
   top: 50%;
-  left: 50%;
-  width: 26px;
-  height: 10px;
-  margin: -5px 0 0 -13px;
-  border-radius: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
   background: linear-gradient(180deg, #d8f2ff, #2ea8ff 62%, #0c4f8f);
   border: 1px solid rgba(216, 242, 255, 0.9);
   box-shadow:
     0 0 8px rgba(46, 168, 255, 0.55),
     inset 0 1px 2px rgba(255, 255, 255, 0.6);
   pointer-events: none;
-  transform: translateY(var(--zoom-thumb, 0px));
-  transition: transform 140ms ease-out;
+  transform: translate(50%, var(--zoom-thumb, 0px));
+  transition:
+    transform 140ms ease-out,
+    right 160ms ease,
+    width 160ms ease,
+    height 160ms ease,
+    margin-top 160ms ease,
+    border-radius 160ms ease;
 }
 
 .touch-zoom.is-active .touch-zoom-thumb {
-  transition: none;
+  right: 15px;
+  width: 26px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 3px;
+  transition:
+    right 160ms ease,
+    width 160ms ease,
+    height 160ms ease,
+    margin-top 160ms ease,
+    border-radius 160ms ease;
 }
 
 /* ----- loader ----- */

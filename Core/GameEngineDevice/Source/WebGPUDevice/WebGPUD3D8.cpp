@@ -513,6 +513,17 @@ struct VertexShaderProgram
 class WebGPUD3DDevice;
 class WebGPUTexture;
 
+// A mirror buffer taken out of use, with what it takes to reuse it.
+struct RetiredBuffer
+{
+	WGPUBuffer buffer;
+	size_t size;
+	WGPUBufferUsage usage;
+};
+
+// The most retired mirror buffers the device keeps for reuse.
+constexpr size_t kMaxPooledBuffers = 24;
+
 // A GPU copy of a vertex or index buffer, so draws read geometry without a
 // per-draw copy. Lock marks the bytes it hands out as dirty, with the lock
 // flags; WebGPUD3DDevice::syncMirror uploads them before the next draw.
@@ -881,7 +892,7 @@ private:
 		size_t lastFixedFunctionSize = 0;
 		// Mirror buffers replaced while this frame's draws still read them;
 		// released once the frame's commands are done.
-		std::vector<WGPUBuffer> retiredBuffers;
+		std::vector<RetiredBuffer> retiredBuffers;
 		std::map<std::array<uintptr_t, 8>, WGPUBindGroup> bindGroups;
 		bool busy = false;
 	};
@@ -987,6 +998,11 @@ private:
 	bool m_fixedFunctionChoiceLogged = false;
 	uint64_t m_frameSerial = 0;
 	std::vector<GpuBufferMirror *> m_pendingMirrors;
+	// Retired mirror buffers whose frame finished, kept for the next rename:
+	// creating a buffer of a megabyte or more twice a frame used up the GPU's
+	// memory faster than the browser freed the old ones, and the GPU process
+	// died (white canvas on an Adreno phone, 2026-10-22).
+	std::vector<RetiredBuffer> m_bufferPool;
 	std::unordered_map<uint64_t, WGPUSampler> m_samplers;
 	WGPUTexture m_whiteTexture = nullptr;
 	WGPUTextureView m_whiteView = nullptr;
@@ -1286,7 +1302,16 @@ bool WebGPUD3DDevice::prepareUploadFrame()
 		}
 		frame.bindGroups.clear();
 	}
-	for (WGPUBuffer buffer : frame.retiredBuffers) wgpuBufferRelease(buffer);
+	// The GPU finished the frame. A bare release leaves a buffer's memory to the
+	// browser's garbage collector, so what the pool cannot take is destroyed.
+	for (const RetiredBuffer &retired : frame.retiredBuffers) {
+		if (m_bufferPool.size() < kMaxPooledBuffers) {
+			m_bufferPool.push_back(retired);
+		} else {
+			wgpuBufferDestroy(retired.buffer);
+			wgpuBufferRelease(retired.buffer);
+		}
+	}
 	frame.retiredBuffers.clear();
 	frame.vertices.clear();
 	frame.indices.clear();
@@ -1305,7 +1330,7 @@ void WebGPUD3DDevice::releaseUploadFrame(UploadFrame &frame)
 		wgpuBindGroupRelease(group);
 	}
 	frame.bindGroups.clear();
-	for (WGPUBuffer buffer : frame.retiredBuffers) wgpuBufferRelease(buffer);
+	for (const RetiredBuffer &retired : frame.retiredBuffers) wgpuBufferRelease(retired.buffer);
 	frame.retiredBuffers.clear();
 	if (frame.indexBuffer) {
 		wgpuBufferRelease(frame.indexBuffer);
@@ -2983,14 +3008,24 @@ WGPUBuffer WebGPUD3DDevice::syncMirror(GpuBufferMirror &mirror, const uint8_t *d
 			&& std::min(dirtyEnd, size) > mirror.usedBegin && std::min(dirtyBegin, size) < mirror.usedEnd;
 		if (overlapsUse && !mirror.discarded) return nullptr;
 		if (overlapsUse) {
-			WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
-			descriptor.usage = usage | WGPUBufferUsage_CopyDst;
-			descriptor.size = padded;
-			WGPUBuffer renamed = wgpuDeviceCreateBuffer(webGPUDevice(), &descriptor);
+			WGPUBuffer renamed = nullptr;
+			for (size_t pooled = 0; pooled < m_bufferPool.size(); ++pooled) {
+				if (m_bufferPool[pooled].size == padded && m_bufferPool[pooled].usage == usage) {
+					renamed = m_bufferPool[pooled].buffer;
+					m_bufferPool.erase(m_bufferPool.begin() + pooled);
+					break;
+				}
+			}
+			if (!renamed) {
+				WGPUBufferDescriptor descriptor = WGPU_BUFFER_DESCRIPTOR_INIT;
+				descriptor.usage = usage | WGPUBufferUsage_CopyDst;
+				descriptor.size = padded;
+				renamed = wgpuDeviceCreateBuffer(webGPUDevice(), &descriptor);
+			}
 			if (!renamed) return nullptr;
 			// The old buffer still owes this frame's earlier draws their bytes.
 			writeMirror(mirror);
-			m_uploadFrames[m_activeUploadFrame].retiredBuffers.push_back(mirror.buffer);
+			m_uploadFrames[m_activeUploadFrame].retiredBuffers.push_back({mirror.buffer, padded, usage});
 			mirror.buffer = renamed;
 			mirror.usedFrame = UINT64_MAX;
 			mirror.renamed = true;
@@ -3598,6 +3633,8 @@ WebGPUD3DDevice::~WebGPUD3DDevice()
 	for (UploadFrame &frame : m_uploadFrames) {
 		releaseUploadFrame(frame);
 	}
+	for (const RetiredBuffer &pooled : m_bufferPool) wgpuBufferRelease(pooled.buffer);
+	m_bufferPool.clear();
 	if (m_pipelineLayout) {
 		wgpuPipelineLayoutRelease(m_pipelineLayout);
 	}

@@ -9,6 +9,7 @@ import { FileBridge } from "./bridge";
 import { mountArchives } from "./mount";
 import { addUserDataPersistence } from "./user-data";
 import { keepWebGpuAlive } from "./webgpu-keepalive";
+import { chooseTransformLighting } from "./transform-lighting";
 
 export { saveUserData } from "./user-data";
 export { addUserFiles } from "./user-files";
@@ -22,6 +23,7 @@ export async function prepareEngineOptions<T extends object>(
   options: T,
 ): Promise<T & { preRun: ((m: any) => void)[] }> {
   keepWebGpuAlive();
+  chooseTransformLighting();
   const files: StoredFile[] = await listStored();
   const bridge = files.length > 0 ? await FileBridge.start(files) : undefined;
   if (bridge !== undefined) {

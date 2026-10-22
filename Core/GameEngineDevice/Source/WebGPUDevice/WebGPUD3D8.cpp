@@ -2633,6 +2633,7 @@ CanonicalVertex WebGPUD3DDevice::convertVertexReference(const uint8_t *source, U
 
 // Transform and lighting run on the GPU unless the page asks for the CPU path
 // (?cputnl=1, or globalThis.zhwpCpuTnl = true at run time) to compare the two.
+// The launcher sets the CPU path by default on Android (web/src/transform-lighting.ts).
 // Read once per frame, so a frame never mixes the paths.
 void WebGPUD3DDevice::updateFixedFunctionChoice()
 {

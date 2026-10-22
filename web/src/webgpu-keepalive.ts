@@ -5,7 +5,8 @@
 // "A valid external Instance reference no longer exists." and the canvas goes
 // white, 12 to 30 s after the engine starts (phone, Brave 155, 2026-10-21; a
 // bare WebGPU page that kept its adapter in a variable ran 100 s without loss).
-// Holding both objects for the life of the page prevents it.
+// Holding both objects for the life of the page was meant to prevent it, but
+// the phone still went white with it on 2026-10-22 (see transform-lighting.ts).
 
 type Gpu = {
   requestAdapter: (...args: unknown[]) => Promise<any>;

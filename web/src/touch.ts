@@ -23,6 +23,8 @@ export interface TouchEngine {
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
   _GeneralsXIsCinematic?: () => unknown;
   _GeneralsXZoomCamera?: (notches: number) => unknown;
+  _GeneralsXGetZoom?: () => number;
+  _GeneralsXSetRadarTapLooksAt?: (on: number) => unknown;
 }
 
 export interface TouchControlsHost {
@@ -289,10 +291,11 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
 
   // ----- zoom bar -----
 
-  // The bar is relative: the engine has no zoom getter, so the thumb shows the
-  // current drag from the centre, not an absolute camera height. It calls the
-  // engine's direct zoom export; an older engine without it falls back to a
-  // synthetic wheel event (the previous path).
+  // The finger's travel is a relative zoom delta, but the thumb shows the real
+  // camera zoom when the engine exports it (top = closest, bottom = farthest),
+  // so it also tells when the zoom is at either end. An older engine without
+  // the getter springs the thumb back to the centre; one without the zoom
+  // export falls back to a synthetic wheel event.
   let zoomPointer: number | null = null;
   let zoomLastY = 0;
   let zoomThumbY = 0;
@@ -334,6 +337,33 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     zoomThumb.style.setProperty("--zoom-thumb", `${y}px`);
   }
 
+  function readZoom(): number | null {
+    const engine = host.engine();
+    const getZoom = engine?._GeneralsXGetZoom;
+    if (typeof getZoom !== "function") return null;
+    try {
+      const value = getZoom.call(engine);
+      return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Puts the thumb where the camera really is; false when the engine cannot say.
+  function syncZoomThumb(): boolean {
+    const value = readZoom();
+    if (value === null) {
+      delete zoom.dataset.zoomEnd;
+      return false;
+    }
+    const limit = zoomLimit();
+    setZoomThumb((value * 2 - 1) * limit);
+    if (value <= 0.01) zoom.dataset.zoomEnd = "in";
+    else if (value >= 0.99) zoom.dataset.zoomEnd = "out";
+    else delete zoom.dataset.zoomEnd;
+    return true;
+  }
+
   function resetZoom(): void {
     if (zoomPointer !== null) {
       try {
@@ -344,7 +374,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     }
     zoomPointer = null;
     zoom.classList.remove("is-active");
-    setZoomThumb(0);
+    if (!syncZoomThumb()) setZoomThumb(0);
   }
 
   function onZoomDown(event: PointerEvent): void {
@@ -356,10 +386,12 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     zoomPointer = event.pointerId;
     zoom.classList.add("is-active");
     zoomLastY = event.clientY;
-    const rail = zoom.getBoundingClientRect();
-    const limit = zoomLimit();
-    const offset = event.clientY - (rail.top + rail.height / 2);
-    setZoomThumb(Math.min(Math.max(offset, -limit), limit));
+    if (!syncZoomThumb()) {
+      const rail = zoom.getBoundingClientRect();
+      const limit = zoomLimit();
+      const offset = event.clientY - (rail.top + rail.height / 2);
+      setZoomThumb(Math.min(Math.max(offset, -limit), limit));
+    }
     try {
       zoom.setPointerCapture(event.pointerId);
     } catch {
@@ -374,8 +406,10 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     const dy = event.clientY - zoomLastY;
     zoomLastY = event.clientY;
     sendZoom(-dy / ZOOM_PX_PER_NOTCH);
-    const limit = zoomLimit();
-    setZoomThumb(Math.min(Math.max(zoomThumbY + dy, -limit), limit));
+    if (!syncZoomThumb()) {
+      const limit = zoomLimit();
+      setZoomThumb(Math.min(Math.max(zoomThumbY + dy, -limit), limit));
+    }
   }
 
   function onZoomUp(event: PointerEvent): void {
@@ -390,7 +424,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
       // Nothing captured.
     }
     zoom.classList.remove("is-active");
-    setZoomThumb(0);
+    if (!syncZoomThumb()) setZoomThumb(0);
   }
 
   zoom.addEventListener("pointerdown", onZoomDown, { passive: false });
@@ -402,7 +436,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     if (zoomPointer === null) return;
     zoomPointer = null;
     zoom.classList.remove("is-active");
-    setZoomThumb(0);
+    if (!syncZoomThumb()) setZoomThumb(0);
   });
 
   // ----- locks and the overlay -----
@@ -451,8 +485,21 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     );
   }
 
+  // With the overlay on, a tap on the minimap moves the camera, not the selected units.
+  function setRadarTapLooksAt(on: boolean): void {
+    const engine = host.engine();
+    const fn = engine?._GeneralsXSetRadarTapLooksAt;
+    if (typeof fn !== "function") return;
+    try {
+      fn.call(engine, on ? 1 : 0);
+    } catch {
+      // A stopped engine is not a page error.
+    }
+  }
+
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
+    setRadarTapLooksAt(show);
     zoom.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
     if (show) {
@@ -566,6 +613,8 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
 
   function pollCinematic(): void {
     setCinematic(readCinematic());
+    // The wheel and keys zoom the camera too; keep the thumb honest between drags.
+    if (zoomPointer === null && !cinematic) syncZoomThumb();
   }
 
   function startCinematicPolling(): void {

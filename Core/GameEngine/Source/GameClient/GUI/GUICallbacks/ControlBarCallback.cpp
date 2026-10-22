@@ -62,6 +62,11 @@ WindowLayout *popupCommunicatorLayout = nullptr;
 //-------------------------------------------------------------------------------------------------
 /** Input procedure for the left HUD */
 //-------------------------------------------------------------------------------------------------
+// GeneralsX @feature 22/10/2026 Touch: with the touch overlay on, a tap on the radar always moves
+// the camera, even with units selected (retail sends them there on a left click). The page sets
+// this through GeneralsXSetRadarTapLooksAt in SDL3GameEngine.cpp.
+Bool g_generalsXRadarTapLooksAt = FALSE;
+
 WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 																	 WindowMsgData mData1, WindowMsgData mData2 )
 {
@@ -260,6 +265,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 				// see if the user wants to move the tactical view
 				if (	drawableList->empty() ||
+					g_generalsXRadarTapLooksAt ||
 					(! TheGlobalData->m_useAlternateMouse && msg == GWM_RIGHT_DOWN) ||
 					(TheGlobalData->m_useAlternateMouse && msg == GWM_LEFT_DOWN)	)
 				{

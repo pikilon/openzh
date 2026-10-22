@@ -392,6 +392,17 @@ test.describe("touch device", () => {
     await joystickTouch(page, "pointerup", 0, -30);
   });
 
+  test("10c: a minimap tap moves the camera only while the overlay is on", async ({ page }, info) => {
+    await startPlaying(page, info.outputPath());
+    const calls = () =>
+      page.evaluate(() => (window as unknown as { __radarLooksAt: number[] }).__radarLooksAt);
+    expect((await calls()).at(-1)).toBe(1);
+    await page.locator("#touch-toggle").click();
+    expect((await calls()).at(-1)).toBe(0);
+    await page.locator("#touch-toggle").click();
+    expect((await calls()).at(-1)).toBe(1);
+  });
+
   test("20: the joystick is disabled while a cinematic plays", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
     const joystick = page.locator("#touch-joystick");

@@ -44,7 +44,12 @@ export default async function factory(options) {
     });
   }
 
+  probe.__radarLooksAt = [];
   const engine = {
+    _GeneralsXSetRadarTapLooksAt(on) {
+      probe.__radarLooksAt.push(on);
+      return 1;
+    },
     _GeneralsXSetAudioMuted() {
       return 1;
     },
@@ -56,11 +61,17 @@ export default async function factory(options) {
       return probe.__cinematic ? 1 : 0;
     },
   };
+  // 0 = closest, 1 = farthest, like the engine's getter; one notch moves it 5 %.
+  let zoomLevel = 0.5;
   if (!probe.__noZoomExport) {
     engine._GeneralsXZoomCamera = (notches) => {
       probe.__zoomCalls.push(notches);
+      zoomLevel = Math.min(1, Math.max(0, zoomLevel - notches * 0.05));
       return 1;
     };
+  }
+  if (!probe.__noZoomGetter) {
+    engine._GeneralsXGetZoom = () => zoomLevel;
   }
   return engine;
 }

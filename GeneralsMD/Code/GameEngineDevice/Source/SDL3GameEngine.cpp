@@ -349,6 +349,31 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXZoomCamera(float notches)
 	return TRUE;
 }
 
+extern Bool g_generalsXRadarTapLooksAt;
+
+// GeneralsX @feature 22/10/2026 Touch: the page turns this on while the touch overlay is shown, so
+// a tap on the minimap moves the camera instead of ordering the selected units there.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetRadarTapLooksAt(Int on)
+{
+	g_generalsXRadarTapLooksAt = on ? TRUE : FALSE;
+	return TRUE;
+}
+
+// GeneralsX @feature 22/10/2026 Issue #195: the touch zoom bar shows the real camera zoom. Returns
+// 0 at the closest camera height up to 1 at the farthest, or -1 when there is no view yet.
+extern "C" EMSCRIPTEN_KEEPALIVE double GeneralsXGetZoom()
+{
+	if (TheTacticalView == nullptr || TheGlobalData == nullptr)
+		return -1.0;
+	const Real range = TheGlobalData->m_maxCameraHeight - TheGlobalData->m_minCameraHeight;
+	if (range <= 0.0f)
+		return -1.0;
+	Real t = (TheTacticalView->getHeightAboveGround() - TheGlobalData->m_minCameraHeight) / range;
+	if (t < 0.0f) t = 0.0f;
+	else if (t > 1.0f) t = 1.0f;
+	return t;
+}
+
 // GeneralsX @feature Codex 06/08/2026 Pause when the player leaves the game surface. Esc cannot
 // pause in a browser — the pointer-lock exit consumes it before the engine ever sees the key — so
 // the page calls this when focus moves outside the canvas and when it comes back.

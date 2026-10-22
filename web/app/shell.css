@@ -754,6 +754,15 @@ body {
     border-radius 160ms ease;
 }
 
+/* At either end of the zoom range the thumb glows, so the player can see
+   there is no more zoom that way. */
+.touch-zoom[data-zoom-end] .touch-zoom-thumb {
+  background: linear-gradient(180deg, #ffffff, #8fd8ff 60%, #2ea8ff);
+  box-shadow:
+    0 0 12px rgba(143, 216, 255, 0.95),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
 /* ----- loader ----- */
 
 .loader-panel {

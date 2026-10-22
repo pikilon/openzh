@@ -246,7 +246,7 @@ test.describe("touch zoom bar", () => {
     expect(await thumbOffset(page)).toBe(0);
   });
 
-  test("3: dragging up zooms in and the thumb returns on release", async ({ page }, info) => {
+  test("3: dragging up zooms in and the thumb stays where the camera is", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
     const before = (await zoomCalls(page)).length;
 
@@ -263,9 +263,32 @@ test.describe("touch zoom bar", () => {
 
     const afterMove = calls.length;
     await barTouch(page, "pointerup", -48);
-    await expect.poll(() => thumbOffset(page)).toBe(0);
     await page.waitForTimeout(250);
+    expect(await thumbOffset(page)).toBeLessThan(-10);
     expect((await zoomCalls(page)).length).toBe(before + afterMove);
+  });
+
+  test("3b: the thumb sits at the top at maximum zoom and glows", async ({ page }, info) => {
+    await startPlaying(page, info.outputPath());
+    await expect(page.locator("#touch-zoom")).not.toHaveAttribute("data-zoom-end", /.+/);
+
+    await barTouch(page, "pointerdown", 0);
+    for (let y = -20; y >= -200; y -= 20) await barTouch(page, "pointermove", y);
+    await expect(page.locator("#touch-zoom")).toHaveAttribute("data-zoom-end", "in", {
+      timeout: WAIT,
+    });
+    const top = await thumbOffset(page);
+    await barTouch(page, "pointerup", -200);
+    expect(await thumbOffset(page)).toBeCloseTo(top, 0);
+    expect(top).toBeLessThan(-30);
+
+    await barTouch(page, "pointerdown", 0);
+    for (let y = 20; y <= 400; y += 20) await barTouch(page, "pointermove", y);
+    await expect(page.locator("#touch-zoom")).toHaveAttribute("data-zoom-end", "out", {
+      timeout: WAIT,
+    });
+    expect(await thumbOffset(page)).toBeGreaterThan(30);
+    await barTouch(page, "pointerup", 400);
   });
 
   test("4: dragging down zooms out", async ({ page }, info) => {
@@ -299,7 +322,7 @@ test.describe("touch zoom bar", () => {
     expect((await zoomCalls(page)).length).toBeGreaterThan(0);
   });
 
-  test("6: hiding the overlay hides the bar and resets the thumb", async ({ page }, info) => {
+  test("6: hiding the overlay hides the bar and the thumb still shows the camera zoom", async ({ page }, info) => {
     await startPlaying(page, info.outputPath());
     await barTouch(page, "pointerdown", 0);
     await barTouch(page, "pointermove", -40);
@@ -310,7 +333,7 @@ test.describe("touch zoom bar", () => {
 
     await page.locator("#touch-toggle").click();
     await expect(page.locator("#touch-zoom")).toBeVisible();
-    expect(await thumbOffset(page)).toBe(0);
+    expect(await thumbOffset(page)).toBeLessThan(-5);
   });
 
   test("7: the joystick cannot be moved onto the bar", async ({ page }, info) => {

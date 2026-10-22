@@ -309,36 +309,6 @@ test.describe("touch device", () => {
     expect(events.at(-1)).toMatchObject({ type: "pointerup", button: 0, buttons: 0 });
   });
 
-  test("7b: Pan lock turns a one-finger drag into a right-button drag scroll", async ({
-    page,
-  }, info) => {
-    await startPlaying(page, info.outputPath());
-    const box = await page.locator("#touch-pan").boundingBox();
-    const screen = await page.locator("#screen").boundingBox();
-    expect(box, "Pan button is rendered").not.toBeNull();
-    expect(box!.y).toBeGreaterThanOrEqual(screen!.y);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(screen!.x + screen!.width);
-    await page.locator("#touch-pan").click();
-    await expect(page.locator("#touch-pan")).toHaveAttribute("aria-pressed", "true");
-    await page.locator("#touch-left").click();
-    await expect(page.locator("#touch-pan")).toHaveAttribute("aria-pressed", "false");
-    await page.locator("#touch-pan").click();
-    const before = (await pointerEvents(page)).length;
-
-    await canvasTouch(page, "pointerdown", 0.3, 0.4);
-    await canvasTouch(page, "pointermove", 0.5, 0.5);
-    await canvasTouch(page, "pointermove", 0.65, 0.6);
-    await canvasTouch(page, "pointerup", 0.65, 0.6);
-
-    await expect
-      .poll(async () => (await pointerEvents(page)).length, { timeout: WAIT })
-      .toBeGreaterThanOrEqual(before + 4);
-    const events = (await pointerEvents(page)).slice(before);
-    expect(events[0]).toMatchObject({ type: "pointerdown", button: 2, buttons: 2 });
-    expect(events.filter((event) => event.type === "pointermove").length).toBeGreaterThanOrEqual(1);
-    expect(events.at(-1)).toMatchObject({ type: "pointerup", button: 2, buttons: 0 });
-  });
-
   test("8: Right lock turns a tap into a right click and no selection click", async ({
     page,
   }, info) => {
@@ -380,7 +350,7 @@ test.describe("touch device", () => {
     const before = (await panCalls(page)).length;
 
     await joystickTouch(page, "pointerdown", 0, 0);
-    await joystickTouch(page, "pointermove", 0, -50);
+    await joystickTouch(page, "pointermove", 0, -75);
     await expect
       .poll(
         async () => {
@@ -394,13 +364,32 @@ test.describe("touch device", () => {
     const knobDrag = await page.locator("#touch-knob").evaluate((element) => element.style.transform);
     expect(knobDrag).not.toBe("translate(0px, 0px)");
 
-    await joystickTouch(page, "pointerup", 0, -50);
+    await joystickTouch(page, "pointerup", 0, -75);
     await expect
       .poll(async () => (await panCalls(page)).at(-1), { timeout: WAIT })
       .toEqual([0, 0]);
     await expect
       .poll(() => page.locator("#touch-knob").evaluate((element) => element.style.transform))
       .toBe("translate(0px, 0px)");
+  });
+
+  test("10b: a pressed joystick has a large ring for fine speed control", async ({ page }, info) => {
+    await startPlaying(page, info.outputPath());
+    const before = (await panCalls(page)).length;
+
+    await joystickTouch(page, "pointerdown", 0, 0);
+    await joystickTouch(page, "pointermove", 0, -30);
+    await expect
+      .poll(
+        async () => {
+          const calls = (await panCalls(page)).slice(before);
+          // 30 px is a gentle push on an 80 px ring: well short of full speed.
+          return calls.some(([, y]) => y < -0.3 && y > -0.7);
+        },
+        { timeout: WAIT },
+      )
+      .toBe(true);
+    await joystickTouch(page, "pointerup", 0, -30);
   });
 
   test("20: the joystick is disabled while a cinematic plays", async ({ page }, info) => {
@@ -417,9 +406,9 @@ test.describe("touch device", () => {
     const during = (await panCalls(page)).length;
 
     await joystickTouch(page, "pointerdown", 0, 0);
-    await joystickTouch(page, "pointermove", 0, -50);
+    await joystickTouch(page, "pointermove", 0, -75);
     await page.waitForTimeout(300);
-    await joystickTouch(page, "pointerup", 0, -50);
+    await joystickTouch(page, "pointerup", 0, -75);
     expect((await panCalls(page)).length).toBe(during);
     await expect
       .poll(() => page.locator("#touch-knob").evaluate((element) => element.style.transform))
@@ -433,7 +422,7 @@ test.describe("touch device", () => {
     await expect(page.locator("#touch-zoom")).not.toHaveAttribute("data-cinematic", "on");
 
     await joystickTouch(page, "pointerdown", 0, 0);
-    await joystickTouch(page, "pointermove", 0, -50);
+    await joystickTouch(page, "pointermove", 0, -75);
     await expect
       .poll(
         async () => {
@@ -443,7 +432,7 @@ test.describe("touch device", () => {
         { timeout: WAIT },
       )
       .toBe(true);
-    await joystickTouch(page, "pointerup", 0, -50);
+    await joystickTouch(page, "pointerup", 0, -75);
   });
 
   test("11: a touch on the overlay never reaches the map", async ({ page }, info) => {

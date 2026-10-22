@@ -480,20 +480,6 @@ body {
   box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
 }
 
-/* Pan lock: right side, left of the zoom bar, above the joystick's reach. */
-.touch-pan[hidden] {
-  display: none;
-}
-
-.touch-pan {
-  position: absolute;
-  top: max(8px, env(safe-area-inset-top));
-  right: calc(46px + max(6px, env(safe-area-inset-right)));
-  z-index: 5;
-  transform: scale(0.7);
-  transform-origin: right top;
-}
-
 /* The dock holds the joystick and its drag grip. By default it sits clear of the
    corner, where the right thumb rests; the grip moves it (src/touch.ts). */
 .touch-joystick-dock {
@@ -578,12 +564,16 @@ body {
   opacity: 0;
   transform: scale(0.33);
   transition:
+    inset 120ms ease-out,
     transform 120ms ease-out,
     opacity 120ms ease-out;
   pointer-events: none;
 }
 
 .touch-joystick.is-active::after {
+  /* Pressing grows the ring to an 80 px radius (JOYSTICK_ACTIVE_RADIUS in
+     src/touch.ts) so the finger has more travel and the speed is finer. */
+  inset: -52.5px;
   opacity: 0.75;
   transform: scale(1);
 }

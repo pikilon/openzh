@@ -9,6 +9,8 @@ import { readJoystickOffset, readTouchControls, writeJoystickOffset, writeTouchC
 const LONG_PRESS_MS = 500;
 const MOVE_SLOP_PX = 10;
 const DEAD_ZONE = 0.15;
+// Radius of the joystick ring while pressed; keep in step with .touch-joystick.is-active::after.
+const JOYSTICK_ACTIVE_RADIUS = 80;
 // Issue #200: the engine marks a scripted cinematic with the letterbox; poll it
 // so the joystick disables itself while the camera is not the player's.
 const CINEMATIC_POLL_MS = 200;
@@ -30,7 +32,6 @@ export interface TouchControlsHost {
   left: HTMLButtonElement;
   right: HTMLButtonElement;
   multi: HTMLButtonElement;
-  pan: HTMLButtonElement;
   dock: HTMLElement;
   grip: HTMLButtonElement;
   joystick: HTMLElement;
@@ -59,7 +60,7 @@ function deviceHasTouch(): boolean {
 }
 
 export function createTouchControls(host: TouchControlsHost): TouchControls {
-  const { canvas, overlay, toggle, left, right, multi, pan: panButton, dock, grip, joystick, knob, zoom, zoomThumb } =
+  const { canvas, overlay, toggle, left, right, multi, dock, grip, joystick, knob, zoom, zoomThumb } =
     host;
 
   const stored = readTouchControls();
@@ -69,7 +70,6 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   let leftLock = false;
   let rightLock = false;
   let multiLock = false;
-  let panLock = false;
   // Button of the drag in progress: 0 selects a box, 2 is the retail right-drag scroll.
   let dragButton: 0 | 2 = 0;
 
@@ -190,8 +190,8 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   function beginDrag(x: number, y: number): void {
     mode = "drag";
     dragActive = true;
-    dragButton = panLock ? 2 : 0;
-    if (multiLock && !panLock) setShift(true);
+    dragButton = 0;
+    if (multiLock) setShift(true);
     mouseX = startX;
     mouseY = startY;
     const buttons = dragButton === 2 ? 2 : 1;
@@ -223,7 +223,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     } catch {
       // Synthetic pointers (and browsers without capture) keep bubbling.
     }
-    if (!leftLock && !rightLock && !panLock) {
+    if (!leftLock && !rightLock) {
       longPressTimer = window.setTimeout(fireLongPress, LONG_PRESS_MS);
     }
   }
@@ -237,7 +237,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
       const moved = Math.hypot(lastX - startX, lastY - startY);
       if (moved > MOVE_SLOP_PX) {
         clearLongPress();
-        if (leftLock || panLock) beginDrag(lastX, lastY);
+        if (leftLock) beginDrag(lastX, lastY);
         else mode = "cancelled";
       }
       return;
@@ -407,13 +407,12 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
 
   // ----- locks and the overlay -----
 
-  function setLock(which: "left" | "right" | "multi" | "pan", on: boolean): void {
+  function setLock(which: "left" | "right" | "multi", on: boolean): void {
     if (which === "left") leftLock = on;
     else if (which === "right") rightLock = on;
-    else if (which === "pan") panLock = on;
     else multiLock = on;
     const button =
-      which === "left" ? left : which === "right" ? right : which === "pan" ? panButton : multi;
+      which === "left" ? left : which === "right" ? right : multi;
     button.setAttribute("aria-pressed", on ? "true" : "false");
   }
 
@@ -421,32 +420,17 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     setLock("left", false);
     setLock("right", false);
     setLock("multi", false);
-    setLock("pan", false);
   }
 
   left.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     setLock("left", !leftLock);
-    if (leftLock) setLock("pan", false);
   });
   right.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     setLock("right", !rightLock);
-    if (rightLock) setLock("pan", false);
-  });
-  // Pan lock: a one-finger drag scrolls the camera like holding the right
-  // button in retail. It replaces the left drag select, so it is exclusive
-  // with the Left and Right locks.
-  panButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setLock("pan", !panLock);
-    if (panLock) {
-      setLock("left", false);
-      setLock("right", false);
-    }
   });
   multi.addEventListener("click", (event) => {
     event.preventDefault();
@@ -470,7 +454,6 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
   function showOverlay(show: boolean): void {
     overlay.hidden = !show;
     zoom.hidden = !show;
-    panButton.hidden = !show;
     toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
     if (show) {
       startCinematicPolling();
@@ -604,7 +587,7 @@ export function createTouchControls(host: TouchControlsHost): TouchControls {
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     const knobRadius = knob.offsetWidth / 2 || 20;
-    const limit = Math.max(1, Math.min(rect.width, rect.height) / 2 - knobRadius);
+    const limit = Math.max(1, JOYSTICK_ACTIVE_RADIUS - knobRadius);
 
     let dx = clientX - centerX;
     let dy = clientY - centerY;

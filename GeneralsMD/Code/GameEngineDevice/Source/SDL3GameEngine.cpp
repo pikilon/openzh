@@ -298,6 +298,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXPanCamera(float x, float y)
 
 	const Real SCROLL_AMT = 200.0f;
 	const Real fpsRatio = TheFramePacer != nullptr ? TheFramePacer->getBaseOverUpdateFpsRatio() : 1.0f;
+	// Zoomed in, the same world distance covers far more of the screen, so the stick slows down
+	// with the camera height (never below 30 % of full speed).
+	Real zoomScale = 1.0f;
+	if (TheGlobalData->m_maxCameraHeight > 0.0f)
+	{
+		zoomScale = TheTacticalView->getHeightAboveGround() / TheGlobalData->m_maxCameraHeight;
+		if (zoomScale > 1.0f) zoomScale = 1.0f;
+		else if (zoomScale < 0.3f) zoomScale = 0.3f;
+	}
+	x *= zoomScale;
+	y *= zoomScale;
 	Coord2D offset;
 	offset.x = x * TheGlobalData->m_horizontalScrollSpeedFactor * fpsRatio * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;
 	offset.y = y * TheGlobalData->m_verticalScrollSpeedFactor * fpsRatio * SCROLL_AMT * TheGlobalData->m_keyboardScrollFactor;

@@ -16,6 +16,7 @@ import { USER_DATA_DIRS } from "./user-data";
 import { IDBFS_DB_VERSION, IDBFS_STORE_NAME } from "./saves";
 import { buildZip, type ZipWriteEntry } from "./zip-write";
 import { openZip, readSmallEntry, readSmallInflated, type ZipEntry } from "./zip";
+import { KEYBOARD_STORAGE_KEY } from "./keyboard";
 
 export type BackupKind = "settings" | "everything";
 
@@ -26,8 +27,13 @@ const ROOTS: readonly { prefix: string; dir: string }[] = [
 const SAVE_PATH = "/GeneralsZH/Save/";
 const MANIFEST = "openzh-backup.json";
 const LAUNCHER_FILE = "launcher.json";
-// Launcher preferences that travel. openzh.touchControls stays on the device.
-export const PORTABLE_PREFERENCE_KEYS: readonly string[] = ["openzh.muted", "openzh.performanceOverlay"];
+// Launcher preferences that travel. openzh.touchControls stays on the device;
+// the keyboard bindings are a user choice like mute and the FPS overlay.
+export const PORTABLE_PREFERENCE_KEYS: readonly string[] = [
+  "openzh.muted",
+  "openzh.performanceOverlay",
+  KEYBOARD_STORAGE_KEY,
+];
 
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;

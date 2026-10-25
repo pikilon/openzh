@@ -149,6 +149,8 @@ LookAtTranslator::LookAtTranslator() :
 	m_anchor.x = m_anchor.y = 0;
 	m_currentPos.x = m_currentPos.y = 0;
 	m_originalAnchor.x = m_originalAnchor.y = 0;
+	for (Int i = 0; i < 4; ++i)
+		m_cameraKeys[i] = KEY_NONE;
 
 	OptionPreferences prefs;
 	m_screenEdgeScrollMode = prefs.getScreenEdgeScrollMode();
@@ -191,6 +193,23 @@ void LookAtTranslator::setCurrentPos( const ICoord2D& pos )
 void LookAtTranslator::setScreenEdgeScrollMode(ScreenEdgeScrollMode mode)
 {
 	m_screenEdgeScrollMode = mode;
+}
+
+// Issue #202: the browser's keymap menu installs four extra camera keys. The
+// arrow keys remain hardcoded in translateGameMessage. Clearing the held
+// directions stops a scroll that started with a key the player just changed.
+void LookAtTranslator::setCameraKeys(KeyDefType up, KeyDefType down, KeyDefType left, KeyDefType right)
+{
+	m_cameraKeys[DIR_UP] = up;
+	m_cameraKeys[DIR_DOWN] = down;
+	m_cameraKeys[DIR_LEFT] = left;
+	m_cameraKeys[DIR_RIGHT] = right;
+
+	for (Int i = 0; i < 4; ++i)
+		scrollDir[i] = false;
+
+	if (m_isScrolling && m_scrollType == SCROLL_KEY)
+		stopScrolling();
 }
 
 //-----------------------------------------------------------------------------
@@ -236,21 +255,39 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			if (TheShell && TheShell->isShellActive())
 				break;
 
+			Int direction = -1;
 			switch (key)
 			{
 			case KEY_UP:
-				scrollDir[DIR_UP] = isPressed;
+				direction = DIR_UP;
 				break;
 			case KEY_DOWN:
-				scrollDir[DIR_DOWN] = isPressed;
+				direction = DIR_DOWN;
 				break;
 			case KEY_LEFT:
-				scrollDir[DIR_LEFT] = isPressed;
+				direction = DIR_LEFT;
 				break;
 			case KEY_RIGHT:
-				scrollDir[DIR_RIGHT] = isPressed;
+				direction = DIR_RIGHT;
 				break;
 			}
+
+			// Issue #202: the player's extra camera keys. Arrow keys are checked
+			// first so a conflicting extra binding cannot hijack them.
+			if (direction < 0)
+			{
+				for (Int i = 0; i < 4; ++i)
+				{
+					if (m_cameraKeys[i] != KEY_NONE && key == (UnsignedByte)m_cameraKeys[i])
+					{
+						direction = i;
+						break;
+					}
+				}
+			}
+
+			if (direction >= 0)
+				scrollDir[direction] = isPressed;
 
 			if (TheInGameUI->isSelecting() || (m_isScrolling && m_scrollType != SCROLL_KEY))
 				break;

@@ -725,6 +725,21 @@ MetaMapRec *MetaMap::getMetaMapRec(GameMessage::Type t)
 }
 
 //-------------------------------------------------------------------------------------------------
+// Issue #202: the browser keymap moves SELECT_ALL_AIRCRAFT and STOP off W/S
+// without a restart. `getMetaMapRec` creates a record when the loaded
+// CommandMap did not define one, so the command still works on a modded map.
+Bool MetaMap::setKey(GameMessage::Type type, MappableKeyType key, MappableKeyModState modState)
+{
+	MetaMapRec *map = getMetaMapRec(type);
+	if (map == nullptr)
+		return FALSE;
+	map->m_key = key;
+	map->m_modState = modState;
+	map->m_transition = DOWN;
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /*static */ void MetaMap::parseMetaMap(INI* ini)
 {
 	// read and ignore the meta-map name

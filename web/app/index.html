@@ -456,6 +456,17 @@
         </section>
 
         <section class="menu-section">
+          <h3>Keyboard</h3>
+          <button id="keyboard-settings" class="btn" type="button">
+            Camera and shortcut keys
+          </button>
+          <p class="hint">
+            WASD moves the camera next to the arrow keys. The original W and S shortcuts
+            start on Y and Z by default.
+          </p>
+        </section>
+
+        <section class="menu-section">
           <h3>About and support</h3>
           <button id="about" class="btn" type="button">About OpenZH</button>
           <p class="hint">A tip is optional and unlocks nothing.</p>
@@ -486,6 +497,63 @@
             >
           </div>
         </section>
+      </div>
+    </dialog>
+
+    <dialog
+      id="keyboard-dialog"
+      class="panel dialog-panel keyboard-panel"
+      aria-labelledby="keyboard-title"
+    >
+      <p class="eyebrow">OpenZH // Input</p>
+      <h2 id="keyboard-title">Keyboard</h2>
+      <p class="dialog-copy">
+        Choose a key for each action. The arrow keys always move the camera, so the four
+        camera keys are extra bindings.
+      </p>
+
+      <div class="keymap-group">
+        <h3>Camera</h3>
+        <div class="keymap-row">
+          <span class="keymap-label">Move up</span>
+          <button class="key-binding" type="button" data-key-slot="cameraUp">W</button>
+        </div>
+        <div class="keymap-row">
+          <span class="keymap-label">Move down</span>
+          <button class="key-binding" type="button" data-key-slot="cameraDown">S</button>
+        </div>
+        <div class="keymap-row">
+          <span class="keymap-label">Move left</span>
+          <button class="key-binding" type="button" data-key-slot="cameraLeft">A</button>
+        </div>
+        <div class="keymap-row">
+          <span class="keymap-label">Move right</span>
+          <button class="key-binding" type="button" data-key-slot="cameraRight">D</button>
+        </div>
+      </div>
+
+      <div class="keymap-group">
+        <h3>Game shortcuts</h3>
+        <div class="keymap-row">
+          <span class="keymap-label">Select all aircraft</span>
+          <button class="key-binding" type="button" data-key-slot="selectAllAircraft">Y</button>
+        </div>
+        <div class="keymap-row">
+          <span class="keymap-label">Stop</span>
+          <button class="key-binding" type="button" data-key-slot="stop">Z</button>
+        </div>
+      </div>
+
+      <p id="keyboard-hint" class="hint">
+        The arrow keys always move the camera. Select all aircraft (normally W) and Stop
+        (normally S) were moved so plain WASD can scroll; change them here if you prefer
+        another layout. Other game shortcuts keep their keys.
+      </p>
+      <p id="keyboard-status" class="mono keymap-status" role="status" aria-live="polite" hidden></p>
+
+      <div class="dialog-actions">
+        <button id="keyboard-reset" class="btn" type="button">Reset</button>
+        <button id="keyboard-close" class="btn btn-primary" type="button">Done</button>
       </div>
     </dialog>
 

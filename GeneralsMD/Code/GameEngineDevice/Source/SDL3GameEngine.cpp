@@ -45,6 +45,8 @@
 #include "GameClient/Gadget.h"
 #include "GameClient/Shell.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/LookAtXlat.h"
+#include "GameClient/MetaEvent.h"
 #include "W3DDevice/GameLogic/W3DGameLogic.h"
 #include "W3DDevice/GameClient/W3DGameClient.h"
 #include "W3DDevice/Common/W3DModuleFactory.h"
@@ -346,6 +348,34 @@ extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXZoomCamera(float notches)
 	if (notches == 0.0f)
 		return TRUE;
 	TheTacticalView->userZoom(-notches * View::ZoomHeightPerSecond * TheGlobalData->m_mouseScrollFactor);
+	return TRUE;
+}
+
+// Issue #202: the launcher's Keyboard dialog sends the six SDL scancodes it
+// stores: four extra camera keys and the two original commands that occupied
+// W and S. Applying both in one call keeps the pair consistent, so a reload
+// never leaves WASD scrolling while Select all aircraft is still on W.
+extern "C" EMSCRIPTEN_KEEPALIVE Int GeneralsXSetKeyMap(Int upScan, Int downScan, Int leftScan, Int rightScan, Int selectAllScan, Int stopScan)
+{
+	if (TheLookAtTranslator == nullptr || TheMetaMap == nullptr)
+		return FALSE;
+
+	const KeyDefType up = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)upScan);
+	const KeyDefType down = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)downScan);
+	const KeyDefType left = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)leftScan);
+	const KeyDefType right = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)rightScan);
+	const KeyDefType selectAll = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)selectAllScan);
+	const KeyDefType stop = SDL3Keyboard::translateScanCodeToKeyVal((unsigned char)stopScan);
+	if (up == KEY_NONE || down == KEY_NONE || left == KEY_NONE || right == KEY_NONE ||
+			selectAll == KEY_NONE || stop == KEY_NONE)
+		return FALSE;
+
+	TheLookAtTranslator->setCameraKeys(up, down, left, right);
+
+	if (!TheMetaMap->setKey(GameMessage::MSG_META_SELECT_ALL_AIRCRAFT, (MappableKeyType)selectAll, NONE))
+		return FALSE;
+	if (!TheMetaMap->setKey(GameMessage::MSG_META_STOP, (MappableKeyType)stop, NONE))
+		return FALSE;
 	return TRUE;
 }
 

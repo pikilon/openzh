@@ -1399,6 +1399,84 @@ dialog::backdrop {
   margin-top: 18px;
 }
 
+/* ----- keyboard bindings (issue #202) ----- */
+
+.keyboard-panel {
+  width: min(500px, calc(100vw - 32px));
+}
+
+.keymap-group {
+  margin-top: 18px;
+}
+
+.keymap-group h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-condensed);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.keymap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(76, 177, 255, 0.12);
+}
+
+.keymap-row:last-child {
+  border-bottom: 0;
+}
+
+.keymap-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.key-binding {
+  min-width: 118px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+  color: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.key-binding:hover,
+.key-binding:focus-visible {
+  color: #fff;
+  border-color: rgba(143, 216, 255, 0.85);
+  box-shadow: 0 0 14px rgba(46, 168, 255, 0.28);
+  outline: none;
+}
+
+.key-binding.is-capturing {
+  color: #03111f;
+  background: linear-gradient(180deg, #a9e2ff, var(--accent));
+  border-color: rgba(143, 216, 255, 0.9);
+  box-shadow: 0 0 16px rgba(46, 168, 255, 0.45);
+}
+
+.keymap-status {
+  margin: 12px 0 0;
+  color: var(--accent-soft);
+}
+
+#keyboard-hint {
+  margin-top: 14px;
+}
+
 /* ----- multiplayer ----- */
 
 .mp-field {

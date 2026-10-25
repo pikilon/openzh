@@ -401,6 +401,11 @@ public:
 
 	void verifyMetaMap();
 
+	// Issue #202: runtime rebinding for the browser keymap bridge. The record
+	// keeps its category, description and usable-in flags; only the key and
+	// modifiers change, and the transition is DOWN.
+	Bool setKey(GameMessage::Type type, MappableKeyType key, MappableKeyModState modState);
+
 	const MetaMapRec *getFirstMetaMapRec() const { return m_metaMaps; }
 };
 

@@ -65,9 +65,12 @@ public:
 	// Legacy method (kept for compatibility)
 	void addSDL3KeyEvent(const SDL_KeyboardEvent& event);
 
+	// Issue #202: the browser keymap bridge converts its SDL scancodes with the
+	// same table the live keyboard uses. The function reads no instance state.
+	static KeyVal translateScanCodeToKeyVal(unsigned char scan);
+
 protected:
 	virtual void getKey(KeyboardIO *key);  // GeneralsX @build fbraz 12/02/2026 BenderAI - Get keyboard event
-	virtual KeyVal translateScanCodeToKeyVal(unsigned char scan);
 
 private:
 	void translateKeyEvent(const SDL_KeyboardEvent& event);

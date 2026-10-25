@@ -94,3 +94,20 @@ The white canvas on the Nubia (see above) came from mirror buffers that were rel
 * Depth and multisample textures recreated on a resize (low risk).
 
 How to check before changing anything: add a counter of live GPU MB (as the DIAG one did: bytes on create, minus on release), load and leave a map 5-6 times on the phone, see whether it keeps growing. If it does, call `wgpuTextureDestroy`/`wgpuBufferDestroy` when the game frees the resource. Desktop probably never showed it: more GPU memory and a collector that runs more often.
+
+## Browser input mapping (issue #202)
+
+* The web launcher stores physical keys as `KeyboardEvent.code` (`KeyW`,
+  `Digit1`) and sends SDL scancodes (USB HID usage) to
+  `GeneralsXSetKeyMap`. The bridge converts them with
+  `SDL3Keyboard::translateScanCodeToKeyVal`, the same table live SDL events
+  use, so the browser menu and the engine cannot disagree about a key.
+* The arrow keys stay hardcoded in `LookAtXlat`. The four camera keys are
+  extra slots on `LookAtTranslator`; `KEY_NONE` leaves a slot off, which is the
+  default for native builds that never call the bridge.
+* The two game shortcuts moved off W/S (`SELECT_ALL_AIRCRAFT` and `STOP`) are
+  rebound at runtime through `MetaMap::setKey`, not by editing
+  `CommandMap.ini`. The command keeps its category, description and
+  `UseableIn` flags, and a mod without those entries gets a record created.
+* The keymap lives in `localStorage` under `openzh.keyboard` and travels in
+  `launcher.json`; no engine `Options.ini` file is involved.

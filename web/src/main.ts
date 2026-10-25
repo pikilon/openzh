@@ -25,6 +25,8 @@ import { resumeUserDataSaves, suspendUserDataSaves } from "./user-data";
 import { createTouchControls } from "./touch";
 import { configureMultiplayer } from "./multiplayer";
 import { createMultiplayer } from "./multiplayer-ui";
+import { readKeyBindings, scancodesForEngine, type KeyBindings } from "./keyboard";
+import { createKeyboardSettings } from "./keyboard-ui";
 
 type Outcome = { status: "resolved" } | { status: "error"; message: string };
 type Page = Window & typeof globalThis & { __zhwpLog?: string[]; __zhwpDone?: Outcome };
@@ -43,6 +45,14 @@ type PageState =
 type EngineModule = {
   _GeneralsXSetAudioMuted?: (muted: number) => unknown;
   _GeneralsXSetDebugOverlay?: (visible: number) => unknown;
+  _GeneralsXSetKeyMap?: (
+    up: number,
+    down: number,
+    left: number,
+    right: number,
+    selectAll: number,
+    stop: number,
+  ) => unknown;
   _GeneralsXPanCamera?: (x: number, y: number) => unknown;
   _GeneralsXIsCinematic?: () => unknown;
   _GeneralsXZoomCamera?: (notches: number) => unknown;
@@ -103,6 +113,11 @@ const donate = byId<HTMLButtonElement>("donate");
 const gameMenu = byId<HTMLButtonElement>("game-menu");
 const donateDialog = byId<HTMLDialogElement>("donate-dialog");
 const donateClose = byId<HTMLButtonElement>("donate-close");
+const keyboardSettingsButton = byId<HTMLButtonElement>("keyboard-settings");
+const keyboardDialog = byId<HTMLDialogElement>("keyboard-dialog");
+const keyboardClose = byId<HTMLButtonElement>("keyboard-close");
+const keyboardReset = byId<HTMLButtonElement>("keyboard-reset");
+const keyboardStatus = byId<HTMLElement>("keyboard-status");
 
 // Set once an import asks for persisting storage and the browser denies it
 // (issue #129): the storage line then says the browser may clear it.
@@ -138,6 +153,10 @@ const touch = createTouchControls({
 // The player's own choices (persisted by src/prefs.ts).
 let userMuted = readMuted();
 let performanceOverlay = readPerformanceOverlay();
+// Issue #202: the camera keys and the two moved game shortcuts travel with the
+// settings backup under openzh.keyboard.
+let keyBindings: KeyBindings = readKeyBindings();
+let keyboardSettings: ReturnType<typeof createKeyboardSettings> | null = null;
 
 // The browser's focus state, tracked from the events rather than polled: the
 // engine is silent while the document is hidden or the window has lost focus.
@@ -385,6 +404,23 @@ function applyPerformanceOverlay(): void {
     setOverlay.call(engine, performanceOverlay ? 1 : 0);
   } catch {
     // Same as the mute export: a missing or failed export is a no-op.
+  }
+}
+
+// Issue #202: applied after every start and every accepted assignment. The
+// six SDL scancodes are W/S/A/D (camera) and Y/Z (the moved game shortcuts).
+// A build without the export keeps playing; an invalid stored set was already
+// replaced by the defaults in readKeyBindings().
+function applyKeyBindings(engine: EngineModule | null = engineModule): void {
+  if (engine === null) return;
+  const setKeyMap = engine._GeneralsXSetKeyMap;
+  if (typeof setKeyMap !== "function") return;
+  const scancodes = scancodesForEngine(keyBindings);
+  if (scancodes === null) return;
+  try {
+    setKeyMap.call(engine, ...scancodes);
+  } catch {
+    // Same as the other exports: a missing or failed export is a no-op.
   }
 }
 
@@ -690,9 +726,10 @@ async function startEngine(): Promise<void> {
     // event, so the flag is refreshed once the engine exists (issue #186).
     refreshFocusFromDocument();
     // Applied as soon as the engine object exists; the player may have changed
-    // either choice while the archives were still loading.
+    // any of these while the archives were still loading.
     applyMute();
     applyPerformanceOverlay();
+    applyKeyBindings();
     if (page.__zhwpDone === undefined) {
       page.__zhwpDone = { status: "resolved" };
     }
@@ -1079,6 +1116,22 @@ async function deleteStoredAndReload(): Promise<void> {
 
 // ----- wiring -----
 
+function wireKeyboard(): void {
+  keyboardSettings = createKeyboardSettings({
+    dialog: keyboardDialog,
+    openButton: keyboardSettingsButton,
+    closeButton: keyboardClose,
+    resetButton: keyboardReset,
+    status: keyboardStatus,
+    initial: keyBindings,
+    onChange: (next) => {
+      keyBindings = next;
+      applyKeyBindings();
+    },
+  });
+  keyboardSettingsButton.addEventListener("click", () => keyboardSettings?.open());
+}
+
 function wireMenu(): void {
   menuButton.addEventListener("click", () => {
     if (menu.open) closeMenu();
@@ -1329,6 +1382,7 @@ function boot(): void {
   fpsToggle.checked = performanceOverlay;
   updateMuteButton();
   wireFullscreen();
+  wireKeyboard();
   wireMenu();
   wireInput();
   wireAudio();

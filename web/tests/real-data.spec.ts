@@ -38,4 +38,20 @@ test("real game data reaches the main menu", async ({ page }) => {
 
   const log = await page.evaluate(() => (window as unknown as { __zhwpLog: string[] }).__zhwpLog);
   expect(log.filter((l) => /GENERALSX_WEBGPU_\w+_FAILED|RuntimeError|Aborted\(/.test(l))).toEqual([]);
+
+  // Issue #202: the browser keymap reaches the real engine. Change one key
+  // while the shell map is running, then close everything; a bad bridge would
+  // abort the engine or leave an error in the log.
+  await page.locator("#menu-button").click();
+  await page.locator("#keyboard-settings").click();
+  await expect(page.locator("#keyboard-dialog")).toHaveAttribute("open", "");
+  await page.locator('[data-key-slot="cameraUp"]').click();
+  await page.keyboard.press("i");
+  await expect(page.locator('[data-key-slot="cameraUp"]')).toHaveText("I");
+  await page.locator("#keyboard-close").click();
+  await page.locator("#menu-close").click();
+  await page.waitForTimeout(500);
+
+  const after = await page.evaluate(() => (window as unknown as { __zhwpLog: string[] }).__zhwpLog);
+  expect(after.filter((l) => /GENERALSX_WEBGPU_\w+_FAILED|RuntimeError|Aborted\(/.test(l))).toEqual([]);
 });

@@ -28,6 +28,7 @@
 #pragma once
 
 #include "GameClient/InGameUI.h"
+#include "GameClient/KeyDefs.h"
 
 //-----------------------------------------------------------------------------
 // TheSuperHackers @feature The Screen Edge Scrolling can now be enabled or
@@ -53,6 +54,10 @@ public:
 	Bool hasMouseMovedRecently();
 	void setCurrentPos( const ICoord2D& pos );
 	void setScreenEdgeScrollMode(ScreenEdgeScrollMode mode);
+	// Issue #202: four extra camera keys on top of the hardcoded arrows. The
+	// browser bridge sets them from the player's preference; KEY_NONE disables
+	// a slot. Passing a key clears any held scroll state first.
+	void setCameraKeys(KeyDefType up, KeyDefType down, KeyDefType left, KeyDefType right);
 
 	void resetModes(); //Used when disabling input, so when we reenable it we aren't stuck in a mode.
 
@@ -82,6 +87,7 @@ private:
 	ViewLocation m_viewLocation[ MAX_VIEW_LOCS ];
 	ScrollType m_scrollType;
 	ScreenEdgeScrollMode m_screenEdgeScrollMode;
+	KeyDefType m_cameraKeys[4];								// extra keys for DIR_UP/DOWN/LEFT/RIGHT
 	UnsignedInt m_lastMouseMoveTimeMsec;				// real-time in milliseconds when mouse last moved
 
 	void setScrolling( ScrollType scrollType );

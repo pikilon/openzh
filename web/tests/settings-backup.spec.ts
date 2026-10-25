@@ -10,6 +10,14 @@ import { writeFileSync } from "node:fs";
 const SHARE = "/home/web_user/.local/share/GeneralsX";
 const CONFIG = "/home/web_user/.config/GeneralsX";
 const WAIT = 30_000;
+const KEYBOARD = JSON.stringify({
+  cameraUp: "KeyI",
+  cameraDown: "KeyS",
+  cameraLeft: "KeyA",
+  cameraRight: "KeyD",
+  selectAllAircraft: "KeyY",
+  stop: "KeyZ",
+});
 
 type Seed = { db: string; path: string; text?: string; dir?: boolean };
 
@@ -117,10 +125,14 @@ test.beforeEach(async ({ page }) => {
 
 test("settings export holds options, config and launcher choices, but no saves and no touch choice", async ({ page }, info) => {
   await seed(page, SEEDS);
-  await page.evaluate(() => {
-    localStorage.setItem("openzh.muted", "1");
-    localStorage.setItem("openzh.touchControls", "1");
-  });
+  await page.evaluate(
+    ({ keyboard }) => {
+      localStorage.setItem("openzh.muted", "1");
+      localStorage.setItem("openzh.keyboard", keyboard);
+      localStorage.setItem("openzh.touchControls", "1");
+    },
+    { keyboard: KEYBOARD },
+  );
   await page.reload();
   await openLauncherMenu(page);
 
@@ -132,7 +144,10 @@ test("settings export holds options, config and launcher choices, but no saves a
     "share/GeneralsZH/Options.ini",
   ]);
   expect(zipText(settings, "share/GeneralsZH/Options.ini")).toBe("Resolution = 1280 768\nAntiAliasing = 4\n");
-  expect(JSON.parse(zipText(settings, "launcher.json"))).toEqual({ "openzh.muted": "1" });
+  expect(JSON.parse(zipText(settings, "launcher.json"))).toEqual({
+    "openzh.muted": "1",
+    "openzh.keyboard": KEYBOARD,
+  });
   expect(JSON.parse(zipText(settings, "openzh-backup.json")).kind).toBe("settings");
 
   const everything = await download(page, "#export-everything", info, "everything.zip");
@@ -142,7 +157,13 @@ test("settings export holds options, config and launcher choices, but no saves a
 
 test("importing a backup restores the files and launcher choices, keeps the device's touch choice", async ({ page }, info) => {
   await seed(page, SEEDS);
-  await page.evaluate(() => localStorage.setItem("openzh.muted", "1"));
+  await page.evaluate(
+    ({ keyboard }) => {
+      localStorage.setItem("openzh.muted", "1");
+      localStorage.setItem("openzh.keyboard", keyboard);
+    },
+    { keyboard: KEYBOARD },
+  );
   await page.reload();
   await openLauncherMenu(page);
   const everything = await download(page, "#export-everything", info, "everything.zip");
@@ -176,6 +197,7 @@ test("importing a backup restores the files and launcher choices, keeps the devi
   expect((await readFile(page, SHARE, "GeneralsZH/Save"))?.mode).toBe(0o40777);
   expect((await readFile(page, CONFIG, "registry.ini"))?.text).toBe("[x]\nKey = 1\n");
   expect(await page.evaluate(() => localStorage.getItem("openzh.muted"))).toBe("1");
+  expect(await page.evaluate(() => localStorage.getItem("openzh.keyboard"))).toBe(KEYBOARD);
   expect(await page.evaluate(() => localStorage.getItem("openzh.touchControls"))).toBe("0");
 });
 

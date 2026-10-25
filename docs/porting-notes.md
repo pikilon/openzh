@@ -108,6 +108,6 @@ How to check before changing anything: add a counter of live GPU MB (as the DIAG
 * The two game shortcuts moved off W/S (`SELECT_ALL_AIRCRAFT` and `STOP`) are
   rebound at runtime through `MetaMap::setKey`, not by editing
   `CommandMap.ini`. The command keeps its category, description and
-  `UseableIn` flags, and a mod without those entries gets a record created.
+  `UseableIn` flags; the standard Zero Hour CommandMap defines both.
 * The keymap lives in `localStorage` under `openzh.keyboard` and travels in
   `launcher.json`; no engine `Options.ini` file is involved.
